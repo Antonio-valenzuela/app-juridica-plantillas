@@ -1,0 +1,37 @@
+node_modules/
+.next/
+out/
+build/
+.env
+.env.local
+.env.production
+*.log
+npm-debug.log*
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+# P12 — backups manuales fuera del repo (histórico en Git)
+_backups_originales/
+backups/
+data/uploads/templates/
+coverage/
+
+# Public-repository safety: local analysis artifacts and generated case documents
+scratch/
+.tmp/
+.claude/
+.codegraph/
+*.docx
+*.pdf
+*.backup
+tmp-flujo-a-*
+*-output.json
+*-run.txt
+reporte_cambios.txt
+AUDITORIA_RELEASE_CANDIDATE_1_0.md
+docs/forensics/
+docs/superpowers/plans/2026-09-12-antecedentes-coverage-binding-repair.md
+docs/superpowers/plans/2026-09-13-legal-research-strategic-drafting-foundation-plan.md
+docs/superpowers/plans/2026-09-13-strategic-analyzer-model-capability.md
+docs/superpowers/plans/2026-09-13-strategic-challenge-discovery-foundation.md
+docs/superpowers/plans/2026-09-13-strategic-legal-drafting-mvp.md

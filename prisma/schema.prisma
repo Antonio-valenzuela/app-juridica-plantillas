@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TemplateVisibility {
+  PRIVATE
+  ORG
+  PUBLIC
+}
+
+model Organization {
+  id           String               @id @default(cuid())
+  name         String
+  slug         String               @unique
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  templates    LegalTemplate[]
+  parties      CaseParty[]
+  styleProfile LawyerStyleProfile?
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LegalTemplate {
+  id             String             @id @default(cuid())
+  slug           String?
+  title          String
+  category       String             @default("General")
+  jurisdiction   String             @default("federal")
+  practiceArea   String?
+  documentType   String             @default("machote")
+  description    String?
+  content        String?            @db.Text
+  originalText   String?            @db.Text
+  legalBasis     String?
+  variables      Json?
+  structureJson  Json?
+  applicableLaws Json?
+  warnings       Json?
+  disclaimer     String?
+  exportFormats  Json?
+  aiInstructions String?            @db.Text
+  systemPrompt   String?            @db.Text
+  contentHash    String?
+  version        Int                @default(1)
+  visibility     TemplateVisibility @default(ORG)
+  organizationId String
+  organization   Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      String?
+  sourceFileName String?
+  indexed        Boolean            @default(false)
+  indexedAt      DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  drafts LegalDraft[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, updatedAt])
+  @@index([createdBy])
+  @@index([category])
+  @@index([contentHash])
+}
+
+model LegalDraft {
+  id                 String         @id @default(cuid())
+  organizationId     String
+  userId             String
+  templateId         String?
+  template           LegalTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  title              String
+  documentType       String         @default("machote")
+  matter             String?
+  jurisdiction       String?        @default("federal")
+  formData           Json?
+  renderedText       String?        @db.Text
+  pendingMarkers     Json?
+  structuredDoc      Json?
+  pipelineState      Json?
+  sourceDocuments    Json?
+  validationResults  Json?
+  generationMetadata Json?
+  status             String         @default("DRAFT")
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([organizationId, status])
+  @@index([userId, status])
+  @@index([organizationId, updatedAt])
+
+  parties CaseParty[]
+}
+
+model CaseParty {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  caseKey        String
+  draftId        String?
+  draft          LegalDraft?  @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  role           String
+  name           String
+  source         String       @default("manual")
+  confidence     Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, caseKey])
+  @@map("workspace_case_party")
+}
+
+model LawyerStyleProfile {
+  id                                            String       @id @default(cuid())
+  organizationId                                String       @unique
+  organization                                  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lawyerName                                    String?
+  firmName                                      String?
+  preferredTone                                 String?
+  preferredStructure                            Json?
+  preferredSectionOrdering                      Json?
+  recurringFormulas                             Json?
+  openingPatterns                               Json?
+  closingPatterns                               Json?
+  argumentPatterns                              Json?
+  citationStyle                                 String?
+  legalTerminology                              Json?
+  preferredDefenses                             Json?
+  preferredWayToContestFacts                    Json?
+  preferredWayToContestBenefits                 Json?
+  preferredWayToAttackEvidence                  Json?
+  preferredWayToDevelopConstitutionalArguments  Json?
+  preferredWayToWritePetition                   Json?
+  averageSectionLength                          String?
+  preferredDocumentLength                       String?
+  createdAt                                     DateTime     @default(now())
+  updatedAt                                     DateTime     @updatedAt
+}
+
+model AiUsageLog {
+  id               String   @id @default(cuid())
+  provider         String
+  model            String?
+  operation        String
+  status           String
+  reasonCategory   String?
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  estimatedCostUsd Decimal? @db.Decimal(12, 6)
+  costSource       String?
+  durationMs       Int
+  fallbackUsed     Boolean  @default(false)
+  requestId        String?
+  createdAt        DateTime @default(now())
+
+  rateLimitLimit     Int?
+  rateLimitRemaining Int?
+  rateLimitResetAt   String?
+  rateLimitSource    String?
+
+  @@index([createdAt])
+  @@index([provider, createdAt])
+  @@index([operation, createdAt])
+  @@index([requestId])
+}
+
+model AiUsageEvent {
+  id            String   @id @default(cuid())
+  requestId     String
+  provider      String
+  model         String?
+  strategy      String?
+  fallbackRank  Int?
+  inputTokens   Int?
+  outputTokens  Int?
+  totalTokens   Int?
+  estimatedCost Decimal? @db.Decimal(12, 6)
+  latencyMs     Int
+  success       Boolean
+  errorCode     String?
+  route         String?
+  mode          String?
+  createdAt     DateTime @default(now())
+
+  @@index([provider, createdAt])
+  @@index([requestId])
+  @@index([mode, createdAt])
+  @@index([createdAt])
+}
+
+model AiProviderHealth {
+  id                  String    @id @default(cuid())
+  provider            String    @unique
+  consecutiveFailures Int       @default(0)
+  lastFailureAt       DateTime?
+  lastSuccessAt       DateTime?
+  lastErrorCode       String?
+  disabledUntil       DateTime?
+  updatedAt           DateTime  @updatedAt
+}
