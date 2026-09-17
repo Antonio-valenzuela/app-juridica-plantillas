@@ -99,11 +99,16 @@ function candidatesFromUnit(unit: SourceUnit, section: string | undefined): {
   const inferredFactSection = /^\s*HECHO\s+(?:\d+|[IVXLCDM]+|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[ÉE]PTIMO|OCTAVO|NOVENO|D[ÉE]CIMO)\b/i.test(unit.text)
     ? 'HECHOS'
     : undefined;
-  const effectiveSection = (headingInfo.heading && !headingInfo.tail && unit.kind !== 'HEADING')
+  const standaloneHeading = Boolean(headingInfo.heading && !headingInfo.tail);
+  const explicitlyDelimitedHeading = /^\s*.+?\s*[:.-]\s*$/.test(unit.text);
+  const opensSection = standaloneHeading && (unit.kind === 'HEADING' || explicitlyDelimitedHeading);
+  const effectiveSection = opensSection
+    ? headingInfo.heading
+    : (headingInfo.heading && !headingInfo.tail && unit.kind !== 'HEADING')
     ? unit.section ?? section ?? inferredFactSection
     : headingInfo.heading ?? unit.section ?? section ?? inferredFactSection;
 
-  if (headingInfo.heading && !headingInfo.tail && unit.kind === 'HEADING') {
+  if (opensSection && headingInfo.heading) {
     return { candidates: [], nextSection: headingInfo.heading, wasSplit: false };
   }
 
@@ -114,10 +119,6 @@ function candidatesFromUnit(unit: SourceUnit, section: string | undefined): {
   const inlineBodies = listBodies ? [] : inlineListBodies(body, effectiveSection);
   const segments = inlineBodies.length > 0 ? inlineBodies : numberedOrBulleted;
   const filtered = segments.filter((segment) => segment.trim().length > 0);
-
-  if (headingInfo.heading && !headingInfo.tail && !listBodies && unit.kind === 'HEADING') {
-    return { candidates: [], nextSection: headingInfo.heading, wasSplit: false };
-  }
 
   return {
     candidates: filtered.map((text, index) => candidateFor(unit, text, index, effectiveSection)),

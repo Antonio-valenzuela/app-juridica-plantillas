@@ -111,6 +111,22 @@ export function TemplateLibraryManager({
     [filteredTemplates, safePage]
   );
 
+  const matterTotal = useMemo(() => {
+    const values = templates
+      .map((template) => (template.category || template.matterId || '').trim().toLowerCase())
+      .filter(Boolean);
+    return new Set(values).size;
+  }, [templates]);
+
+  const recentTemplate = useMemo(() => {
+    return templates.reduce<TemplateItem | null>((current, template) => {
+      if (!current) return template;
+      const currentTime = new Date(current.updatedAt || '').getTime();
+      const templateTime = new Date(template.updatedAt || '').getTime();
+      return templateTime > currentTime ? template : current;
+    }, null);
+  }, [templates]);
+
   const getMatterStyle = (category?: string) => {
     const cat = (category || '').toLowerCase();
     if (cat.includes('amparo')) return { bg: 'bg-emerald-50 text-emerald-800 border-emerald-200', tag: 'Amparo' };
@@ -135,182 +151,137 @@ export function TemplateLibraryManager({
   };
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto">
-      {/* HEADER COMPACTO CENTRADO (referencia) */}
-      <div className="bg-white p-6 rounded-2xl border border-[#ded8c9] shadow-sm">
-        <div className="flex flex-col items-center text-center gap-1.5">
-          <div className="flex items-center gap-3 justify-center">
-            <span className="text-xl">📄</span>
-            <h2 className="text-lg font-black text-[#0B2545]">Mis Plantillas y Machotes</h2>
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#F7F1E8] text-[#8F6745] border border-[#D6B887] whitespace-nowrap">
-              {templates.length} {templates.length === 1 ? 'plantilla' : 'plantillas'}
-            </span>
+    <div className="templates-page space-y-5 w-full mx-auto">
+      <header className="templates-hero">
+        <div className="templates-hero-copy">
+          <div className="templates-hero-icon" aria-hidden="true">▤</div>
+          <div>
+            <h1>Mis Plantillas y Machotes</h1>
+            <p>Biblioteca de documentos oficiales y plantillas reutilizables para redacción judicial.</p>
           </div>
-          <p className="text-xs text-slate-500 max-w-md">
-            Biblioteca de documentos oficiales y plantillas reutilizables
-            para redacción judicial.
-          </p>
-          <button
-            onClick={onCreateNewTemplate}
-            className="mt-1 px-4 py-2 bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-1.5"
-          >
-            + Crear Machote / Plantilla
+        </div>
+        <div className="templates-hero-note">La tecnología al servicio de la justicia <span aria-hidden="true" /></div>
+      </header>
+
+      <section className="templates-metrics" aria-label="Resumen de la biblioteca">
+        <div className="templates-metric-card">
+          <div className="templates-metric-icon templates-metric-icon-blue" aria-hidden="true">▤</div>
+          <div><strong>{templates.length}</strong><span>Plantillas en mi biblioteca</span></div>
+        </div>
+        <div className="templates-metric-card">
+          <div className="templates-metric-icon templates-metric-icon-green" aria-hidden="true">▥</div>
+          <div><strong>{matterTotal}</strong><span>Materias</span></div>
+        </div>
+        <div className="templates-metric-card">
+          <div className="templates-metric-icon templates-metric-icon-slate" aria-hidden="true">◷</div>
+          <div><strong>{recentTemplate ? 'Recientes' : 'Sin registros'}</strong><span>{recentTemplate ? formatDateSafe(recentTemplate.updatedAt) : 'Aún no hay plantillas'}</span></div>
+        </div>
+        {profileSlot ? <div className="templates-profile-slot">{profileSlot}</div> : null}
+      </section>
+
+      <section className="templates-library-card">
+        <div className="templates-controls">
+          <label className="templates-search-field">
+            <span aria-hidden="true">⌕</span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+              placeholder="Buscar por nombre, materia o palabra clave..."
+              aria-label="Buscar plantillas"
+            />
+          </label>
+          <label className="templates-filter-field">
+            <span className="sr-only">Filtrar por materia</span>
+            <select
+              value={selectedMatterId}
+              onChange={(e) => { setSelectedMatterId(e.target.value); setPage(1); }}
+              aria-label="Filtrar por materia"
+            >
+              <option value="all">Todas las materias ({templates.length})</option>
+              {availableMatters.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.count})</option>)}
+            </select>
+          </label>
+          <button onClick={onCreateNewTemplate} className="templates-create-button">
+            <span aria-hidden="true">＋</span> Crear Machote / Plantilla
           </button>
         </div>
 
-        <div className="mt-4">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-            placeholder="🔍 Buscar por nombre, materia o palabra clave..."
-            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-[#0B2545] transition"
-          />
+        <div className="templates-list-heading">
+          <div>
+            <h2>Mis plantillas</h2>
+            <p>{filteredTemplates.length} {filteredTemplates.length === 1 ? 'plantilla' : 'plantillas'} en tu biblioteca personal</p>
+          </div>
         </div>
 
-        <div className="mt-3">
-          <select
-            value={selectedMatterId}
-            onChange={(e) => { setSelectedMatterId(e.target.value); setPage(1); }}
-            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:bg-white focus:border-[#0B2545] transition"
-          >
-            <option value="all">Todas las Materias ({templates.length})</option>
-            {availableMatters.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.icon} {m.name} ({m.count})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+        {filteredTemplates.length === 0 && (
+          <div className="templates-empty-state">
+            <div className="templates-empty-icon" aria-hidden="true">▤</div>
+            <h3>No se encontraron plantillas coincidentes</h3>
+            <p>Prueba ajustando el término de búsqueda o seleccionando otra materia en el filtro.</p>
+            <button
+              onClick={() => { setSearchQuery(''); setSelectedMatterId('all'); setPage(1); }}
+              className="templates-reset-button"
+            >
+              Restablecer filtros
+            </button>
+          </div>
+        )}
 
-      {profileSlot}
+        {pagedTemplates.length > 0 && (
+          <div className="templates-list">
+            {pagedTemplates.map((tpl) => {
+              const matterStyle = getMatterStyle(tpl.category);
+              const ext = tpl.fileType || tpl.sourceFileName?.split('.').pop()?.toUpperCase() || 'PDF';
+              const pageCount = tpl.pageCount || 1;
+              const preview = previewText(tpl);
 
-      {filteredTemplates.length === 0 && (
-        <div className="bg-white p-12 rounded-2xl border border-dashed border-[#ded8c9] text-center space-y-3">
-          <div className="text-4xl">📄</div>
-          <h3 className="text-sm font-bold text-slate-800">No se encontraron plantillas coincidentes</h3>
-          <p className="text-xs text-slate-500 max-w-md mx-auto">
-            Prueba ajustando el término de búsqueda o seleccionando otra materia en el filtro.
-          </p>
-          <button
-            onClick={() => {
-              setSearchQuery('');
-              setSelectedMatterId('all');
-            }}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition"
-          >
-            Restablecer filtros
-          </button>
-        </div>
-      )}
-
-      {pagedTemplates.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {pagedTemplates.map((tpl) => {
-            const matterStyle = getMatterStyle(tpl.category);
-            const ext = tpl.fileType || tpl.sourceFileName?.split('.').pop()?.toUpperCase() || 'PDF';
-            const pageCount = tpl.pageCount || 1;
-            const preview = previewText(tpl);
-
-            return (
-              <div
-                key={tpl.id}
-                className="bg-white rounded-2xl border border-[#E7DFD2] hover:border-[#B58A5A] transition-all duration-200 shadow-sm hover:shadow-md flex flex-col overflow-hidden group"
-              >
-                {/* Fila superior: materia | formato·páginas */}
-                <div className="p-4 pb-2 flex items-center justify-between">
-                  <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold border uppercase ${matterStyle.bg}`}>
-                    {matterStyle.tag}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white text-slate-600 border border-[#E7DFD2]">
-                    {ext} · {pageCount} {pageCount === 1 ? 'pág' : 'págs'}
-                  </span>
-                </div>
-
-                {/* PREVIEW dominante con contenido real */}
-                <div
-                  onClick={() => setPreviewTemplate(tpl)}
-                  className="px-4 cursor-pointer"
-                >
-                  <div className="h-[280px] bg-white rounded-lg border border-slate-200 shadow-inner p-4 overflow-hidden relative">
-                    {preview ? (
-                      <div className="h-full whitespace-pre-line font-serif text-[6.5px] leading-[10px] text-slate-700 overflow-hidden">
-                        {preview}
-                      </div>
-                    ) : (
-                      <div className="h-full flex flex-col justify-between">
-                        <div>
-                          <div className="text-center pb-2 border-b border-slate-100 mb-2">
-                            <div className="text-[7px] font-black tracking-widest text-slate-400 uppercase">
-                              PODER JUDICIAL DE LA FEDERACIÓN
-                            </div>
-                            <div className="text-[6px] text-slate-400">ESCRITO JUDICIAL</div>
-                          </div>
-                          <div className="space-y-1.5 opacity-60">
-                            <div className="h-1.5 bg-slate-300 rounded w-5/6" />
-                            <div className="h-1.5 bg-slate-200 rounded w-full" />
-                            <div className="h-1.5 bg-slate-200 rounded w-4/6" />
-                            <div className="h-1.5 bg-slate-100 rounded w-full" />
-                          </div>
-                        </div>
-                        <div className="text-[8px] text-slate-400 text-center pt-1 border-t border-slate-50 flex justify-between items-center">
-                          <span>Foja 1 de {pageCount}</span>
-                          <span className="text-[#0B2545] font-bold flex items-center gap-1 group-hover:underline">
-                            👁️ Vista rápida
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Cuerpo: badge páginas, título, descripción */}
-                <div className="p-4 flex-1 flex flex-col space-y-1.5">
-                  <span className="inline-flex items-center gap-1 self-start px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-50 text-slate-600 border border-slate-200">
-                    📄 {pageCount} {pageCount === 1 ? 'pág' : 'págs'}
-                  </span>
-                  <h3
+              return (
+                <article key={tpl.id} className="templates-row-card">
+                  <button
+                    type="button"
                     onClick={() => setPreviewTemplate(tpl)}
-                    className="text-base font-bold text-[#0B2545] leading-snug line-clamp-2 cursor-pointer"
-                    title={tpl.name}
+                    className="templates-thumbnail"
+                    aria-label={`Vista previa de ${tpl.name}`}
                   >
-                    {tpl.name}
-                  </h3>
-                  <p className="text-xs text-slate-500 line-clamp-2">
-                    {tpl.description?.trim() || formatDateSafe(tpl.updatedAt)}
-                  </p>
+                    {preview ? (
+                      <span className="templates-thumbnail-text">{preview}</span>
+                    ) : (
+                      <span className="templates-thumbnail-lines" aria-hidden="true">
+                        <span /><span /><span /><span /><span />
+                      </span>
+                    )}
+                    <span className="templates-thumbnail-caption">Vista previa</span>
+                  </button>
 
-                  {/* Footer de acciones alineado abajo */}
-                  <div className="mt-auto pt-3 flex items-center gap-2">
-                    <button
-                      onClick={() => onUseTemplate(tpl)}
-                      className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-[#0B2545] text-xs font-extrabold rounded-xl transition flex items-center justify-center gap-1 tracking-wide"
-                    >
-                      ⚡ USAR
-                    </button>
-                    <button
-                      onClick={() => onEditTemplate(tpl)}
-                      className="w-9 h-9 flex items-center justify-center bg-white hover:bg-slate-50 text-slate-700 rounded-xl border border-[#E7DFD2] text-xs transition"
-                      title="Editar plantilla"
-                    >
-                      ✎
-                    </button>
-                    <button
-                      onClick={() => handleDelete(tpl.id, tpl.name)}
-                      disabled={deletingId === tpl.id}
-                      className="w-9 h-9 flex items-center justify-center bg-white hover:bg-red-50 text-red-500 rounded-xl border border-[#E7DFD2] text-xs transition disabled:opacity-40"
-                      title="Eliminar plantilla"
-                    >
-                      🗑️
-                    </button>
+                  <div className="templates-row-main">
+                    <div className="templates-row-topline">
+                      <span className={`templates-matter-tag ${matterStyle.bg}`}>{matterStyle.tag}</span>
+                      <span className="templates-row-format">{ext}</span>
+                    </div>
+                    <h3 onClick={() => setPreviewTemplate(tpl)} title={tpl.name}>{tpl.name}</h3>
+                    <p>{tpl.description?.trim() || 'Plantilla personal revisada para documentos jurídicos.'}</p>
+                    <div className="templates-row-meta">
+                      <span aria-label="Páginas">▧ {pageCount} {pageCount === 1 ? 'pág.' : 'págs.'}</span>
+                      <span aria-label="Actualización">◷ {formatDateSafe(tpl.updatedAt)}</span>
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+
+                  <div className="templates-row-actions">
+                    <p className="templates-row-summary">{tpl.description?.trim() || `Documento ${matterStyle.tag.toLowerCase()} reutilizable.`}</p>
+                    <div className="templates-action-buttons">
+                      <button type="button" onClick={() => onUseTemplate(tpl)} className="templates-use-button">⚡ Usar</button>
+                      <button type="button" onClick={() => onEditTemplate(tpl)} className="templates-icon-button" title="Editar plantilla" aria-label={`Editar ${tpl.name}`}>✎</button>
+                      <button type="button" onClick={() => handleDelete(tpl.id, tpl.name)} disabled={deletingId === tpl.id} className="templates-icon-button templates-delete-button" title="Eliminar plantilla" aria-label={`Eliminar ${tpl.name}`}>🗑</button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+      </section>
 
       {/* Paginación real (control visible; números según páginas existentes) */}
       {filteredTemplates.length > 0 && (

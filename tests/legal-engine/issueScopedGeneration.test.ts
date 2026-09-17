@@ -8,6 +8,8 @@ import { buildLegalIssueMatrix, type LegalIssueItem, type LegalIssueMatrix, type
 import type { LegalIssueType } from '@/lib/legal-engine/legalIssueMatrix';
 import { buildDraftingPlan, generateSection } from '@/lib/legal-engine/pipeline';
 import { buildGenerationTasksForSection } from '@/lib/legal-engine/generationTasks';
+import { assembleLegalDraft } from '@/lib/legal-engine/documentAssembly';
+import { makeAssemblyInput, makeTask as makeAssemblyTask } from '@/lib/legal-engine/documentAssemblyTypes';
 import { makeFixtureDocument, makeFixtureFCaseAnalysis } from '@/tests/fixtures/richCoverageFixtures';
 import {
   draftBlockFromIssueResult,
@@ -155,6 +157,11 @@ function packFor(issueType: LegalIssueType) {
 }
 
 function promptFor(issueType: LegalIssueType) {
+  if (issueType === 'EVIDENCE_RELEVANCE' || issueType === 'EVIDENCE_SUFFICIENCY') {
+    const { analysis, doc, matrix, task } = evidenceExecutionContext();
+    const pack = buildIssueContextPack(task, doc, analysis, matrix);
+    return buildIssuePrompt({ ...pack, legalIssue: { ...pack.legalIssue, issueType } }, task);
+  }
   const basePack = packFor('CLAIM_ELEMENT');
   return buildIssuePrompt({
     ...basePack,
@@ -223,8 +230,60 @@ function descriptiveExecutionContext() {
   return { analysis, doc: { ...doc, coverageMatrix, legalIssueMatrix: matrix }, matrix, issue, task };
 }
 
+function evidenceExecutionContext() {
+  const analysis = fixtureAnalysis();
+  const doc = fixtureDocument();
+  const coverageMatrix = buildCoverageMatrix(analysis, doc, doc.sections);
+  const baseMatrix = buildLegalIssueMatrix({ caseAnalysis: analysis, coverageMatrix });
+  const sourceIssue = fixtureIssueForType(baseMatrix, 'EVIDENCE_RELEVANCE');
+  const issue = {
+    ...sourceIssue,
+    id: 'issue-evidence-ready-1',
+    status: 'READY_FOR_GENERATION' as const,
+    relationStatus: 'EXPLICIT' as const,
+    conflictIds: [],
+    clientPositionStatus: 'NOT_REQUIRED' as const,
+    researchStatus: 'NOT_REQUIRED' as const,
+    blocking: false,
+  };
+  const matrix: LegalIssueMatrix = { ...baseMatrix, issues: [issue, ...baseMatrix.issues.filter((item) => item.id !== sourceIssue.id)] };
+  const task: GenerationTask = {
+    ...taskForIssue(),
+    id: 'task-evidence-ready-1',
+    sectionId: 'sec-pruebas',
+    sectionTitle: 'PRUEBAS',
+    taskType: 'EVIDENCE',
+    type: 'EVIDENCE',
+    complexity: 'MEDIUM',
+    tokenBudget: 2350,
+    legalIssueIds: [issue.id],
+    coverageItemIds: [...issue.coverageItemIds],
+    factIds: [...issue.factIds],
+    evidenceIds: [...issue.evidenceMentionIds, ...issue.evidenceOfferIds],
+    authorityIds: [],
+  };
+  return { analysis, doc: { ...doc, coverageMatrix, legalIssueMatrix: matrix }, matrix, issue, task };
+}
+
 function issueResultForRequest(request: any, overrides: Record<string, unknown> = {}) {
   const context = request.legalContext;
+  if (context.contentRole === 'EVIDENCE') {
+    const evidenceDescription = context.evidenceMentions
+      .map((item: any) => item.description)
+      .filter(Boolean)
+      .join('; ') || 'La evidencia vinculada';
+    return {
+      factualDevelopment: [`${evidenceDescription}.`],
+      evidentiaryDevelopment: [`${evidenceDescription} se relaciona con los hechos expresamente vinculados, sin ampliar su alcance.`],
+      sourceEntityIds: [
+        ...context.evidenceMentions.map((item: any) => item.id),
+        ...context.evidenceOffers.map((item: any) => item.id),
+      ],
+      authorityMentionIds: [],
+      unresolvedRequirements: [],
+      ...overrides,
+    };
+  }
   return {
     thesis: 'La cuestión debe responderse con el material permitido.',
     factualDevelopment: ['El hecho relacionado consta como afirmación de fuente.'],
@@ -480,6 +539,33 @@ describe('FASE 4 IssueDraftResult boundary', () => {
     expect(validation.result?.legalDevelopment).toEqual([]);
   });
 
+  it('accepts an omitted descriptive authority array when no legal support is linked and normalizes it to []', () => {
+    const validation = validateIssueDraftModelOutput({
+      factualDevelopment: ['Hecho respaldado por fuente.'],
+      sourceEntityIds: ['fact-1'],
+      unresolvedRequirements: [],
+    }, 'DESCRIPTIVE', getIssueDraftContractRequirements('DESCRIPTIVE', {
+      hasLinkedLegalSupport: false,
+    }));
+
+    expect(validation.valid).toBe(true);
+    expect(validation.errors).toEqual([]);
+    expect(validation.output?.authorityMentionIds).toEqual([]);
+  });
+
+  it('keeps descriptive authority references mandatory when an authority is linked', () => {
+    const validation = validateIssueDraftModelOutput({
+      factualDevelopment: ['Hecho respaldado por fuente.'],
+      sourceEntityIds: ['fact-1'],
+      unresolvedRequirements: [],
+    }, 'DESCRIPTIVE', getIssueDraftContractRequirements('DESCRIPTIVE', {
+      hasLinkedAuthorities: true,
+    }));
+
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toContain('REQUIRED_ARRAY_INVALID:authorityMentionIds');
+  });
+
   it('does not accept provider success without a valid result', () => {
     const providerSuccess = {
       success: true,
@@ -574,7 +660,7 @@ describe('FASE 4 allow-listed issue context and prompt strategies', () => {
     expect(prompt.draftContract).toBe('DESCRIPTIVE');
     expect(schema.required).toContain('factualDevelopment');
     expect(schema.required).toContain('sourceEntityIds');
-    expect(schema.required).toContain('authorityMentionIds');
+    expect(schema.required).not.toContain('authorityMentionIds');
     expect(schema.required).toContain('unresolvedRequirements');
     expect(schema.required).not.toContain('evidentiaryDevelopment');
     expect(schema.required).not.toContain('legalDevelopment');
@@ -715,7 +801,7 @@ describe('FASE 4 allow-listed issue context and prompt strategies', () => {
   });
 
   it('sends the model output contract in the effective provider messages and marks context as input-only', () => {
-    const prompt = promptFor('EVIDENCE_RELEVANCE');
+    const prompt = promptFor('CLAIM_ELEMENT');
     const effectiveMessages = [
       { role: 'system', content: prompt.systemPrompt },
       { role: 'user', content: prompt.userMessage },
@@ -738,19 +824,210 @@ describe('FASE 4 allow-listed issue context and prompt strategies', () => {
     expect(prompt.userMessage).toContain('FINAL OUTPUT CONTRACT');
   });
 
-  it('gives EVIDENCE tasks an evidence-treatment directive while retaining the strict canonical fields', () => {
+  it('gives EVIDENCE tasks a descriptive evidence-treatment directive and schema', () => {
     const prompt = promptFor('EVIDENCE_RELEVANCE');
 
     expect(prompt.systemPrompt).toContain('EVIDENCE TASK CONTRACT');
-    expect(prompt.systemPrompt).toContain('thesis = pertinencia probatoria');
-    expect(prompt.systemPrompt).toContain('application = relación explícita con la cuestión');
-    expect(prompt.systemPrompt).toContain('conclusion = conclusión limitada al tratamiento de la evidencia');
+    expect(prompt.systemPrompt).toContain('usa el contrato DESCRIPTIVE');
+    expect(prompt.systemPrompt).toContain('factualDevelopment = descripción concreta');
+    expect(prompt.systemPrompt).toContain('evidentiaryDevelopment = pertinencia, propósito y límites');
+    expect(prompt.systemPrompt).toContain('No devuelvas thesis, application ni conclusion');
     expect(prompt.systemPrompt).toContain('No inventes una EvidenceOffer');
     expect(prompt.systemPrompt).toContain('No conviertas SOURCE_MENTIONED en prueba ofrecida');
+    expect((prompt.outputSchema as { required: string[] }).required).not.toEqual(expect.arrayContaining(['thesis', 'application', 'conclusion']));
+  });
+
+  it('holds an evidence result that leaks extraction metadata and generic boilerplate instead of exposing it as prose', async () => {
+    const { analysis, doc, task } = evidenceExecutionContext();
+    const invokeProvider = vi.fn().mockResolvedValue({
+      success: true,
+      structuredOutput: {
+        factualDevelopment: ['La evidencia expresamente mencionada se encuentra en un expediente natural.'],
+        evidentiaryDevelopment: ['La evidencia mencionada es un extracto de un PDF con confianza de 0.95.'],
+        sourceEntityIds: [task.evidenceIds![0]],
+        authorityMentionIds: [],
+        unresolvedRequirements: ['REQUIRES_LEGAL_RESEARCH'],
+      },
+      provider: 'nvidia',
+      providerActuallyUsed: 'nvidia',
+      model: 'fixture-model',
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+
+    expect(outcome.status).toBe('FAILED');
+    expect(outcome.failureReason).toBe('SEMANTIC');
+    expect(outcome.block).toBeUndefined();
+    expect((outcome.evaluation as any)?.hardFailReasons).toEqual(expect.arrayContaining([
+      'EVIDENCE_GENERIC_TEXT',
+      'INTERNAL_METADATA_LEAK',
+    ]));
+  });
+
+  it.each([
+    'elemento 267',
+    'párrafo 18',
+    'página 5',
+    'elementIndex: 7',
+    'paragraphIndex: 18',
+    'page: 5',
+  ])('rejects evidence prose that leaks internal locator metadata (%s)', async (locator) => {
+    const { analysis, doc, task } = evidenceExecutionContext();
+    const invokeProvider = vi.fn().mockResolvedValue({
+      success: true,
+      structuredOutput: {
+        factualDevelopment: ['La evidencia vinculada se describe como contrato.'],
+        evidentiaryDevelopment: [`La evidencia vinculada se relaciona con el contrato señalado; metadato de extracción: ${locator}.`],
+        sourceEntityIds: [task.evidenceIds![0]],
+        authorityMentionIds: [],
+        unresolvedRequirements: [],
+      },
+      provider: 'fixture',
+      providerActuallyUsed: 'fixture',
+      model: 'fixture-model',
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+
+    expect(outcome.status).toBe('FAILED');
+    expect(outcome.failureReason).toBe('SEMANTIC');
+    expect(outcome.block).toBeUndefined();
+    expect((outcome.evaluation as any)?.hardFailReasons).toContain('INTERNAL_METADATA_LEAK');
+  });
+
+  it('allows ordinary legal page and paragraph references when no extraction context is present', async () => {
+    const { analysis, doc, task } = evidenceExecutionContext();
+    const invokeProvider = vi.fn().mockResolvedValue({
+      success: true,
+      structuredOutput: {
+        factualDevelopment: ['Contrato mencionado en la fuente.'],
+        evidentiaryDevelopment: ['La evidencia tiene pertinencia; la sentencia se refiere a la página 5 y al párrafo 18 del expediente.'],
+        sourceEntityIds: [task.evidenceIds![0]],
+        authorityMentionIds: [],
+        unresolvedRequirements: [],
+      },
+      provider: 'fixture',
+      providerActuallyUsed: 'fixture',
+      model: 'fixture-model',
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+
+    expect(outcome.status).toBe('ACCEPTED');
+    expect((outcome.evaluation as any)?.hardFailReasons).not.toContain('INTERNAL_METADATA_LEAK');
+  });
+
+  it('uses a descriptive evidence contract and renders a compact evidence treatment', async () => {
+    const { analysis: packAnalysis, doc: packDoc, matrix: packMatrix, task: packTask } = evidenceExecutionContext();
+    const evidencePack = buildIssueContextPack(packTask, packDoc, packAnalysis, packMatrix);
+    expect(selectIssueDraftContract(evidencePack)).toBe('DESCRIPTIVE');
+
+    const { analysis, doc, task } = evidenceExecutionContext();
+    const invokeProvider = vi.fn().mockResolvedValue({
+      success: true,
+      structuredOutput: {
+        factualDevelopment: ['Contrato mencionado en la fuente.'],
+        evidentiaryDevelopment: ['Se relaciona expresamente con el hecho identificado, sin ampliar su alcance.'],
+        sourceEntityIds: [task.evidenceIds![0]],
+        authorityMentionIds: [],
+        unresolvedRequirements: [],
+      },
+      provider: 'fixture',
+      providerActuallyUsed: 'fixture',
+      model: 'fixture-model',
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+
+    expect(outcome.status).toBe('ACCEPTED');
+    expect(outcome.block?.text).toContain('Contrato mencionado en la fuente.');
+    expect(outcome.block?.text).toContain('Se relaciona expresamente con el hecho identificado');
+    expect(outcome.block?.text).not.toContain('CUESTIÓN:');
+    expect(outcome.block?.text).not.toContain('APLICACIÓN:');
+    expect(outcome.block?.text).not.toContain('CONCLUSIÓN:');
+  });
+
+  it('does not treat an evidence identifier alone as substantive treatment', async () => {
+    const { analysis, doc, task } = evidenceExecutionContext();
+    const invokeProvider = vi.fn().mockResolvedValue({
+      success: true,
+      structuredOutput: {
+        factualDevelopment: ['La evidencia vinculada se describe como contrato.'],
+        evidentiaryDevelopment: ['La evidencia consta como contrato.'],
+        sourceEntityIds: [task.evidenceIds![0]],
+        authorityMentionIds: [],
+        unresolvedRequirements: [],
+      },
+      provider: 'fixture',
+      providerActuallyUsed: 'fixture',
+      model: 'fixture-model',
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+
+    expect(outcome.status).toBe('FAILED');
+    expect(outcome.failureReason).toBe('INSUFFICIENT');
+    expect((outcome.evaluation as any)?.deficiencies).toContain('EVIDENCE_TREATMENT_INCOMPLETE');
+  });
+
+  it('rejects a relational evidence sentence that never grounds the linked evidence description', async () => {
+    const { analysis, doc, task } = evidenceExecutionContext();
+    const invokeProvider = vi.fn().mockResolvedValue({
+      success: true,
+      structuredOutput: {
+        factualDevelopment: ['El documento se relaciona con el hecho.'],
+        evidentiaryDevelopment: ['Tiene pertinencia y alcance limitado para la cuestión.'],
+        sourceEntityIds: [task.evidenceIds![0]],
+        authorityMentionIds: [],
+        unresolvedRequirements: [],
+      },
+      provider: 'fixture',
+      providerActuallyUsed: 'fixture',
+      model: 'fixture-model',
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+
+    expect(outcome.status).toBe('FAILED');
+    expect(outcome.failureReason).toBe('SEMANTIC');
+    expect((outcome.evaluation as any)?.hardFailReasons).toContain('EVIDENCE_GENERIC_TEXT');
   });
 });
 
 describe('FASE 4 provider seam and post-provider validation', () => {
+  it('preserves provider substantive content through parsing, DraftBlock, assembly, and document output', async () => {
+    const { analysis, doc, task } = descriptiveExecutionContext();
+    const sentinel = 'TEST-SUBSTANTIVE-CONTENT-XYZ';
+    const invokeProvider = vi.fn().mockResolvedValue({
+      success: true,
+      content: JSON.stringify({
+        factualDevelopment: [sentinel],
+        sourceEntityIds: ['fixture-f-fact-1'],
+        unresolvedRequirements: [],
+      }),
+      provider: 'nvidia',
+      providerActuallyUsed: 'nvidia',
+      model: 'fixture-model',
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+    expect(outcome.status).toBe('ACCEPTED');
+    expect(outcome.block?.text).toContain(sentinel);
+
+    const issueAssembly = assembleIssueDraftBlocks(
+      createDocumentNode({ id: task.sectionId!, type: 'background', title: task.sectionTitle!, order: 1 }),
+      [outcome],
+    );
+    const assembled = assembleLegalDraft(makeAssemblyInput({
+      candidateBlocks: [{ sectionId: task.sectionId!, block: issueAssembly.blocks[0] }],
+      generationTasks: [makeAssemblyTask({ id: task.id, sectionId: task.sectionId!, order: 0 })],
+    }));
+
+    expect(assembled.orderedBlocks[0].text).toContain(sentinel);
+    expect(assembled.document.sections.find((section) => section.id === task.sectionId)?.content.some((block) => block.text.includes(sentinel)))
+      .toBe(true);
+  });
+
   it('accepts source-backed descriptive established-fact output without argumentative fields', async () => {
     const { analysis, doc, task, issue } = descriptiveExecutionContext();
     expect(issue.status).toBe('READY_FOR_GENERATION');
@@ -1124,9 +1401,10 @@ describe('FASE 4 issue semantics and directed retry', () => {
 
     const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
 
-    expect(outcome.status).toBe('VALID_NON_FINAL');
-    expect(outcome.block?.issueDraftValidationStatus).toBe('VALID_NON_FINAL');
-    expect(outcome.block?.generationStatus).toBe('partial');
+    expect(outcome.status).toBe('FAILED');
+    expect(outcome.failureReason).toBe('INSUFFICIENT');
+    expect(outcome.block).toBeUndefined();
+    expect((outcome.evaluation as any)?.verdict).toBe('WEAK');
   });
 
   it('builds a directed retry prompt without changing the context hash', () => {
@@ -1270,6 +1548,187 @@ describe('FASE 4 issue blocks and Coverage safety', () => {
 
     expect(assembled.blocks).toHaveLength(2);
     expect(assembled.blocks.map((block) => block.legalIssueIds?.[0])).toEqual(['issue-a', 'issue-b']);
+  });
+
+  it('consolidates exact duplicate evidence treatments while preserving source and Coverage links', () => {
+    const evidenceBlock = (id: string, issueId: string, taskId: string, coverageId: string, evidenceId: string) => ({
+      id,
+      layer: 'GENERATED_ARGUMENT' as const,
+      text: 'El contrato se relaciona con el hecho identificado y no amplía su alcance.',
+      generationTaskId: taskId,
+      generationTaskType: 'EVIDENCE',
+      legalIssueIds: [issueId],
+      coverageItemIds: [coverageId],
+      evidenceIds: [evidenceId],
+      issueDraftValidationStatus: 'VALID_ACCEPTED' as const,
+      generationStatus: 'generated' as const,
+      generationRequirement: 'AI_REQUIRED' as const,
+      generatedBy: 'AI' as const,
+    });
+    const outcomes = [
+      { legalIssueId: 'issue-evidence-a', taskId: 'task-evidence-a', status: 'ACCEPTED' as const, attempts: [], block: evidenceBlock('blk-a', 'issue-evidence-a', 'task-evidence-a', 'cov-evidence-a', 'evidence-a') },
+      { legalIssueId: 'issue-evidence-b', taskId: 'task-evidence-b', status: 'ACCEPTED' as const, attempts: [], block: evidenceBlock('blk-b', 'issue-evidence-b', 'task-evidence-b', 'cov-evidence-b', 'evidence-b') },
+      { legalIssueId: 'issue-evidence-c', taskId: 'task-evidence-c', status: 'ACCEPTED' as const, attempts: [], block: evidenceBlock('blk-c', 'issue-evidence-c', 'task-evidence-c', 'cov-evidence-c', 'evidence-c') },
+    ];
+    const assembled = assembleIssueDraftBlocks(
+      createDocumentNode({ id: 'sec-pruebas', type: 'evidence', title: 'PRUEBAS', order: 1 }),
+      outcomes,
+    );
+
+    expect(assembled.blocks).toHaveLength(1);
+    expect(assembled.blocks[0].legalIssueIds).toEqual(['issue-evidence-a', 'issue-evidence-b', 'issue-evidence-c']);
+    expect(assembled.blocks[0].coverageItemIds).toEqual(['cov-evidence-a', 'cov-evidence-b', 'cov-evidence-c']);
+    expect(assembled.blocks[0].evidenceIds).toEqual(['evidence-a', 'evidence-b', 'evidence-c']);
+    expect(assembled.blocks[0].generationTaskIds).toEqual(['task-evidence-a', 'task-evidence-b', 'task-evidence-c']);
+    expect(assembled.warnings).toContain('EVIDENCE_DUPLICATE_CONSOLIDATED:issue-evidence-b');
+    expect(assembled.warnings).toContain('EVIDENCE_DUPLICATE_CONSOLIDATED:issue-evidence-c');
+  });
+
+  it('consolidates exact evidence blocks created from issue results and retains task evaluations and hashes', () => {
+    const evidenceBlock = (suffix: string) => {
+      const issueId = `issue-real-evidence-${suffix}`;
+      const task: GenerationTask = {
+        ...taskForIssue(),
+        id: `task-real-evidence-${suffix}`,
+        sectionId: 'sec-pruebas',
+        sectionTitle: 'PRUEBAS',
+        taskType: 'EVIDENCE',
+        type: 'EVIDENCE',
+        legalIssueIds: [issueId],
+        coverageItemIds: [`cov-real-evidence-${suffix}`],
+        factIds: [`fact-real-${suffix}`],
+        evidenceIds: [`evidence-real-${suffix}`],
+        authorityIds: [],
+      };
+      const result = {
+        ...validRawResult({
+          legalIssueId: issueId,
+          issueType: 'EVIDENCE_RELEVANCE',
+          coverageItemIds: [`cov-real-evidence-${suffix}`],
+          factualDevelopment: ['El contrato se relaciona con el hecho identificado.'],
+          evidentiaryDevelopment: ['Se relaciona con la pertinencia y mantiene limitado su alcance.'],
+          legalDevelopment: [],
+          thesis: '',
+          application: '',
+          conclusion: '',
+          sourceEntityIds: [`evidence-real-${suffix}`],
+          authorityMentionIds: [],
+        }),
+      } as unknown as IssueDraftResult;
+      const evaluation = {
+        blockId: `blk-${task.id}`,
+        taskId: task.id,
+        sectionId: task.sectionId,
+        factualCoverage: 0.8,
+        legalSupport: 0.8,
+        evidenceLinkage: 0.9,
+        issueResponsiveness: 0.9,
+        argumentDepth: 0.8,
+        specificity: 0.8,
+        completeness: 0.9,
+        repetitionPenalty: 0,
+        unsupportedAssertionPenalty: 0,
+        overallScore: 0.85,
+        verdict: 'PASS',
+        revisionMode: 'NONE',
+        deficiencies: [],
+        coveredCoverageItemIds: [...(task.coverageItemIds || [])],
+        missingCoverageItemIds: [],
+        hardFailReasons: [],
+      } as any;
+      return {
+        legalIssueId: issueId,
+        taskId: task.id,
+        status: 'ACCEPTED' as const,
+        attempts: [],
+        block: draftBlockFromIssueResult(result, task, evaluation),
+      };
+    };
+    const assembled = assembleIssueDraftBlocks(
+      createDocumentNode({ id: 'sec-pruebas', type: 'evidence', title: 'PRUEBAS', order: 1 }),
+      [evidenceBlock('a'), evidenceBlock('b')],
+    );
+
+    expect(assembled.blocks).toHaveLength(1);
+    expect(assembled.blocks[0].generationTaskIds).toEqual(['task-real-evidence-a', 'task-real-evidence-b']);
+    expect(assembled.blocks[0].factIds).toEqual(['fact-real-a', 'fact-real-b']);
+    expect(assembled.blocks[0].semanticEvaluations).toHaveLength(2);
+    expect(assembled.blocks[0].issueDraftResultHashes).toHaveLength(2);
+  });
+
+  it('does not consolidate evidence blocks with different finality or fallback states', () => {
+    const evidenceBlock = (id: string, issueId: string, taskId: string, validationStatus: 'VALID_ACCEPTED' | 'VALID_NON_FINAL', generationStatus: 'generated' | 'partial') => ({
+      id,
+      layer: 'GENERATED_ARGUMENT' as const,
+      text: 'El contrato se relaciona con el hecho identificado y no amplía su alcance.',
+      generationTaskId: taskId,
+      generationTaskType: 'EVIDENCE',
+      legalIssueIds: [issueId],
+      coverageItemIds: [`cov-${issueId}`],
+      evidenceIds: [`evidence-${issueId}`],
+      issueDraftValidationStatus: validationStatus,
+      generationStatus,
+      generationRequirement: 'AI_REQUIRED' as const,
+      generatedBy: 'AI' as const,
+    });
+    const assembled = assembleIssueDraftBlocks(
+      createDocumentNode({ id: 'sec-pruebas', type: 'evidence', title: 'PRUEBAS', order: 1 }),
+      [
+        { legalIssueId: 'issue-accepted', taskId: 'task-accepted', status: 'ACCEPTED' as const, attempts: [], block: evidenceBlock('blk-accepted', 'issue-accepted', 'task-accepted', 'VALID_ACCEPTED', 'generated') },
+        { legalIssueId: 'issue-review', taskId: 'task-review', status: 'VALID_NON_FINAL' as const, attempts: [], block: evidenceBlock('blk-review', 'issue-review', 'task-review', 'VALID_NON_FINAL', 'partial') },
+      ],
+    );
+
+    expect(assembled.blocks).toHaveLength(2);
+    expect(assembled.warnings).not.toContain('EVIDENCE_DUPLICATE_CONSOLIDATED:issue-review');
+  });
+
+  it('does not consolidate exact evidence when evaluation or provenance differs', () => {
+    const base = {
+      layer: 'GENERATED_ARGUMENT' as const,
+      text: 'El contrato se relaciona con el hecho identificado y no amplía su alcance.',
+      generationTaskType: 'EVIDENCE',
+      issueDraftValidationStatus: 'VALID_ACCEPTED' as const,
+      generationStatus: 'generated' as const,
+      generationRequirement: 'AI_REQUIRED' as const,
+      generatedBy: 'AI' as const,
+    };
+    const assembled = assembleIssueDraftBlocks(
+      createDocumentNode({ id: 'sec-pruebas', type: 'evidence', title: 'PRUEBAS', order: 1 }),
+      [
+        {
+          legalIssueId: 'issue-provenance-a',
+          taskId: 'task-provenance-a',
+          status: 'ACCEPTED' as const,
+          attempts: [],
+          block: {
+            ...base,
+            id: 'blk-provenance-a',
+            generationTaskId: 'task-provenance-a',
+            legalIssueIds: ['issue-provenance-a'],
+            semanticEvaluation: { verdict: 'PASS', overallScore: 0.9 } as any,
+            issueDraftResultHash: 'hash-a',
+          },
+        },
+        {
+          legalIssueId: 'issue-provenance-b',
+          taskId: 'task-provenance-b',
+          status: 'ACCEPTED' as const,
+          attempts: [],
+          block: {
+            ...base,
+            id: 'blk-provenance-b',
+            generationTaskId: 'task-provenance-b',
+            legalIssueIds: ['issue-provenance-b'],
+            semanticEvaluation: { verdict: 'PASS', overallScore: 0.8 } as any,
+            issueDraftResultHash: 'hash-b',
+          },
+        },
+      ],
+    );
+
+    expect(assembled.blocks).toHaveLength(2);
+    expect(assembled.warnings).toEqual([]);
   });
 
   it('assembly order ignores provider completion order', () => {

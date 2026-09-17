@@ -39,6 +39,42 @@ function sectionText(document: UniversalLegalDocument, title: RegExp): string {
 }
 
 describe('ANTECEDENTES visible materialization', () => {
+  it('keeps source-backed antecedentes visible when NVIDIA is configured but the section is reference-only', async () => {
+    const previous = {
+      key: process.env.NVIDIA_API_KEY,
+      baseUrl: process.env.NVIDIA_BASE_URL,
+      requestTimeout: process.env.NVIDIA_REQUEST_TIMEOUT_MS,
+      sectionTimeout: process.env.SECTION_AI_TIMEOUT_MS,
+    };
+    process.env.NVIDIA_API_KEY = 'test-key';
+    process.env.NVIDIA_BASE_URL = 'http://127.0.0.1:1';
+    process.env.NVIDIA_REQUEST_TIMEOUT_MS = '1000';
+    process.env.SECTION_AI_TIMEOUT_MS = '50';
+    try {
+      const result = await runGenerationPipeline({
+        selectedDocumentType: 'recurso_revision_amparo_directo',
+        documentTypeLabel: 'Recurso de revisión en amparo directo',
+        matter: 'Amparo',
+        jurisdiction: 'Federal',
+        targetSection: 'sec-recurso_revision_amparo_directo-4',
+        userInstruction: 'Preparar recurso de revisión en amparo directo con antecedentes.',
+        sourceDocuments: [sourceWithVisibleProceduralEvent()],
+        generationId: 'generation-antecedentes-reference-only-configured',
+        traceOptions: { enabled: true },
+      });
+
+      const metadata = result.generationMetadata.sections?.['sec-recurso_revision_amparo_directo-4'];
+      expect(sectionText(result, /antecedente/i)).toContain(MARKER);
+      expect(metadata?.provider).toBeNull();
+      expect(metadata?.generationReason).toMatch(/Materializado determinísticamente desde eventos procesales/);
+    } finally {
+      if (previous.key === undefined) delete process.env.NVIDIA_API_KEY; else process.env.NVIDIA_API_KEY = previous.key;
+      if (previous.baseUrl === undefined) delete process.env.NVIDIA_BASE_URL; else process.env.NVIDIA_BASE_URL = previous.baseUrl;
+      if (previous.requestTimeout === undefined) delete process.env.NVIDIA_REQUEST_TIMEOUT_MS; else process.env.NVIDIA_REQUEST_TIMEOUT_MS = previous.requestTimeout;
+      if (previous.sectionTimeout === undefined) delete process.env.SECTION_AI_TIMEOUT_MS; else process.env.SECTION_AI_TIMEOUT_MS = previous.sectionTimeout;
+    }
+  }, 30000);
+
   it('materializes source-backed procedural text through assembly into the editor', async () => {
     const provider = vi.fn();
     const result = await runGenerationPipeline({

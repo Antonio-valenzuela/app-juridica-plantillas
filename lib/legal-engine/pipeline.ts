@@ -66,6 +66,11 @@ import type {
   RejectedAuthorityCandidate,
   ResearchClock,
 } from './legal-research/types';
+import type { SourceProvenance } from './case-extraction/types';
+import { assembleSectionContextPacket } from './sectionContextAssembly';
+import { generateSectionDraft, sectionDraftToContentBlock } from './sectionGeneration';
+import { projectSectionPlanFromTasks } from './sectionPlanning';
+import type { SectionDraft } from './sectionDraft';
 
 export interface LegalResearchOnlyInput {
   caseAnalysis: CaseAnalysis;
@@ -711,6 +716,12 @@ export interface SectionPlan {
   factResponsePlans?: FactResponsePlan[];
   authorityIds?: string[];
   counterargumentStrategy?: string;
+  /** Canonical task/grounding links projected from the existing plan. */
+  generationTaskIds?: string[];
+  factIds?: string[];
+  evidenceIds?: string[];
+  legalIssueIds?: string[];
+  provenance?: SourceProvenance[];
 }
 
 export interface DraftingPlan {
@@ -776,6 +787,8 @@ export interface PipelineInput {
   /** Artefactos de investigación verificada; solo se leen durante generación. */
   researchBundlesByIssueId?: ReadonlyMap<string, LegalResearchBundle>;
   derivedReadinessByIssueId?: ReadonlyMap<string, DerivedIssueReadiness>;
+  /** Opt-in seam for the section-level architecture; legacy remains default. */
+  sectionGenerationMode?: 'legacy' | 'section';
 }
 
 export function buildLawyerStyleDirective(profile: LawyerProfile): string {
@@ -1519,7 +1532,9 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
   // Una contestación tiene una voz y una lógica distintas a amparo/recurso.
   // Este camino se ejecuta tanto sin credenciales como cuando NVIDIA falla;
   // por eso no puede compartir el texto genérico de medios de impugnación.
-  if (isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)) {
+  if (isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
+    || doc.documentType === 'recurso_revision_amparo_directo'
+    || doc.documentTypeLabel === 'recurso_revision_amparo_directo') {
     return getRevisionAmparoDirectoSectionText(doc, block.title, caseAnalysis);
   }
 
@@ -2621,7 +2636,7 @@ function shouldMaterializeSourceBackedProceduralReference(
   },
   coverageItemIds: readonly string[],
 ): boolean {
-  if (!generated.text?.trim() || generated.aiUsed === true || generated.fallbackUsed !== true || generated.isTruncated) {
+  if (!generated.text?.trim() || generated.aiUsed === true || generated.isTruncated) {
     return false;
   }
 
@@ -2632,13 +2647,14 @@ function shouldMaterializeSourceBackedProceduralReference(
   );
   if (!hasSourceBackedEventInText) return false;
 
-  return Boolean(doc.coverageMatrix?.items.some((item) =>
+  const hasReferenceOnlyCoverage = Boolean(doc.coverageMatrix?.items.some((item) =>
     coverageItemIds.includes(item.id)
     && item.category === 'PROCEDURAL_REQUIREMENT'
     && item.sourceEntityType === 'PROCEDURAL_REQUIREMENT'
     && item.satisfactionPolicy === 'REFERENCE_ONLY'
     && item.targetSectionIds.includes(section.id)
   ));
+  return hasReferenceOnlyCoverage && (generated.fallbackUsed === true || section.type === 'background');
 }
 
 /**
@@ -2658,6 +2674,7 @@ export async function generateSection(
   maxIssueConcurrency?: number,
   researchBundlesByIssueId?: ReadonlyMap<string, LegalResearchBundle>,
   derivedReadinessByIssueId?: ReadonlyMap<string, DerivedIssueReadiness>,
+  sectionGenerationMode: 'legacy' | 'section' = 'legacy',
 ): Promise<{
   text: string;
   blocks?: ContentBlock[];
@@ -2680,6 +2697,7 @@ export async function generateSection(
   finishReason?: string | null;
   isTruncated?: boolean;
   fallbackUsed?: boolean;
+  sectionDraft?: SectionDraft;
 }> {
   const sec = doc.sections.find((s) => s.id === sectionId);
   if (!sec) return { text: '', warnings: ['Sección no encontrada'] };
@@ -2744,18 +2762,25 @@ export async function generateSection(
   const hasConfirmedDefenses = Boolean(caseAnalysis?.arguments?.length);
   const hasEvidence = Boolean(caseAnalysis?.evidence?.length);
   const hasConfirmedFactPositions = Boolean(caseAnalysis?.facts?.some((fact) => fact.position && !['REQUIRE_LAWYER_INPUT', 'UNDETERMINED'].includes(fact.position)));
+  const hasSourceBackedProceduralEvent = Boolean(caseAnalysis?.richCaseAnalysis?.proceduralTimeline?.some((event) => event.provenance.length > 0));
+  const hasReferenceOnlyProceduralCoverage = Boolean(doc.coverageMatrix?.items.some((item) =>
+    item.targetSectionIds.includes(sec.id)
+    && item.category === 'PROCEDURAL_REQUIREMENT'
+    && item.sourceEntityType === 'PROCEDURAL_REQUIREMENT'
+    && item.satisfactionPolicy === 'REFERENCE_ONLY'
+  ));
+  const sourceBackedProceduralReferenceSection = sec.type === 'background'
+    && hasSourceBackedProceduralEvent
+    && hasReferenceOnlyProceduralCoverage;
   const aiEligibleSection = !formalSection && (
-    // Las respuestas punto por punto tienen un contrato estructurado y se
-    // generan determinísticamente para no contradecir la postura elegida.
-    false ||
     (/excepcion|defensa/.test(sectionTitleKey) && hasConfirmedDefenses) ||
     (/prueba|evidencia/.test(sectionTitleKey) && hasEvidence) ||
     (/alegato/.test(sectionTitleKey) && (hasConfirmedDefenses || hasConfirmedFactPositions)) ||
     // La revisión extraordinaria de amparo directo NO es una contestación
     // punto-por-punto: es una estrategia post-sentencia que requiere
     // argumentación desarrollada. Las secciones sustantivas SÍ son AI-elegibles.
-    (isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel) && !/petitorio|firma|proemio|comparecencia|cierre/.test(sectionTitleKey)) ||
-    (!isContestacionType(doc.documentType, doc.documentTypeLabel) && !/petitorio|firma|proemio|comparecencia/.test(sectionTitleKey))
+    (!sourceBackedProceduralReferenceSection && isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel) && !/petitorio|firma|proemio|comparecencia|cierre/.test(sectionTitleKey)) ||
+    (!sourceBackedProceduralReferenceSection && !isContestacionType(doc.documentType, doc.documentTypeLabel) && !/petitorio|firma|proemio|comparecencia/.test(sectionTitleKey))
   );
   // Construir índice temporal mínimo para el wrapper
   const tempIndex: DocumentIndex = {
@@ -2792,6 +2817,7 @@ export async function generateSection(
   if (hasHierarchicalPlans && sectionPlan) {
     const tasks = buildGenerationTasksForSection(sectionPlan, doc, caseAnalysis, doc.coverageMatrix);
     if (tasks.length > 0) {
+      const effectiveSectionPlan = projectSectionPlanFromTasks({ section: sec, sectionPlan, tasks });
       logGenerationPlan(sec.title, tasks);
       tasks.forEach((task) => trace?.recordTaskPlanned(task));
 
@@ -2858,6 +2884,60 @@ export async function generateSection(
         }
 
         console.log(`[pipeline:accounting] Sección "${sec.title}": planned=${plannedTasks}, attempted=${attemptedTasks}, accepted=${acceptedTasks}, blocked=${blockedTasks}, reviewRequired=${reviewRequiredTasks}, rejected=${rejectedTasks}, unresolved=${unresolvedTasks}`);
+        const taskWarnings = unresolvedTasks > 0 ? [`TASK_ACCOUNTING_FAILED:${sec.id}:${unresolvedTasks}`] : [];
+
+        if (sectionGenerationMode === 'section') {
+          const sectionPacket = assembleSectionContextPacket({
+            doc,
+            caseAnalysis,
+            section: sec,
+            sectionPlan: effectiveSectionPlan,
+            tasks,
+            issueOutcomes: allOutcomes,
+            researchBundlesByIssueId,
+            derivedReadinessByIssueId,
+          });
+          const sectionDraft = await generateSectionDraft(sectionPacket, {
+            invokeProvider: issueProviderInvoker || runFastMode,
+            trace,
+          });
+          const sectionWarnings = [...sectionPacket.diagnostics, ...sectionDraft.diagnostics];
+          sectionWarnings.forEach((warning) => trace?.addWarning(warning));
+          const sectionBlock = sectionDraft.status === 'ACCEPTED' || sectionDraft.status === 'VALID_NON_FINAL'
+            ? sectionDraftToContentBlock(sectionDraft)
+            : undefined;
+          if (sectionBlock) {
+            sectionBlock.generationId = trace?.generationId;
+            applySectionCoverageTransition(doc, sec, sectionBlock, trace);
+            sec.content = [sectionBlock];
+          } else {
+            sec.content = [];
+          }
+          return {
+            text: sectionBlock?.text || '',
+            blocks: sectionBlock ? [sectionBlock] : [],
+            generationTasks: tasks,
+            sectionDraft,
+            taskAccounting: {
+              plannedTasks,
+              attemptedTasks,
+              acceptedTasks,
+              rejectedTasks,
+              blockedTasks,
+              reviewRequiredTasks: reviewRequiredTasks + (sectionDraft.status === 'REVIEW_REQUIRED' ? 1 : 0),
+              unresolvedTasks,
+            },
+            warnings: Array.from(new Set(taskWarnings.concat(sectionWarnings))),
+            sources: [],
+            aiUsed: sectionDraft.provider.actuallyUsed === 'nvidia' && sectionDraft.provider.calls === 1,
+            aiProvider: sectionDraft.provider.actuallyUsed,
+            aiModel: sectionDraft.provider.model || undefined,
+            aiError: sectionDraft.status === 'REVIEW_REQUIRED' ? sectionDraft.diagnostics.join('; ') : undefined,
+            finishReason: sectionDraft.trace.finishReason || 'stop',
+            isTruncated: sectionDraft.trace.finishReason === 'length',
+            fallbackUsed: Boolean(sectionDraft.provider.fallbackReason),
+          };
+        }
 
         const assembled = assembleIssueDraftBlocks(sec, allOutcomes);
         sec.content = assembled.blocks;
@@ -3599,7 +3679,11 @@ export async function runGenerationPipeline(
         input.maxIssueConcurrency,
         input.researchBundlesByIssueId,
         input.derivedReadinessByIssueId,
+        input.sectionGenerationMode || 'legacy',
       );
+      if (generatedRaw.sectionDraft) {
+        (section as DocumentNode & { sectionDraft?: SectionDraft }).sectionDraft = generatedRaw.sectionDraft;
+      }
       if (generatedRaw.generationTasks?.length) {
         accumulatedGenerationTasks.push(...generatedRaw.generationTasks);
       }

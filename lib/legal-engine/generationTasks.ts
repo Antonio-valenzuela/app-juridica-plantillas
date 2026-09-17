@@ -18,6 +18,7 @@ import type { CaseAnalysis, LegalIssue } from './caseAnalysis';
 import type { SectionPlan, IssuePlan, ClaimPlan, FactResponsePlan } from './pipeline';
 import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } from './coverageMatrix';
 import { buildLegalIssueMatrix, type LegalIssueItem, type LegalIssueMatrix } from './legalIssueMatrix';
+import { buildEvidenceGroups } from './evidenceGrouping';
 import type { LawyerProfile } from '../workspace/lawyerProfileTypes';
 import { runFastMode } from '@/lib/ai/orchestrator';
 import { sanitizeGeneratedText } from './pipeline';
@@ -448,30 +449,63 @@ export function buildGenerationTasksForSection(
 
     const nativeEvidenceItems = sectionItems.filter((item) =>
       item.category === 'EVIDENCE_TREATMENT' || item.category === 'EVIDENCE_OFFER');
-    for (const [idx, item] of nativeEvidenceItems.entries()) {
-      const evidenceIds = [...(item.evidenceMentionIds || []), ...(item.evidenceOfferIds || [])];
+    const evidenceIssueGroups = buildEvidenceGroups(caseAnalysis!.richCaseAnalysis!, nativeEvidenceItems)
+      .map((group) => {
+        const items = nativeEvidenceItems.filter((item) => group.coverageItemIds.includes(item.id));
+        const mentionIssue = group.evidenceMentionIds.length === 1
+          ? legalIssueMatrix?.issues.find((issue) =>
+            issue.issueType === 'EVIDENCE_RELEVANCE' && issue.evidenceMentionIds.includes(group.evidenceMentionIds[0]),
+          )
+          : undefined;
+        const issue = mentionIssue || legalIssueMatrix?.issues.find((candidate) =>
+          candidate.coverageItemIds.some((id) => group.coverageItemIds.includes(id)),
+        );
+        return { issue, items };
+      })
+      .filter((group) => group.items.length > 0)
+      .sort((left, right) => nativeEvidenceItems.indexOf(left.items[0]) - nativeEvidenceItems.indexOf(right.items[0]));
+    const groupedEvidenceCoverageIds = new Set(evidenceIssueGroups.flatMap((group) => group.items.map((item) => item.id)));
+    const appendEvidenceTask = (
+      items: DocumentCoverageItem[],
+      issue: LegalIssueItem | undefined,
+      idx: number,
+    ) => {
+      const evidenceIds = [...new Set([
+        ...(issue?.evidenceMentionIds || []),
+        ...(issue?.evidenceOfferIds || []),
+        ...items.flatMap((item) => [...(item.evidenceMentionIds || []), ...(item.evidenceOfferIds || [])]),
+      ])];
+      const factIds = [...new Set([
+        ...(issue?.factIds || []),
+        ...items.flatMap((item) => item.factIds || []),
+      ])];
+      const coverageItemIds = items.map((item) => item.id);
       tasks.push({
-        id: `task-evidence-${sectionId}-${item.id}`,
+        id: `task-evidence-${sectionId}-${issue?.id || coverageItemIds[0]}`,
         documentId: doc.id,
         sectionId,
         sectionTitle,
         taskType: 'EVIDENCE',
         type: 'EVIDENCE',
-        title: item.description,
-        label: item.description,
+        title: items[0].description,
+        label: items[0].description,
         objective: 'Tratar únicamente la evidencia identificada y sus relaciones explícitas.',
         complexity: 'MEDIUM',
         tokenBudget: calculateTaskTokenBudget({ taskType: 'EVIDENCE', complexity: 'MEDIUM', relatedEvidenceCount: evidenceIds.length }),
         status: 'pending',
         order: (idx + 1) * 10,
         orderInParent: (idx + 1) * 10,
-        coverageItemIds: [item.id],
-        legalIssueIds: issueIdsForCoverage([item.id]),
-        factIds: [...(item.factIds || [])],
+        coverageItemIds,
+        legalIssueIds: issue ? [issue.id] : issueIdsForCoverage(coverageItemIds),
+        factIds,
         evidenceIds,
         authorityIds: [],
       });
-    }
+    };
+    evidenceIssueGroups.forEach(({ issue, items }, idx) => appendEvidenceTask(items, issue, idx));
+    nativeEvidenceItems
+      .filter((item) => !groupedEvidenceCoverageIds.has(item.id))
+      .forEach((item, idx) => appendEvidenceTask([item], undefined, evidenceIssueGroups.length + idx));
 
     const sectionSupportItems = sectionItems.filter((item) =>
       item.category === 'SOURCE_ARGUMENT_RESPONSE' || item.category === 'PETITION_SUPPORT');

@@ -17,6 +17,7 @@ export interface SourceProvenanceInput {
   section?: string;
   paragraphIndex?: number;
   elementIndex?: number;
+  candidateId?: string;
   /** Preferred field for callers building a provenance record directly. */
   excerpt?: string;
   /** Alias used by source-unit and candidate builders. */
@@ -79,6 +80,7 @@ export function createSourceProvenance(
     ...(input.section ? { section: input.section } : {}),
     ...(input.paragraphIndex !== undefined ? { paragraphIndex: input.paragraphIndex } : {}),
     ...(input.elementIndex !== undefined ? { elementIndex: input.elementIndex } : {}),
+    ...(input.candidateId ? { candidateId: input.candidateId } : {}),
     excerptHash: input.excerptHash ?? hashExcerpt(excerpt),
     ...(excerpt ? { excerpt } : {}),
     ...(input.speakerRole ? { speakerRole: input.speakerRole } : {}),

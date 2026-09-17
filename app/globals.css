@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+.contestaciones-two-column-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  width: 100%;
+  min-width: 0;
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .contestaciones-two-column-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.contestaciones-two-column-layout > main,
+.contestaciones-two-column-layout > aside {
+  min-width: 0;
+  width: 100%;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -2637,4 +2658,3 @@ textarea:disabled {
   word-wrap: break-word;
   overflow-wrap: anywhere;
 }
-

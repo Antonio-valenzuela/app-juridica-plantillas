@@ -58,6 +58,76 @@ describe('documents and evidence mentions', () => {
     expect(item.statedPurpose).toMatch(/acreditar el pago/i);
   });
 
+  it('keeps a public deed under an explicit public-document label', () => {
+    const result = extractDocumentsAndEvidence(
+      classified('1. DOCUMENTAL PÚBLICA: Copia certificada de la escritura pública número 12,450 que contiene el poder del apoderado.'),
+      context(),
+    );
+
+    expect(result.evidenceMentions).toHaveLength(1);
+    expect(result.evidenceMentions[0]).toMatchObject({
+      type: 'DOCUMENTAL PÚBLICA',
+      description: 'Copia certificada de la escritura pública número 12,450 que contiene el poder del apoderado.',
+      status: 'SOURCE_MENTIONED',
+    });
+    expect(result.evidenceOffers).toEqual([]);
+  });
+
+  it.each([
+    { candidates: classified('PRUEBAS: Se celebrará escritura pública para formalizar la compraventa.') },
+    { candidates: sourceAssertion('La parte actora se obliga a otorgar escritura pública en fecha posterior.', 'PRUEBAS') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: La escritura pública se otorgará en fecha posterior.') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: La escritura pública será otorgada en fecha posterior.') },
+    { candidates: classified('PRUEBAS: Las escrituras públicas serán formalizadas posteriormente.') },
+    { candidates: classified('PRUEBAS: La escritura pública irá a formalizarse después.') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: La escritura pública se otorgará conforme al contrato de compraventa.') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: La escritura pública se otorgará el día número 3.') },
+    { candidates: classified('PRUEBAS: La escritura pública será otorgada según el folio registral futuro.') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: La escritura pública se otorgará conforme al instrumento de planeación.') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: La escritura pública se otorgará tras exhibir copia del contrato.') },
+  ])('does not treat a prospective public deed as evidence under an explicit label', ({ candidates }) => {
+    const result = extractDocumentsAndEvidence(candidates, context());
+
+    expect(result.documents).toEqual([]);
+    expect(result.evidenceMentions).toEqual([]);
+    expect(result.evidenceOffers).toEqual([]);
+  });
+
+  it('keeps an explicitly labelled public deed with a present documentary cue and identifier', () => {
+    const result = extractDocumentsAndEvidence(
+      classified('DOCUMENTAL PÚBLICA: Se exhibe escritura pública número 12,450.'),
+      context(),
+    );
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual([
+      'Se exhibe escritura pública número 12,450.',
+    ]);
+  });
+
+  it.each([
+    { candidates: classified('PRUEBAS: La parte actora exhibió escritura pública.') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: La demandada aportó escritura pública.') },
+    { candidates: classified('PRUEBAS: El promovente ofreció escritura pública.') },
+    { candidates: classified('PRUEBAS: El actor exhibió escritura pública.') },
+    { candidates: classified('DOCUMENTAL PÚBLICA: El demandado aportó escritura pública.') },
+    { candidates: classified('PRUEBAS: El quejoso ofreció escritura pública.') },
+  ])('keeps an explicitly labelled public deed with a present party documentary act', ({ candidates }) => {
+    const result = extractDocumentsAndEvidence(candidates, context());
+
+    expect(result.evidenceMentions).toHaveLength(1);
+    expect(result.evidenceMentions[0]?.status).toBe('SOURCE_MENTIONED');
+  });
+
+  it.each([
+    { candidates: classified('PRUEBAS: contrato que obliga a otorgar escritura pública.'), expected: 'contrato que obliga a otorgar escritura pública.' },
+    { candidates: classified('DOCUMENTAL PRIVADA: Contrato de compraventa que obliga a otorgar escritura pública.'), expected: 'Contrato de compraventa que obliga a otorgar escritura pública.' },
+    { candidates: classified('DOCUMENTAL PÚBLICA: Copia certificada del contrato que obliga a otorgar escritura pública.'), expected: 'Copia certificada del contrato que obliga a otorgar escritura pública.' },
+  ])('preserves an explicit concrete document that mentions a future public deed', ({ candidates, expected }) => {
+    const result = extractDocumentsAndEvidence(candidates, context());
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual([expected]);
+  });
+
   it('extracts concrete evidence embedded in a source assertion and keeps a reported offer separate', () => {
     const result = extractDocumentsAndEvidence(
       sourceAssertion('Luego, de las actuaciones que integran el juicio laboral se tiene que la parte actora ofreció prueba confesional a cargo del director operativo.'),
@@ -73,6 +143,182 @@ describe('documents and evidence mentions', () => {
     expect(result.evidenceOffers[0]).toMatchObject({
       evidenceMentionId: result.evidenceMentions[0].id,
       status: 'PARTY_OFFERED',
+    });
+  });
+
+  it('keeps identifiers distinct for multiple embedded public deeds', () => {
+    const result = extractDocumentsAndEvidence(
+      sourceAssertion('En autos obran la escritura pública 12,450 y la escritura pública 67,890.'),
+      context(),
+    );
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual([
+      'escritura pública 12,450',
+      'escritura pública 67,890',
+    ]);
+    expect(new Set(result.evidenceMentions.map((item) => item.id)).size).toBe(2);
+  });
+
+  it.each([
+    {
+      text: 'En autos obran la escritura pública número 12,450 y la escritura pública número 67,890.',
+      expected: ['escritura pública número 12,450', 'escritura pública número 67,890'],
+    },
+    {
+      text: 'La parte actora ofreció el contrato, la escritura pública número 12,450 y la escritura pública número 67,890.',
+      expected: ['contrato', 'escritura pública número 12,450', 'escritura pública número 67,890'],
+    },
+  ])('keeps every identified public deed in a direct evidence list: $text', ({ text, expected }) => {
+    const result = extractDocumentsAndEvidence(sourceAssertion(text), context());
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual(expected);
+    expect(new Set(result.evidenceMentions.map((item) => item.id)).size).toBe(expected.length);
+  });
+
+  it('keeps long ungrouped identifiers distinct for multiple embedded public deeds', () => {
+    const result = extractDocumentsAndEvidence(
+      sourceAssertion('En autos obran la escritura pública 1234567 y la escritura pública 1234568.'),
+      context(),
+    );
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual([
+      'escritura pública 1234567',
+      'escritura pública 1234568',
+    ]);
+    expect(new Set(result.evidenceMentions.map((item) => item.id)).size).toBe(2);
+  });
+
+  it('does not materialize a future public deed as source evidence', () => {
+    const result = extractDocumentsAndEvidence(
+      sourceAssertion('En autos se ordenó que las partes otorgaran escritura pública para formalizar la compraventa.'),
+      context(),
+    );
+
+    expect(result.documents).toEqual([]);
+    expect(result.evidenceMentions).toEqual([]);
+    expect(result.evidenceOffers).toEqual([]);
+  });
+
+  it.each([
+    'Se otorgará escritura pública para formalizar la compraventa.',
+    'Se celebrará escritura para formalizar la compraventa.',
+    'Las partes se obligan a otorgar escritura pública en fecha posterior.',
+    'El vendedor se ofrece a otorgar escritura pública para formalizar la compraventa.',
+    'La parte actora ofreció otorgar escritura pública para formalizar la compraventa.',
+    'La parte actora ofreció suscribir escritura pública para formalizar la compraventa.',
+    'La parte actora ofreció protocolizar escritura pública.',
+    'La parte actora ofreció firmar escritura pública.',
+  ])('does not materialize a future legal act as evidence: %s', (text) => {
+    const result = extractDocumentsAndEvidence(sourceAssertion(text), context());
+
+    expect(result.documents).toEqual([]);
+    expect(result.evidenceMentions).toEqual([]);
+    expect(result.evidenceOffers).toEqual([]);
+  });
+
+  it('keeps an offered contract while excluding its promised future public deed', () => {
+    const result = extractDocumentsAndEvidence(
+      sourceAssertion('La parte actora ofreció el contrato que obliga a otorgar escritura pública.'),
+      context(),
+    );
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual(['contrato']);
+    expect(result.evidenceMentions.some((item) => /escritura pública/i.test(item.description))).toBe(false);
+  });
+
+  it('keeps a public deed that continues a direct documentary offer list', () => {
+    const result = extractDocumentsAndEvidence(
+      sourceAssertion('La parte actora ofreció el contrato y la escritura pública número 12,450.'),
+      context(),
+    );
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual([
+      'contrato',
+      'escritura pública número 12,450',
+    ]);
+  });
+
+  it.each([
+    {
+      text: 'La parte actora ofreció el contrato, la escritura pública número 12,450 y el recibo.',
+      expected: ['contrato', 'escritura pública número 12,450', 'recibo'],
+    },
+    {
+      text: 'La parte actora ofreció el contrato, el recibo y la escritura pública número 12,450.',
+      expected: ['contrato', 'recibo', 'escritura pública número 12,450'],
+    },
+    {
+      text: 'Se ofrece el contrato, el recibo y la escritura pública número 12,450.',
+      expected: ['contrato', 'recibo', 'escritura pública número 12,450'],
+    },
+  ])('keeps every concrete item in a direct documentary list: $text', ({ text, expected }) => {
+    const result = extractDocumentsAndEvidence(sourceAssertion(text), context());
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual(expected);
+  });
+
+  it('does not propagate a documentary offer across intervening future-act prose', () => {
+    const result = extractDocumentsAndEvidence(
+      sourceAssertion('La parte actora ofreció el contrato, pero se obligó a suscribir escritura pública.'),
+      context(),
+    );
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual(['contrato']);
+  });
+
+  it.each([
+    'En autos obra escritura pública número 12,450.',
+    'En autos consta escritura pública número 12,450.',
+    'Se exhibe escritura pública número 12,450.',
+    'Se ofrece escritura pública número 12,450.',
+  ])('materializes documented public-deed evidence: %s', (text) => {
+    const result = extractDocumentsAndEvidence(sourceAssertion(text), context());
+
+    expect(result.evidenceMentions).toHaveLength(1);
+    expect(result.evidenceMentions[0]).toMatchObject({
+      description: 'escritura pública número 12,450',
+      status: 'SOURCE_MENTIONED',
+      provenance: [expect.objectContaining({
+        sourceId: 'src-real-pdf',
+        page: 20,
+        elementIndex: 270,
+        excerpt: 'escritura pública número 12,450',
+      })],
+    });
+  });
+
+  it.each([
+    'La parte actora ofreció escritura pública número 12,450.',
+    'La demandada exhibió escritura pública número 12,450.',
+    'En autos la parte actora aportó escritura pública número 12,450.',
+  ])('materializes a public deed offered or produced by a party: %s', (text) => {
+    const result = extractDocumentsAndEvidence(sourceAssertion(text), context());
+
+    expect(result.evidenceMentions).toHaveLength(1);
+    expect(result.evidenceMentions[0]?.description).toBe('escritura pública número 12,450');
+  });
+
+  it.each([
+    'Se ofrece como prueba la escritura pública número 12,450.',
+    'Se ofrece como prueba documental la escritura pública número 12,450.',
+  ])('keeps the identified public deed when it is offered as documentary evidence: %s', (text) => {
+    const result = extractDocumentsAndEvidence(sourceAssertion(text), context());
+
+    expect(result.evidenceMentions.map((item) => item.description)).toEqual([
+      'escritura pública número 12,450',
+    ]);
+  });
+
+  it('preserves the source-unit-derived candidate identity for public-deed evidence', () => {
+    const candidates = sourceAssertion('En autos obra escritura pública número 1234567.');
+    candidates[0].candidateId = 'source-unit-27:candidate:0';
+    candidates[0].provenance[0].candidateId = 'source-unit-27:candidate:0';
+
+    const result = extractDocumentsAndEvidence(candidates, context());
+
+    expect(result.evidenceMentions[0]?.provenance[0]).toMatchObject({
+      candidateId: 'source-unit-27:candidate:0',
+      excerpt: 'escritura pública número 1234567',
     });
   });
 

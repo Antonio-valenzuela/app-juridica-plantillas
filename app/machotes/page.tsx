@@ -24,7 +24,7 @@ import type {
   LawyerFactPosition,
   LawyerClaimPosition,
 } from '@/lib/legal-engine/types';
-import type { CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
+import { reconstructCaseAnalysis, type CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 import { createEmptyDocument } from '@/lib/legal-engine/types';
 import { createSourceDocument } from '@/lib/legal-engine/context';
 import { markDocumentAsDraft, markDocumentAsSource, markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
@@ -53,6 +53,7 @@ import {
   saveTemplateWithPersistenceStatus,
 } from '@/lib/templates/customTemplateStore';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { createGenerationIdentityFactory } from '@/lib/legal-engine/generationIdentity';
 
 export type LegalWorkspaceMode =
   | 'universal'
@@ -207,11 +208,13 @@ export default function MachotesPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
   const [selectedTemplateRefText, setSelectedTemplateRefText] = useState<string>('');
   const [generationMode, setGenerationMode] = useState<GenerationMode>('automatic');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDraftGeneratorOpen, setIsDraftGeneratorOpen] = useState(false);
   const [isSaveCustomOpen, setIsSaveCustomOpen] = useState(false);
   const [editTemplateData, setEditTemplateData] = useState<any>(null);
   const [isEditCustomOpen, setIsEditCustomOpen] = useState(false);
   const [isUniversalGenerating, setIsUniversalGenerating] = useState(false);
+  const [generationIdentityFactory] = useState(createGenerationIdentityFactory);
   const [pipelineStageIndex, setPipelineStageIndex] = useState(0);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const fileInputHiddenRef = useRef<HTMLInputElement>(null);
@@ -767,6 +770,7 @@ export default function MachotesPage() {
 
   const handleSwitchMode = (mode: LegalWorkspaceMode) => {
     setActiveNavTab(mode);
+    setIsSidebarOpen(false);
     // Persistir tab en URL (§24)
     try {
       const params = new URLSearchParams(searchParams.toString());
@@ -1145,13 +1149,24 @@ export default function MachotesPage() {
 
   const handleRemoveUploadedSource = (id: string) => {
     setUploadedSourceDocs((prev) => prev.filter((s) => s.id !== id));
-    setCaseDocuments((prev) => prev.filter((d) => d.id !== id));
+    setCaseDocuments((prev) => {
+      const filtered = prev.filter((d) => d.id !== id);
+      // Si se eliminó el documento seleccionado, seleccionar el siguiente válido por ID explícito
+      if (selectedCaseDoc?.id === id) {
+        const nextSelected = filtered[0] || null;
+        // Actualizar selectedCaseDoc de forma síncrona para evitar stale
+        // Se usa setTimeout 0 para evitar setState durante render si es llamado desde evento
+        setTimeout(() => setSelectedCaseDoc(nextSelected), 0);
+      }
+      return filtered;
+    });
     setInitialWritingsSessionDocIds((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
+    // Recalcular ficha y análisis materia tras eliminación se hará vía useMemo en siguiente render
   };
 
   /* ── Usar como Machote / Guardar Plantilla Reutilizable ────────────────── */
@@ -1304,7 +1319,7 @@ export default function MachotesPage() {
     setActiveGenJob({ jobId: '', total: 0, completed: 0, percentage: 0, currentBlock: null, status: 'processing', stage: 'Preparando documento…' });
     notify('warning', flow === 'contestacion' ? 'Generando contestación…' : flow === 'recurso' ? 'Generando recurso…' : flow === 'escrito_inicial' ? 'Generando escrito inicial…' : 'Generando documento jurídico…');
 
-    const generationId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const generationId = generationIdentityFactory.next();
     // A5: las partes confirmadas/editadas viajan en el body (fuente de verdad del frontend);
     // el backend NO consulta CaseParty durante la generación.
     // Si el payload trae partes explícitas, usarlas para evitar reutilizar partes de otra sesión.
@@ -1340,7 +1355,7 @@ export default function MachotesPage() {
       ? buildWritingWorkflow(writingIntake, workflowSelection)
       : {
           sourceDocuments: effectiveSourceDocs,
-          analysis: caseAnalysis || { facts: [], missingData: [] },
+          analysis: (effectiveSourceDocs.length === uploadedSourceDocs.length && matterAnalysis) ? matterAnalysis : (caseAnalysis || { facts: [], missingData: [] }),
           selection: workflowSelection,
           updatedAt: new Date().toISOString(),
         };
@@ -1587,7 +1602,7 @@ export default function MachotesPage() {
     setIsUniversalGenerating(true);
     setActiveGenJob({ jobId: '', total: 0, completed: 0, percentage: 0, currentBlock: null, status: 'processing', stage: 'Preparando contestación…' } as any);
     notify('warning', 'Generando contestación…');
-    const genId2 = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const genId2 = generationIdentityFactory.next();
     // A5: partes confirmadas desde el estado local (sin consulta DB en backend).
     const contestacionCaseParties = savedCaseParties
       .filter((p) => p.name && p.name.trim())
@@ -1624,7 +1639,7 @@ export default function MachotesPage() {
           referenceDocumentText: effectiveRefText,
           workflow: {
             sourceDocuments: uploadedSourceDocs,
-            analysis: caseAnalysis || { facts: [], missingData: [] },
+            analysis: matterAnalysis || caseAnalysis || { facts: [], missingData: [] },
             selection: effectiveGenMode === 'personal_template' && effectiveRefId
               ? { mode: 'personal_template', templateId: effectiveRefId }
               : effectiveGenMode === 'reference_document'
@@ -1966,9 +1981,24 @@ export default function MachotesPage() {
 
   const generatingStage = STAGES[pipelineStageIndex];
   const hasInitialContext = Boolean(caseFicha) || uploadedSourceDocs.length > 0;
-  const liveCaseFicha = uploadedSourceDocs.length > 0
-    ? detectCaseFicha(uploadedSourceDocs.map((s) => s.extractedText || ''))
-    : null;
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- detectCaseFicha es pura y determinista para memoización manual del expediente
+  const liveCaseFicha = React.useMemo(() => (
+    uploadedSourceDocs.length > 0
+      ? detectCaseFicha(uploadedSourceDocs.map((s) => s.extractedText || ''))
+      : null
+  ), [uploadedSourceDocs]);
+
+  // Contrato explícito: contexto seleccionado vs contexto materia
+  // selectedFicha: ficha documental del documento actualmente seleccionado (por ID explícito)
+  // matterAnalysis: análisis agregado de todos los sourceDocs (materia)
+  const selectedSourceForFicha = React.useMemo(() => uploadedSourceDocs.find((s) => s.id === selectedCaseDoc?.id) || null, [uploadedSourceDocs, selectedCaseDoc?.id]);
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- detectCaseFicha pura, evita recalcular ficha en cada render
+  const selectedFicha = React.useMemo(() => {
+    if (selectedSourceForFicha) return detectCaseFicha([selectedSourceForFicha.extractedText || '']);
+    return caseFicha || liveCaseFicha;
+  }, [selectedSourceForFicha, caseFicha, liveCaseFicha]);
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- reconstructCaseAnalysis es costosa y determinista, se memoiza por uploadedSourceDocs
+  const matterAnalysis = React.useMemo(() => reconstructCaseAnalysis(uploadedSourceDocs, ''), [uploadedSourceDocs]);
 
   return (
     <div className="machotes-shell h-[calc(100dvh-64px)] flex flex-col font-sans select-none overflow-hidden bg-[#f4f7f9]">
@@ -2064,6 +2094,22 @@ export default function MachotesPage() {
         .machotes-shell .grid-cols-1 { grid-template-columns:1fr; }
         .machotes-shell .grid-cols-2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .machotes-shell .grid-cols-12 { grid-template-columns:repeat(12,minmax(0,1fr)); }
+        .machotes-shell .contestaciones-layout-grid { grid-template-columns:1fr; }
+        .machotes-shell .contestaciones-main-column, .machotes-shell .contestaciones-side-column { grid-column:auto; }
+        .machotes-shell .contestaciones-page-header { display:flex; flex-direction:column; gap:.5rem; }
+        .machotes-shell .contestaciones-page-header h1 { margin:0; font-size:28px; line-height:1.15; letter-spacing:-.02em; }
+        .machotes-shell .contestaciones-summary-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; }
+        .machotes-shell .contestaciones-summary-column { display:flex; flex-direction:column; gap:8px; min-width:0; }
+        .machotes-shell .contestaciones-summary-field { display:grid; grid-template-columns:max-content minmax(0,1fr); align-items:baseline; gap:8px; min-width:0; }
+        .machotes-shell .contestaciones-summary-field-status { align-items:center; }
+        .machotes-shell .contestaciones-layout-grid h2 { margin:0; font-size:16px; line-height:1.25; letter-spacing:0; }
+        .machotes-shell .contestaciones-layout-grid h3 { margin:0; font-size:14px; line-height:1.35; letter-spacing:0; }
+        .machotes-shell .contestaciones-summary-card { min-height:150px; }
+        .machotes-shell .contestaciones-side-column { display:flex; flex-direction:column; gap:14px; }
+        .machotes-shell .contestaciones-config-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+        .machotes-shell .contestaciones-checklist-grid { display:grid; grid-template-columns:1fr; align-items:center; gap:12px; }
+        .machotes-shell .contestaciones-checklist-items, .machotes-shell .contestaciones-checklist-action { min-width:0; }
+        .machotes-shell .contestaciones-assistance-banner { min-height:74px; }
         .machotes-shell .lg\:grid-cols-12 { grid-template-columns:1fr; }
         .machotes-shell .lg\:col-span-3 { grid-column:span 12 / span 12; }
         .machotes-shell .lg\:col-span-6 { grid-column:span 12 / span 12; }
@@ -2082,7 +2128,7 @@ export default function MachotesPage() {
         .machotes-side-btn.is-active { background:#35415A; color:#FFFFFF; font-weight:800; box-shadow:inset 3px 0 0 var(--mach-gold); }
         .machotes-side-btn.is-active span:first-child { color:var(--mach-gold-light); }
         .machotes-main { flex:1; min-width:0; min-height:0; background:#F5F4F7; overflow:hidden; }
-        .machotes-main-scroll { width:100%; height:100%; overflow:auto; padding:24px 28px 28px; }
+        .machotes-main-scroll { width:100%; height:100%; overflow:auto; padding:16px 28px 24px; }
         .machotes-title { margin:0; color:#111827; font-size:34px; line-height:1.05; letter-spacing:-.02em; font-weight:800; }
         .machotes-subtitle { margin:6px 0 0; color:#334155; font-size:16px; line-height:1.5; }
         .machotes-analysis-grid { display:grid !important; grid-template-columns:minmax(285px, .84fr) minmax(0, 1.55fr) minmax(270px, .82fr) !important; gap:18px; align-items:start; }
@@ -2097,6 +2143,14 @@ export default function MachotesPage() {
         .machotes-shell .machotes-side + .machotes-main .machotes-page-header { margin-bottom:18px; }
         .machotes-shell .machotes-side + .machotes-main button { cursor:pointer; }
         @media (min-width: 1100px) {
+          .machotes-shell .contestaciones-page-header { flex-direction:row; align-items:flex-start; justify-content:space-between; }
+          .machotes-shell .contestaciones-side-column { margin-top:-55px; }
+          .machotes-shell .contestaciones-main-column { margin-top:13px; }
+          .machotes-shell .contestaciones-layout-grid { grid-template-columns:minmax(0,3fr) minmax(360px,2fr); }
+          .machotes-shell .contestaciones-main-column { grid-column:1; }
+          .machotes-shell .contestaciones-side-column { grid-column:2; }
+          .machotes-shell .contestaciones-config-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .machotes-shell .contestaciones-checklist-grid { grid-template-columns:minmax(0,7fr) minmax(220px,5fr); }
           .machotes-shell .lg\:grid-cols-12 { grid-template-columns:repeat(12,minmax(0,1fr)); }
           .machotes-shell .lg\:col-span-3 { grid-column:span 3 / span 3; }
           .machotes-shell .lg\:col-span-6 { grid-column:span 6 / span 6; }
@@ -2105,6 +2159,7 @@ export default function MachotesPage() {
           .machotes-shell .sm\:grid-cols-2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
         }
         @media (max-width: 1100px) {
+          .machotes-shell .contestaciones-summary-fields { grid-template-columns:1fr; }
           .machotes-analysis-grid { grid-template-columns:1fr !important; }
           .machotes-side { width:72px; min-width:72px; padding:16px 8px; }
           .machotes-side-brand span, .machotes-side-btn span:last-child { display:none; }
@@ -2115,9 +2170,123 @@ export default function MachotesPage() {
           .machotes-side { display:none; }
           .machotes-main-scroll { padding:12px; }
         }
+        .machotes-shell .templates-page { color:#1E293B; }
+        .machotes-shell .templates-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:4px 2px 2px; }
+        .machotes-shell .templates-hero-copy { display:flex; align-items:center; gap:14px; min-width:0; }
+        .machotes-shell .templates-hero-icon { width:48px; height:48px; flex:0 0 48px; display:flex; align-items:center; justify-content:center; border-radius:16px; background:#EEF4FF; color:#0B5ED7; font-size:25px; font-weight:800; box-shadow:inset 0 0 0 1px #DCE8FA; }
+        .machotes-shell .templates-hero h1 { margin:0; color:#0B2545; font-size:30px; line-height:1.15; letter-spacing:-.025em; font-weight:850; }
+        .machotes-shell .templates-hero p { margin:4px 0 0; color:#64748B; font-size:15px; line-height:1.4; }
+        .machotes-shell .templates-hero-note { display:flex; align-items:center; gap:12px; padding-top:12px; color:#64748B; font-size:12px; white-space:nowrap; }
+        .machotes-shell .templates-hero-note span { display:inline-block; width:34px; height:2px; border-radius:999px; background:#B58A5A; }
+        .machotes-shell .templates-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) minmax(300px,1.65fr); gap:14px; align-items:stretch; }
+        .machotes-shell .templates-metric-card { min-height:112px; display:flex; align-items:center; gap:14px; padding:18px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; box-shadow:0 2px 8px rgba(15,23,42,.045); }
+        .machotes-shell .templates-metric-icon { width:54px; height:54px; flex:0 0 54px; display:flex; align-items:center; justify-content:center; border-radius:999px; font-size:25px; font-weight:800; }
+        .machotes-shell .templates-metric-icon-blue { background:#EAF2FF; color:#0B5ED7; }
+        .machotes-shell .templates-metric-icon-green { background:#E8F7F0; color:#15805D; }
+        .machotes-shell .templates-metric-icon-slate { background:#EFF3F9; color:#0B2545; }
+        .machotes-shell .templates-metric-card strong { display:block; margin:0; color:#0B2545; font-size:22px; line-height:1.05; font-weight:850; }
+        .machotes-shell .templates-metric-card span:not(.templates-metric-icon) { display:block; margin-top:5px; color:#64748B; font-size:13px; line-height:1.25; }
+        .machotes-shell .templates-profile-slot { min-width:0; }
+        .machotes-shell .templates-profile-slot > * { height:100%; }
+        .machotes-shell .templates-profile-slot h2 { font-size:16px; }
+        .machotes-shell .templates-library-card { padding:18px; background:#fff; border:1px solid #E2E8F0; border-radius:12px; box-shadow:0 2px 10px rgba(15,23,42,.045); }
+        .machotes-shell .templates-controls { display:grid; grid-template-columns:minmax(0,1fr) 250px auto; gap:14px; align-items:center; }
+        .machotes-shell .templates-search-field, .machotes-shell .templates-filter-field { min-width:0; position:relative; display:flex; align-items:center; }
+        .machotes-shell .templates-search-field > span { position:absolute; left:14px; color:#0B2545; font-size:25px; line-height:1; pointer-events:none; transform:translateY(-1px); }
+        .machotes-shell .templates-search-field input, .machotes-shell .templates-filter-field select { width:100%; height:46px; border:1px solid #D5DEE9; border-radius:9px; background:#F8FAFD; color:#1E293B; font-size:14px; font-weight:600; outline:none; transition:border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+        .machotes-shell .templates-search-field input { padding:0 14px 0 42px; }
+        .machotes-shell .templates-filter-field select { appearance:auto; padding:0 36px 0 14px; }
+        .machotes-shell .templates-search-field input:focus, .machotes-shell .templates-filter-field select:focus { border-color:#0B5ED7; background:#fff; box-shadow:0 0 0 3px rgba(11,94,215,.1); }
+        .machotes-shell .templates-create-button { height:46px; padding:0 18px; border:1px solid #A97822; border-radius:9px; background:linear-gradient(135deg,#C79632,#A97822); color:#fff; font-size:14px; font-weight:800; white-space:nowrap; box-shadow:0 4px 10px rgba(169,120,34,.18); }
+        .machotes-shell .templates-create-button:hover { filter:brightness(.96); }
+        .machotes-shell .templates-create-button span { font-size:21px; vertical-align:-1px; }
+        .machotes-shell .templates-list-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; padding:22px 0 14px; border-bottom:1px solid #E8EDF3; }
+        .machotes-shell .templates-list-heading h2 { margin:0; color:#0B2545; font-size:22px; line-height:1.1; font-weight:850; }
+        .machotes-shell .templates-list-heading p { margin:5px 0 0; color:#64748B; font-size:14px; }
+        .machotes-shell .templates-list { display:flex; flex-direction:column; gap:12px; padding-top:14px; }
+        .machotes-shell .templates-row-card { display:grid; grid-template-columns:144px minmax(0,1fr) minmax(260px,.58fr); gap:18px; align-items:center; min-height:158px; padding:14px; border:1px solid #DDE5EE; border-radius:11px; background:#fff; transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+        .machotes-shell .templates-row-card:hover { border-color:#B58A5A; box-shadow:0 6px 18px rgba(15,23,42,.07); transform:translateY(-1px); }
+        .machotes-shell .templates-thumbnail { position:relative; width:132px; height:136px; overflow:hidden; display:flex; flex-direction:column; justify-content:space-between; padding:12px 10px 9px; border:1px solid #D8E0EA; border-radius:5px; background:#fff; color:#475569; box-shadow:0 2px 6px rgba(15,23,42,.09); cursor:pointer; text-align:left; }
+        .machotes-shell .templates-thumbnail:focus-visible { outline:3px solid rgba(11,94,215,.22); outline-offset:2px; }
+        .machotes-shell .templates-thumbnail-text { display:block; overflow:hidden; height:106px; white-space:pre-line; color:#64748B; font-family:Georgia,serif; font-size:6px; line-height:8px; }
+        .machotes-shell .templates-thumbnail-lines { display:flex; flex-direction:column; gap:7px; padding-top:8px; }
+        .machotes-shell .templates-thumbnail-lines span { display:block; height:4px; border-radius:99px; background:#CBD5E1; }
+        .machotes-shell .templates-thumbnail-lines span:nth-child(2) { width:88%; background:#E2E8F0; }
+        .machotes-shell .templates-thumbnail-lines span:nth-child(3) { width:72%; background:#E2E8F0; }
+        .machotes-shell .templates-thumbnail-lines span:nth-child(4) { width:94%; background:#E2E8F0; }
+        .machotes-shell .templates-thumbnail-lines span:nth-child(5) { width:61%; background:#F1F5F9; }
+        .machotes-shell .templates-thumbnail-caption { color:#0B2545; font-size:10px; font-weight:800; text-align:center; }
+        .machotes-shell .templates-row-main { min-width:0; align-self:stretch; display:flex; flex-direction:column; justify-content:center; }
+        .machotes-shell .templates-row-topline { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+        .machotes-shell .templates-matter-tag { display:inline-flex; align-items:center; min-height:24px; padding:3px 10px; border:1px solid currentColor; border-radius:999px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.02em; }
+        .machotes-shell .templates-row-format { color:#64748B; font-size:12px; font-weight:700; }
+        .machotes-shell .templates-row-main h3 { margin:0; color:#0B2545; font-size:18px; line-height:1.22; font-weight:850; cursor:pointer; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        .machotes-shell .templates-row-main h3:hover { color:#0B5ED7; }
+        .machotes-shell .templates-row-main > p { margin:6px 0 0; color:#64748B; font-size:13px; line-height:1.42; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        .machotes-shell .templates-row-meta { display:flex; align-items:center; flex-wrap:wrap; gap:16px; margin-top:12px; color:#64748B; font-size:12px; font-weight:600; }
+        .machotes-shell .templates-row-actions { min-width:0; min-height:126px; display:flex; flex-direction:column; justify-content:space-between; padding-left:18px; border-left:1px solid #E3E8EF; }
+        .machotes-shell .templates-row-summary { margin:0; color:#64748B; font-size:13px; line-height:1.45; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; }
+        .machotes-shell .templates-action-buttons { display:grid; grid-template-columns:minmax(0,1fr) 52px 52px; gap:10px; align-items:center; }
+        .machotes-shell .templates-use-button { height:44px; border:1px solid #0B2545; border-radius:8px; background:#0B3567; color:#fff; font-size:14px; font-weight:850; }
+        .machotes-shell .templates-use-button:hover { background:#092b54; }
+        .machotes-shell .templates-icon-button { width:52px; height:44px; border:1px solid #D6DFEA; border-radius:8px; background:#fff; color:#0B2545; font-size:20px; font-weight:700; }
+        .machotes-shell .templates-icon-button:hover { background:#F8FAFD; border-color:#9CB2CC; }
+        .machotes-shell .templates-delete-button { color:#D4473E; }
+        .machotes-shell .templates-delete-button:hover { background:#FFF4F3; border-color:#F2B6B0; }
+        .machotes-shell .templates-empty-state { margin-top:16px; padding:42px 20px; border:1px dashed #C9D4E1; border-radius:10px; background:#FAFCFE; text-align:center; }
+        .machotes-shell .templates-empty-icon { color:#0B5ED7; font-size:32px; }
+        .machotes-shell .templates-empty-state h3 { margin:10px 0 5px; color:#0B2545; font-size:16px; font-weight:800; }
+        .machotes-shell .templates-empty-state p { margin:0 auto 14px; max-width:420px; color:#64748B; font-size:13px; }
+        .machotes-shell .templates-reset-button { padding:9px 14px; border:1px solid #D6DFEA; border-radius:8px; background:#fff; color:#0B2545; font-size:12px; font-weight:800; }
+        .machotes-shell .templates-reset-button:hover { background:#F8FAFD; }
+        .machotes-shell .machotes-side { position:relative; transition:width .2s ease, min-width .2s ease, padding .2s ease, box-shadow .2s ease; }
+        .machotes-shell .machotes-side.is-open { width:232px; min-width:232px; padding:20px 12px; }
+        .machotes-shell .machotes-side.is-collapsed { width:64px; min-width:64px; padding:16px 8px; }
+        .machotes-shell .machotes-side.is-collapsed .machotes-side-brand, .machotes-shell .machotes-side.is-collapsed .machotes-side-footer { display:none; }
+        .machotes-shell .machotes-side.is-collapsed .machotes-side-btn { justify-content:center; padding:0; }
+        .machotes-shell .machotes-side.is-collapsed .machotes-side-btn span:last-child { display:none; }
+        .machotes-shell .machotes-side-toggle { width:100%; min-height:40px; display:flex; align-items:center; justify-content:center; gap:10px; border:1px solid rgba(214,184,135,.32); border-radius:10px; background:rgba(255,255,255,.05); color:#fff; font-size:22px; line-height:1; cursor:pointer; }
+        .machotes-shell .machotes-side-toggle:hover { background:rgba(255,255,255,.11); }
+        .machotes-shell .machotes-side.is-open .machotes-side-toggle { width:40px; margin-left:auto; margin-bottom:14px; }
+        .machotes-shell .machotes-side.is-open .machotes-side-toggle-label { display:none; }
+        .machotes-shell .machotes-side.is-collapsed .machotes-side-toggle-label { display:none; }
+        .machotes-shell .machotes-side-footer { margin-top:auto; }
+        @media (max-width: 1100px) {
+          .machotes-shell .templates-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .machotes-shell .templates-profile-slot { grid-column:1 / -1; }
+          .machotes-shell .templates-controls { grid-template-columns:minmax(0,1fr) minmax(190px,.45fr); }
+          .machotes-shell .templates-create-button { grid-column:1 / -1; justify-self:start; }
+          .machotes-shell .templates-row-card { grid-template-columns:118px minmax(0,1fr); }
+          .machotes-shell .templates-thumbnail { width:108px; height:124px; }
+          .machotes-shell .templates-row-actions { grid-column:2; min-height:0; padding:12px 0 0; border-left:0; border-top:1px solid #E3E8EF; }
+          .machotes-shell .templates-row-summary { display:none; }
+        }
+        @media (max-width: 700px) {
+          .machotes-shell .templates-hero { flex-direction:column; }
+          .machotes-shell .templates-hero-note { padding-top:0; }
+          .machotes-shell .templates-hero h1 { font-size:24px; }
+          .machotes-shell .templates-hero p { font-size:13px; }
+          .machotes-shell .templates-metrics, .machotes-shell .templates-controls { grid-template-columns:1fr; }
+          .machotes-shell .templates-profile-slot, .machotes-shell .templates-create-button { grid-column:auto; width:100%; }
+          .machotes-shell .templates-row-card { grid-template-columns:1fr; }
+          .machotes-shell .templates-thumbnail { width:100%; height:112px; }
+          .machotes-shell .templates-row-actions { grid-column:auto; }
+          .machotes-shell .templates-action-buttons { grid-template-columns:minmax(0,1fr) 48px 48px; }
+          .machotes-shell .templates-icon-button { width:48px; }
+        }
       `}</style>
       <div className="machotes-shell-body flex-1 flex min-h-0 min-w-0 overflow-hidden">
-        <aside className="machotes-side shrink-0">
+        <aside className={`machotes-side shrink-0 ${isSidebarOpen ? 'is-open' : 'is-collapsed'}`}>
+          <button
+            type="button"
+            className="machotes-side-toggle"
+            onClick={() => setIsSidebarOpen((open) => !open)}
+            aria-label={isSidebarOpen ? 'Cerrar menú de navegación' : 'Abrir menú de navegación'}
+            aria-expanded={isSidebarOpen}
+          >
+            <span aria-hidden="true">{isSidebarOpen ? '×' : '☰'}</span>
+            <span className="machotes-side-toggle-label">Menú</span>
+          </button>
           <div className="machotes-side-brand"><div className="machotes-side-mark" aria-hidden="true" /><span>Radar Jurídico</span></div>
           <nav className="machotes-side-nav" aria-label="Módulos de Machotes">
             <button className={`machotes-side-btn ${activeNavTab === 'universal' ? 'is-active' : ''}`} onClick={() => handleSwitchMode('universal')}><span>⚙</span><span>Motor Jurídico</span></button>
@@ -2126,6 +2295,7 @@ export default function MachotesPage() {
             <button className={`machotes-side-btn ${activeNavTab === 'my-templates' ? 'is-active' : ''}`} onClick={() => handleSwitchMode('my-templates')}><span>□</span><span>Mis Plantillas</span></button>
           </nav>
           <div
+            className="machotes-side-footer"
             style={{
               marginTop: 'auto',
               paddingTop: 16,
@@ -2187,7 +2357,7 @@ export default function MachotesPage() {
         {activeNavTab === 'my-templates' ? (
           /* TAB 4: MIS PLANTILLAS */
           <div className="w-full min-h-0 overflow-y-auto font-sans">
-            <div className="w-full max-w-[1200px] mx-auto px-5 md:px-6 py-5 md:py-6">
+            <div className="templates-workspace w-full mx-auto px-5 md:px-7 py-5 md:py-6">
               <TemplateLibraryManager
                 templates={customTemplates}
                 onUseTemplate={(tpl) => handleUseTemplate(tpl)}
@@ -2205,12 +2375,13 @@ export default function MachotesPage() {
           </div>
         ) : activeNavTab === 'responses_resources' ? (
           /* TAB 3: CONTESTACIONES Y RECURSOS (PANEL DE COTEJO DOCUMENTAL 1:1) */
-          <div className="flex w-full min-h-0 min-w-0 overflow-hidden">
+          <div className="min-h-screen min-w-0 w-full overflow-x-hidden overflow-y-auto bg-[#F5F7FA]">
             <CaseDocumentsReader
               documents={caseDocuments}
               sourceDocs={uploadedSourceDocs}
               customTemplates={customTemplates}
               selectedDocId={selectedCaseDoc?.id}
+              caseFicha={selectedFicha}
               onSelectDocument={(doc) => setSelectedCaseDoc(doc)}
               onUploadNewDocument={() => fileInputHiddenRef.current?.click()}
                onGenerateResponse={(request) => {

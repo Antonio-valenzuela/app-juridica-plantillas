@@ -254,6 +254,11 @@ export interface IssueContextPack {
 export function selectIssueDraftContract(
   pack: Pick<IssueContextPack, 'contentRole' | 'legalIssue' | 'facts' | 'clientPosition'>,
 ): IssueDraftContract | undefined {
+  if (pack.contentRole === 'EVIDENCE'
+    && (pack.legalIssue.issueType === 'EVIDENCE_RELEVANCE' || pack.legalIssue.issueType === 'EVIDENCE_SUFFICIENCY')) {
+    return 'DESCRIPTIVE';
+  }
+
   if (pack.contentRole === 'FACT_RESPONSE' && pack.legalIssue.issueType === 'FACT_DISPUTE') {
     if (pack.facts.length > 0 && pack.facts.every((fact) => fact.assertionStatus === 'ESTABLISHED_FACT')) {
       return 'DESCRIPTIVE';
@@ -398,13 +403,29 @@ function requireEntity<T extends { id: string }>(map: Map<string, T>, id: string
   return entity;
 }
 
-function projectCoverage(coverageMatrix: CoverageMatrix, issue: LegalIssueItem, task: GenerationTask): DocumentCoverageItem[] {
+function projectCoverage(
+  coverageMatrix: CoverageMatrix,
+  issue: LegalIssueItem,
+  task: GenerationTask,
+  rich: NonNullable<CaseAnalysis['richCaseAnalysis']>,
+): DocumentCoverageItem[] {
   const requestedIds = task.coverageItemIds && task.coverageItemIds.length > 0
     ? task.coverageItemIds
     : issue.coverageItemIds;
-  if (requestedIds.some((id) => !issue.coverageItemIds.includes(id))) {
-    throw new IssueContextScopeError('COVERAGE_OUT_OF_SCOPE', requestedIds.find((id) => !issue.coverageItemIds.includes(id)));
-  }
+  const offers = new Map(rich.evidenceOffers.map((offer) => [offer.id, offer]));
+  const allowedEvidenceOffer = (item: DocumentCoverageItem) => {
+    if (item.category !== 'EVIDENCE_OFFER') return false;
+    const mentionIds = [...new Set(item.evidenceMentionIds || [])];
+    if (mentionIds.length !== 1 || !issue.evidenceMentionIds.includes(mentionIds[0])) return false;
+    const offerIds = [...new Set(item.evidenceOfferIds || [])];
+    return offerIds.length > 0 && offerIds.every((id) => offers.get(id)?.evidenceMentionId === mentionIds[0]);
+  };
+  const outOfScopeId = requestedIds.find((id) => {
+    if (issue.coverageItemIds.includes(id)) return false;
+    const item = coverageMatrix.items.find((candidate) => candidate.id === id);
+    return !item || !allowedEvidenceOffer(item);
+  });
+  if (outOfScopeId) throw new IssueContextScopeError('COVERAGE_OUT_OF_SCOPE', outOfScopeId);
   return requestedIds.map((id) => {
     const item = coverageMatrix.items.find((candidate) => candidate.id === id);
     if (!item) throw new IssueContextScopeError('MISSING_COVERAGE', id);
@@ -439,10 +460,14 @@ export function buildIssueContextPack(
   const selectedClaims = issue.claimIds.map((id) => requireEntity(claims, id, 'CLAIM'));
   const selectedFacts = issue.factIds.map((id) => requireEntity(facts, id, 'FACT'));
   const selectedMentions = issue.evidenceMentionIds.map((id) => requireEntity(evidenceMentions, id, 'EVIDENCE_MENTION'));
-  const selectedOffers = issue.evidenceOfferIds.map((id) => requireEntity(evidenceOffers, id, 'EVIDENCE_OFFER'));
+  const taskLinkedOfferIds = (task.evidenceIds || [])
+    .filter((id) => evidenceOffers.has(id))
+    .filter((id) => issue.evidenceMentionIds.includes(evidenceOffers.get(id)!.evidenceMentionId));
+  const selectedOffers = [...new Set([...issue.evidenceOfferIds, ...taskLinkedOfferIds])]
+    .map((id) => requireEntity(evidenceOffers, id, 'EVIDENCE_OFFER'));
   const selectedArguments = issue.argumentIds.map((id) => requireEntity(argumentsById, id, 'SOURCE_ARGUMENT'));
   const selectedAuthorities = issue.authorityMentionIds.map((id) => requireEntity(authorities, id, 'AUTHORITY'));
-  const selectedCoverage = projectCoverage(coverageMatrix, issue, task);
+  const selectedCoverage = projectCoverage(coverageMatrix, issue, task, rich);
   const section = doc.sections.find((candidate) => candidate.id === task.sectionId);
   if (!section) throw new IssueContextScopeError('SECTION_NOT_RESOLVED', task.sectionId);
   const contentRole = getSectionContentRole(section, coverageMatrix);
@@ -509,6 +534,8 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
     hasLinkedLegalSupport: pack.authorities.length > 0
       || pack.sourceArguments.length > 0
       || (pack.verifiedResearch?.authorities.length || 0) > 0,
+    hasLinkedAuthorities: pack.authorities.length > 0
+      || (pack.verifiedResearch?.authorities.length || 0) > 0,
   });
   const promptVersion = ISSUE_PROMPT_VERSIONS[pack.legalIssue.issueType];
   const outputContract = draftContract === 'DESCRIPTIVE'
@@ -532,7 +559,9 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
       fieldRequirements.legalDevelopment.required
         ? 'legalDevelopment es obligatorio y no vacío porque el contexto contiene apoyo jurídico vinculado.'
         : 'legalDevelopment es NOT_APPLICABLE en este contexto; puede omitirse y el sistema lo normaliza a [].',
-      'authorityMentionIds y unresolvedRequirements deben existir como arrays; pueden ser [].',
+      fieldRequirements.authorityMentionIds.required
+        ? 'authorityMentionIds y unresolvedRequirements deben existir como arrays; pueden ser [].'
+        : 'authorityMentionIds es NOT_APPLICABLE porque no hay autoridades enlazadas; puede omitirse y el sistema lo normaliza a []. unresolvedRequirements debe existir como array; puede ser [].',
       'No devuelvas thesis, counterPosition, application ni conclusion en una tarea DESCRIPTIVE.',
       'No devuelvas legalIssueId, coverageItemIds, issueType ni generationMetadata; el sistema los materializa.',
     ].join('\n')
@@ -556,22 +585,21 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
     ].join('\n');
   const evidenceDirective = pack.legalIssue.issueType === 'EVIDENCE_RELEVANCE'
     ? [
-      'EVIDENCE TASK CONTRACT: esta task trata una EvidenceMention, no redacta un agravio completo.',
-      'thesis = pertinencia probatoria limitada a la EvidenceMention vinculada.',
-      'evidentiaryDevelopment = descripción, propósito y estado de la evidencia únicamente según el contexto.',
-      'application = relación explícita con la cuestión y los hechos vinculados, sin afirmar que la evidencia prueba más de lo que la fuente dice.',
-      'conclusion = conclusión limitada al tratamiento de la evidencia y sus límites.',
-      'No inventes una EvidenceOffer.',
-      'No conviertas SOURCE_MENTIONED en prueba ofrecida.',
+      'EVIDENCE TASK CONTRACT: esta task trata una EvidenceMention y usa el contrato DESCRIPTIVE; no redacta un agravio completo.',
+      'factualDevelopment = descripción concreta de la EvidenceMention y de los hechos vinculados, únicamente según el contexto.',
+      'evidentiaryDevelopment = pertinencia, propósito y límites de la evidencia expresamente vinculada, sin afirmar más de lo que la fuente dice.',
+      'No devuelvas thesis, application ni conclusion para esta task.',
+      'No inventes una EvidenceOffer. No conviertas SOURCE_MENTIONED en prueba ofrecida.',
+      'No incluyas confianza, método de extracción, OCR, IDs, hashes, estados internos ni nombres de campos del sistema en el texto.',
     ].join('\n')
     : pack.legalIssue.issueType === 'EVIDENCE_SUFFICIENCY'
       ? [
-        'EVIDENCE TASK CONTRACT: esta task trata únicamente la suficiencia de una EvidenceOffer explícita.',
-        'thesis = suficiencia limitada a la oferta de prueba vinculada.',
-        'evidentiaryDevelopment = contenido y estado de la oferta según el contexto.',
-        'application = relación explícita con la cuestión y sus elementos vinculados.',
-        'conclusion = conclusión limitada a la suficiencia observada y sus límites.',
+        'EVIDENCE TASK CONTRACT: esta task trata únicamente la suficiencia de una EvidenceOffer explícita y usa el contrato DESCRIPTIVE.',
+        'factualDevelopment = contenido concreto de la oferta vinculada y hechos relacionados, únicamente según el contexto.',
+        'evidentiaryDevelopment = suficiencia observada y sus límites, sin crear una oferta adicional.',
+        'No devuelvas thesis, application ni conclusion para esta task.',
         'No inventes una EvidenceOffer adicional ni conviertas una EvidenceMention en oferta.',
+        'No incluyas confianza, método de extracción, OCR, IDs, hashes, estados internos ni nombres de campos del sistema en el texto.',
       ].join('\n')
       : '';
   const strategy = {
@@ -758,6 +786,73 @@ function normalizeBlockText(text: string): string {
   return text.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
+function evidenceConsolidationMetadataKey(block: import('./types').ContentBlock): string {
+  // Exact-text consolidation is safe only when all non-link provenance and
+  // evaluation metadata are equivalent. Otherwise preserve both blocks so a
+  // duplicate-looking sentence cannot erase a distinct review/evidence trail.
+  const evaluation = block.semanticEvaluation;
+  const metadata = {
+    trust: block.trust,
+    trustLevel: block.trustLevel,
+    style: block.style,
+    sources: block.sources,
+    sourceRef: block.sourceRef,
+    provenance: block.provenance,
+    isManuallyEdited: block.isManuallyEdited,
+    variables: block.variables,
+    createdAt: block.createdAt,
+    generationRequirement: block.generationRequirement,
+    generationStatus: block.generationStatus,
+    // Evaluation identity (block/task/section and linked Coverage IDs) is
+    // intentionally excluded: those links are unioned below and retained in
+    // semanticEvaluations. Quality verdicts, scores, deficiencies and hard
+    // fails remain part of the key, so materially different evaluations do
+    // not merge.
+    semanticEvaluation: evaluation
+      ? {
+          factualCoverage: evaluation.factualCoverage,
+          legalSupport: evaluation.legalSupport,
+          evidenceLinkage: evaluation.evidenceLinkage,
+          issueResponsiveness: evaluation.issueResponsiveness,
+          argumentDepth: evaluation.argumentDepth,
+          specificity: evaluation.specificity,
+          completeness: evaluation.completeness,
+          repetitionPenalty: evaluation.repetitionPenalty,
+          unsupportedAssertionPenalty: evaluation.unsupportedAssertionPenalty,
+          overallScore: evaluation.overallScore,
+          verdict: evaluation.verdict,
+          revisionMode: evaluation.revisionMode,
+          deficiencies: evaluation.deficiencies,
+          hardFailReasons: evaluation.hardFailReasons,
+          caseDensityMetrics: evaluation.caseDensityMetrics
+            ? {
+                entityMentions: evaluation.caseDensityMetrics.entityMentions,
+                genericPhrasesCount: evaluation.caseDensityMetrics.genericPhrasesCount,
+              }
+            : undefined,
+        }
+      : undefined,
+    issueDraftValidationStatus: block.issueDraftValidationStatus,
+    authorityIds: block.authorityIds,
+    verifiedAuthorityIds: block.verifiedAuthorityIds,
+    researchHash: block.researchHash,
+    revisionOfBlockId: block.revisionOfBlockId,
+    revisionNumber: block.revisionNumber,
+    generatedBy: block.generatedBy,
+    provider: block.provider,
+    model: block.model,
+    generationId: block.generationId,
+    strategicCandidateId: block.strategicCandidateId,
+    decisionReasoningId: block.decisionReasoningId,
+    strategicArgumentPlanId: block.strategicArgumentPlanId,
+    fallbackStatus: block.fallbackStatus,
+    fallbackReason: block.fallbackReason,
+    semanticScore: block.semanticScore,
+    genericityClass: block.genericityClass,
+  };
+  return JSON.stringify(metadata);
+}
+
 export function assembleIssueDraftBlocks(
   section: DocumentNode,
   outcomes: IssueGenerationOutcome[],
@@ -774,11 +869,52 @@ export function assembleIssueDraftBlocks(
       return issue !== 0 ? issue : left.taskId.localeCompare(right.taskId);
     });
   const seenByIssueAndText = new Set<string>();
+  const evidenceByState = new Map<string, import('./types').ContentBlock[]>();
   const blocks: import('./types').ContentBlock[] = [];
   const warnings: string[] = [];
   for (const outcome of ordered) {
     const block = outcome.block!;
-    const key = `${(block.legalIssueIds || [outcome.legalIssueId]).join(',')}|${normalizeBlockText(block.text)}`;
+    const normalizedText = normalizeBlockText(block.text);
+    if (block.generationTaskType === 'EVIDENCE') {
+      // Never let an accepted block absorb a review-required or fallback
+      // block. The consolidation key includes every finality/status marker
+      // consumed by readiness and export gates.
+      const evidenceStateKey = [
+        block.issueDraftValidationStatus || 'UNKNOWN_VALIDATION',
+        block.generationStatus || 'UNKNOWN_GENERATION',
+        block.generatedBy || 'UNKNOWN_ORIGIN',
+        block.fallbackStatus || '',
+      ].join('|');
+      const stateSiblings = evidenceByState.get(evidenceStateKey) || [];
+      const blockMetadataKey = evidenceConsolidationMetadataKey(block);
+      const existingEvidence = stateSiblings.find((candidate) => (
+        normalizeBlockText(candidate.text) === normalizedText
+        && evidenceConsolidationMetadataKey(candidate) === blockMetadataKey
+      ));
+      if (existingEvidence) {
+        existingEvidence.legalIssueIds = [...new Set([...(existingEvidence.legalIssueIds || []), ...(block.legalIssueIds || [outcome.legalIssueId])])];
+        existingEvidence.coverageItemIds = [...new Set([...(existingEvidence.coverageItemIds || []), ...(block.coverageItemIds || [])])];
+        existingEvidence.factIds = [...new Set([...(existingEvidence.factIds || []), ...(block.factIds || [])])];
+        existingEvidence.evidenceIds = [...new Set([...(existingEvidence.evidenceIds || []), ...(block.evidenceIds || [])])];
+        existingEvidence.generationTaskIds = [...new Set([...(existingEvidence.generationTaskIds || [existingEvidence.generationTaskId].filter(Boolean) as string[]), ...(block.generationTaskIds || [block.generationTaskId].filter(Boolean) as string[])])];
+        const evaluations = [
+          ...(existingEvidence.semanticEvaluations || (existingEvidence.semanticEvaluation ? [existingEvidence.semanticEvaluation] : [])),
+          ...(block.semanticEvaluations || (block.semanticEvaluation ? [block.semanticEvaluation] : [])),
+        ];
+        existingEvidence.semanticEvaluations = evaluations.filter((candidate, index, all) => (
+          all.findIndex((item) => JSON.stringify(item) === JSON.stringify(candidate)) === index
+        ));
+        existingEvidence.issueDraftResultHashes = [...new Set([
+          ...(existingEvidence.issueDraftResultHashes || [existingEvidence.issueDraftResultHash].filter(Boolean) as string[]),
+          ...(block.issueDraftResultHashes || [block.issueDraftResultHash].filter(Boolean) as string[]),
+        ])];
+        warnings.push(`EVIDENCE_DUPLICATE_CONSOLIDATED:${outcome.legalIssueId}`);
+        continue;
+      }
+      stateSiblings.push(block);
+      evidenceByState.set(evidenceStateKey, stateSiblings);
+    }
+    const key = `${(block.legalIssueIds || [outcome.legalIssueId]).join(',')}|${normalizedText}`;
     if (seenByIssueAndText.has(key)) {
       warnings.push(`DUPLICATE_ISSUE_BLOCK:${outcome.legalIssueId}`);
       continue;
@@ -888,6 +1024,8 @@ function fallbackIssueOutcome(
     coverageItemIds: [...(task.coverageItemIds || [])],
     factIds: [...(task.factIds || [])],
     evidenceIds: [...(task.evidenceIds || [])],
+    generationTaskType: task.taskType || task.type,
+    generationTaskIds: [task.id],
     issueDraftValidationStatus: 'INVALID_FATAL' as const,
     fallbackStatus: 'LOCAL_PLACEHOLDER',
     fallbackReason: response.fallbackReason || 'LOCAL_PROVIDER_OUTPUT',
@@ -1196,6 +1334,42 @@ export async function executeIssueScopedGeneration(
     }
 
     const evaluation = evaluateIssueDraftResult(validation.result, task, doc, pack);
+    if (evaluation.verdict === 'FAIL') {
+      recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
+      return {
+        legalIssueId: eligibility.legalIssueId!,
+        taskId: task.id,
+        status: 'FAILED',
+        failureReason: 'SEMANTIC',
+        attempts: attempts.map((item, index) => index === attempts.length - 1 ? { ...item, status: 'SEMANTIC_FAILED' } : item),
+        result: validation.result,
+        validation,
+        evaluation,
+      };
+    }
+
+    // Quality is evaluated before non-final legal status is materialized. A
+    // REVIEW_REQUIRED/VALID_NON_FINAL result may remain a provisional legal
+    // status, but it must never be used to admit semantically weak prose.
+    if (evaluation.verdict === 'WEAK' && attemptNumber <= MAX_SEMANTIC_RETRIES_PER_ISSUE) {
+      recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
+      const retryPrompt = buildTargetedIssueRetryPrompt(activePrompt, evaluation.deficiencies);
+      return runAttempt(2, retryPrompt, attempts.map((item) => ({ ...item, status: 'SEMANTIC_WEAK' })));
+    }
+    if (evaluation.verdict === 'WEAK') {
+      recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
+      return {
+        legalIssueId: eligibility.legalIssueId!,
+        taskId: task.id,
+        status: 'FAILED',
+        failureReason: 'INSUFFICIENT',
+        attempts: attempts.map((item, index) => index === attempts.length - 1 ? { ...item, status: 'SEMANTIC_WEAK' } : item),
+        result: validation.result,
+        validation,
+        evaluation,
+      };
+    }
+
     const effectiveNonFinal = validation.status === 'VALID_NON_FINAL'
       || eligibility.effectiveStatus === 'GENERATABLE_REQUIRES_REVIEW';
     const effectiveValidationStatus: IssueDraftValidationStatus = effectiveNonFinal ? 'VALID_NON_FINAL' : validation.status;
@@ -1220,38 +1394,6 @@ export async function executeIssueScopedGeneration(
         },
         evaluation,
         block,
-      };
-    }
-
-    if (evaluation.verdict === 'FAIL') {
-      recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
-      return {
-        legalIssueId: eligibility.legalIssueId!,
-        taskId: task.id,
-        status: 'FAILED',
-        failureReason: 'SEMANTIC',
-        attempts: attempts.map((item, index) => index === attempts.length - 1 ? { ...item, status: 'SEMANTIC_FAILED' } : item),
-        result: validation.result,
-        validation,
-        evaluation,
-      };
-    }
-    if (evaluation.verdict === 'WEAK' && attemptNumber <= MAX_SEMANTIC_RETRIES_PER_ISSUE) {
-      recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
-      const retryPrompt = buildTargetedIssueRetryPrompt(activePrompt, evaluation.deficiencies);
-      return runAttempt(2, retryPrompt, attempts.map((item) => ({ ...item, status: 'SEMANTIC_WEAK' })));
-    }
-    if (evaluation.verdict === 'WEAK') {
-      recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
-      return {
-        legalIssueId: eligibility.legalIssueId!,
-        taskId: task.id,
-        status: 'FAILED',
-        failureReason: 'INSUFFICIENT',
-        attempts: attempts.map((item, index) => index === attempts.length - 1 ? { ...item, status: 'SEMANTIC_WEAK' } : item),
-        result: validation.result,
-        validation,
-        evaluation,
       };
     }
 

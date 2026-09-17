@@ -24,6 +24,7 @@ export type IssueDraftContractRequirements = Record<IssueDraftModelArrayField, I
 export interface IssueDraftContractContext {
   hasLinkedEvidence?: boolean;
   hasLinkedLegalSupport?: boolean;
+  hasLinkedAuthorities?: boolean;
 }
 
 const requiredField = (nonEmpty = false): IssueDraftFieldRequirement => ({ required: true, nonEmpty });
@@ -46,12 +47,13 @@ export function getIssueDraftContractRequirements(
 
   const hasLinkedEvidence = context.hasLinkedEvidence === true;
   const hasLinkedLegalSupport = context.hasLinkedLegalSupport === true;
+  const hasLinkedAuthorities = context.hasLinkedAuthorities ?? hasLinkedLegalSupport;
   return {
     factualDevelopment: requiredField(true),
     evidentiaryDevelopment: hasLinkedEvidence ? requiredField(true) : optionalField(),
     legalDevelopment: hasLinkedLegalSupport ? requiredField(true) : optionalField(),
     sourceEntityIds: requiredField(true),
-    authorityMentionIds: requiredField(),
+    authorityMentionIds: hasLinkedAuthorities ? requiredField() : optionalField(),
     unresolvedRequirements: requiredField(),
   };
 }
@@ -306,7 +308,9 @@ export function validateIssueDraftModelOutput(
     ...(asStringArray(raw.evidentiaryDevelopment) ? { evidentiaryDevelopment: [...raw.evidentiaryDevelopment] } : {}),
     ...(asStringArray(raw.legalDevelopment) ? { legalDevelopment: [...raw.legalDevelopment] } : {}),
     sourceEntityIds: [...(raw.sourceEntityIds as string[])],
-    authorityMentionIds: [...(raw.authorityMentionIds as string[])],
+    authorityMentionIds: asStringArray(raw.authorityMentionIds)
+      ? [...raw.authorityMentionIds]
+      : [],
     verifiedAuthorityIds: asStringArray(raw.verifiedAuthorityIds)
       ? [...raw.verifiedAuthorityIds]
       : undefined,
@@ -592,7 +596,9 @@ export function validateIssueDraftResult(
     conclusion: draftContract === 'DESCRIPTIVE' ? '' : raw.conclusion as string,
     draftContract,
     sourceEntityIds: [...(raw.sourceEntityIds as string[])],
-    authorityMentionIds: [...(raw.authorityMentionIds as string[])],
+    authorityMentionIds: asStringArray(raw.authorityMentionIds)
+      ? [...raw.authorityMentionIds]
+      : [],
     unresolvedRequirements: [...unresolvedRequirements],
     generationMetadata: {
       promptVersion: (metadata as Record<string, unknown>).promptVersion as string,
@@ -616,7 +622,15 @@ export function validateIssueDraftResult(
   return { status: 'VALID_ACCEPTED', result, errors, warnings };
 }
 
-function renderIssueComponents(result: IssueDraftResult): string {
+function renderIssueComponents(result: IssueDraftResult, task: GenerationTask): string {
+  if (task.taskType === 'EVIDENCE' || task.type === 'EVIDENCE') {
+    return [
+      ...result.factualDevelopment,
+      ...result.evidentiaryDevelopment,
+      ...result.legalDevelopment,
+    ].filter((section) => section.trim().length > 0).join('\n\n');
+  }
+
   if (result.draftContract === 'DESCRIPTIVE') {
     return [
       `DESARROLLO FÁCTICO:\n${result.factualDevelopment.join('\n')}`,
@@ -647,8 +661,10 @@ export function draftBlockFromIssueResult(
   return {
     id: `blk-${task.id}`,
     layer: 'GENERATED_ARGUMENT',
-    text: renderIssueComponents(result),
+    text: renderIssueComponents(result, task),
     generationTaskId: task.id,
+    generationTaskType: task.taskType || task.type,
+    generationTaskIds: [task.id],
     legalIssueIds: [result.legalIssueId],
     coverageItemIds: [...result.coverageItemIds],
     factIds: [...(task.factIds || [])],
@@ -658,7 +674,9 @@ export function draftBlockFromIssueResult(
     researchHash: result.researchHash,
     issueDraftValidationStatus: validationStatus,
     issueDraftResultHash: resultHash,
+    issueDraftResultHashes: [resultHash],
     semanticEvaluation: evaluation,
+    semanticEvaluations: [evaluation],
     generationStatus: nonFinal ? 'partial' : 'generated',
     generationRequirement: 'AI_REQUIRED',
     generatedBy: 'AI',

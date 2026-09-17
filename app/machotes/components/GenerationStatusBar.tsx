@@ -21,12 +21,12 @@ interface GenerationStatusBarProps {
   cancelling?: boolean;
 }
 
-/**
- * Barra de progreso basada EXCLUSIVAMENTE en el estado real del Job
- * (/api/legal-engine/generate/status vía activeGenJob). Sin animaciones falsas:
- * si no hay total aún, se muestra la etapa sin porcentaje inventado.
- */
-export function GenerationStatusBar({ job, title = 'Generando escrito jurídico…', onCancel, cancelling }: GenerationStatusBarProps) {
+export function GenerationStatusBar({
+  job,
+  title = 'Generando escrito jurídico…',
+  onCancel,
+  cancelling,
+}: GenerationStatusBarProps) {
   if (!job) return null;
 
   const isRunning = job.status === 'processing';
@@ -36,7 +36,6 @@ export function GenerationStatusBar({ job, title = 'Generando escrito jurídico�
 
   if (!isRunning && !isCompleted && !isFailed && !isCancelled) return null;
 
-  // Si /status no trae percentage, calcularlo de completed/total. Nunca inventar.
   const pct =
     typeof job.percentage === 'number'
       ? Math.max(0, Math.min(100, Math.round(job.percentage)))
@@ -48,78 +47,99 @@ export function GenerationStatusBar({ job, title = 'Generando escrito jurídico�
   const usingFallback = isRunning && job.aiProvider === 'fallback';
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-3.5 space-y-2">
-      {/* Título / estados */}
-      {isRunning && (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-extrabold text-[#0B2545] flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#B58A5A] animate-pulse" />
-            {title}
-          </p>
-          {hasTotal && <span className="text-[11px] font-bold text-[#8F6745]">{pct}%</span>}
-        </div>
-      )}
-      {isCompleted && (
-        job.documentReadiness && job.documentReadiness !== 'READY' ? (
-          <p className="text-xs font-extrabold text-amber-700">⚠️ {job.stage || `Generación completada · ${job.documentReadiness}`}</p>
-        ) : (
-          <p className="text-xs font-extrabold text-emerald-700">✓ Documento generado{hasTotal ? ` · ${job.completed}/${job.total}` : ''}</p>
-        )
-      )}
-      {isFailed && (
-        <div>
-          <p className="text-xs font-extrabold text-red-700">No se pudo completar la generación.</p>
-          {job.error && <p className="text-[11px] text-red-600 mt-0.5 break-words">{job.error}</p>}
-        </div>
-      )}
-      {isCancelled && (
-        <div>
-          <p className="text-xs font-extrabold text-amber-700">Generación cancelada.</p>
-          <p className="text-[11px] text-slate-500">Puedes iniciar una nueva generación.</p>
-        </div>
-      )}
+    <div className="rounded-xl bg-white px-4 py-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          {isRunning && (
+            <>
+              <p className="text-sm font-black text-slate-900">{title}</p>
+              <p className="text-xs text-slate-500">
+                {job.stage || 'Procesando el expediente…'}
+              </p>
+            </>
+          )}
 
-      {/* Barra: track #E7E5E0 · fill oro bronce · sin animación infinita */}
-      <div className="w-full h-2 rounded-full bg-[#E7E5E0] overflow-hidden">
+          {isCompleted && (
+            <>
+              <p className="text-sm font-black text-emerald-700">
+                Documento generado
+              </p>
+              <p className="text-xs text-slate-500">
+                {job.documentReadiness && job.documentReadiness !== 'READY'
+                  ? `Estado: ${job.documentReadiness}`
+                  : 'La generación concluyó correctamente.'}
+              </p>
+            </>
+          )}
+
+          {isFailed && (
+            <>
+              <p className="text-sm font-black text-red-700">
+                No se pudo completar la generación
+              </p>
+              <p className="text-xs text-red-600">{job.error || 'Error no especificado.'}</p>
+            </>
+          )}
+
+          {isCancelled && (
+            <>
+              <p className="text-sm font-black text-amber-700">
+                Generación cancelada
+              </p>
+              <p className="text-xs text-slate-500">
+                Puedes iniciar una nueva corrida cuando lo necesites.
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className="shrink-0 text-right">
+          <p className="text-lg font-black text-[#0B2545]">
+            {isFailed ? '0%' : isCompleted ? '100%' : `${pct}%`}
+          </p>
+          {hasTotal && (
+            <p className="text-xs font-semibold text-slate-400">
+              {job.completed}/{job.total}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
         <div
           className="h-full rounded-full transition-all duration-300"
           style={{
             width: `${isFailed ? 0 : isCompleted ? 100 : pct}%`,
-            background: 'linear-gradient(90deg,#B58A5A,#8F6745)',
+            background: 'linear-gradient(90deg,#0B2545 0%, #2457A6 60%, #5B8DEF 100%)',
           }}
         />
       </div>
 
-      {/* Contador real X/Y + sección actual + Cancelar */}
-      {isRunning && (
-        <>
-          <p className="text-[11px] font-semibold text-slate-600">
-            {hasTotal ? `${job.completed} / ${job.total}` : job.stage || 'Preparando documento…'}
-          </p>
+      <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
           {job.currentBlock && (
-            <p className="text-[11px] text-slate-500 truncate" title={job.currentBlock}>
-              {job.currentBlock}
+            <p className="truncate text-xs text-slate-500" title={job.currentBlock}>
+              Bloque actual: {job.currentBlock}
             </p>
           )}
+
           {usingFallback && (
-            <p className="text-[10px] text-slate-400 italic">
+            <p className="text-[11px] italic text-slate-400">
               Modo local seguro para esta sección
             </p>
           )}
-          {onCancel && (
-            <button
-              onClick={onCancel}
-              disabled={!!cancelling}
-              className="mt-2 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-800 text-[11px] font-bold transition"
-            >
-              {cancelling ? 'Cancelando…' : 'Cancelar generación'}
-            </button>
-          )}
-        </>
-      )}
-      {isCompleted && !hasTotal && job.stage && (
-        <p className="text-[11px] text-slate-500 truncate">{job.stage}</p>
-      )}
+        </div>
+
+        {onCancel && isRunning && (
+          <button
+            onClick={onCancel}
+            disabled={!!cancelling}
+            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 transition hover:bg-amber-100 disabled:opacity-50"
+          >
+            {cancelling ? 'Cancelando…' : 'Cancelar'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

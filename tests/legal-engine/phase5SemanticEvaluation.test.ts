@@ -291,12 +291,33 @@ Dicho medio de convicción acredita que la parte demandada incurrió en mora, po
   // 11. Afirmaciones no sustentadas / jurisprudencia fabricada
   it('11. Detección de afirmaciones no sustentadas / jurisprudencia fabricada', () => {
     const task = createMockTask({ scopedAuthorities: [] });
-    const caseAnalysis: CaseAnalysis = { authorities: [] } as any;
+    const caseAnalysis: CaseAnalysis = { authorities: [] } as CaseAnalysis;
 
     const fabricatedText = 'Como lo sostiene la jurisprudencia con Registro digital 2099999 de rubro: USURA EN PAGARÉS MERCANTILES. SU ANÁLISIS OFICIOSO.';
     const unsupportedRes = detectUnsupportedAssertions(fabricatedText, task, caseAnalysis);
     expect(unsupportedRes.penalty).toBe(1.0);
     expect(unsupportedRes.hardFailReasons.some((r) => r.includes('FABRICATED_AUTHORITY'))).toBe(true);
+  });
+
+  it('11a. El allowlist de autoridad usa todos los campos canónicos scoped y no authorities fuera de scope', () => {
+    const scopedTask = createMockTask({
+      authorityIds: ['authority-1'],
+      scopedAuthorities: [{
+        id: 'authority-1',
+        citationText: 'Registro Digital 12345',
+        identity: { canonicalCitation: 'Registro Digital 12345' },
+        proposition: { text: 'La autoridad resulta aplicable.' },
+      }],
+    });
+    const scopedResult = detectUnsupportedAssertions('Conforme al Registro Digital 12345.', scopedTask, { authorities: [] } as CaseAnalysis);
+    expect(scopedResult.hardFailReasons).not.toContain(expect.stringContaining('FABRICATED_AUTHORITY'));
+
+    const outOfScopeResult = detectUnsupportedAssertions(
+      'Conforme al Registro Digital 2099999.',
+      createMockTask({ authorityIds: [], scopedAuthorities: [] }),
+      { authorities: [{ citation: 'Registro Digital 2099999' }] } as CaseAnalysis,
+    );
+    expect(outOfScopeResult.hardFailReasons.some((reason) => reason.includes('FABRICATED_AUTHORITY'))).toBe(true);
   });
 
   // 12. Dependencias fácticas no resueltas

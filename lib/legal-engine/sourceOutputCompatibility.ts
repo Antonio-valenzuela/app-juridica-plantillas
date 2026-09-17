@@ -189,10 +189,19 @@ function sourceText(sourceDocuments: UploadedSourceDocument[]): string {
     .join('\n');
 }
 
+function classificationDocuments(sourceDocuments: UploadedSourceDocument[]): UploadedSourceDocument[] {
+  const nonReference = sourceDocuments.filter((source) => sourceRoleFor(source) !== 'REFERENCE');
+  if (nonReference.length === 0) return [];
+  const primary = nonReference.filter((source) => sourceRoleFor(source) === 'PRIMARY');
+  if (primary.length > 0) return primary;
+  const supporting = nonReference.filter((source) => sourceRoleFor(source) === 'SUPPORTING');
+  return supporting.length > 0 ? supporting : nonReference;
+}
+
 function matterLabel(value: string | undefined): string {
   const normalized = normalize(value);
   if (/mercantil/.test(normalized)) return 'MERCANTIL';
-  if (/laboral|trabajo/.test(normalized)) return 'LABORAL';
+  if (/^(?:materia\s+)?laboral$/.test(normalized)) return 'LABORAL';
   if (/administrativ/.test(normalized)) return 'ADMINISTRATIVA';
   if (/familiar/.test(normalized)) return 'FAMILIAR';
   if (/civil/.test(normalized)) return 'CIVIL';
@@ -200,18 +209,107 @@ function matterLabel(value: string | undefined): string {
   return value?.trim() ? value.trim().toUpperCase() : 'NO_IDENTIFICADA';
 }
 
+const LABOR_INDICATOR_PATTERNS: readonly RegExp[] = [
+  /\blaboral(?:es)?\b/,
+  /\btrabajador(?:a|es|as)?\b/,
+  /\bpatron(?:es)?\b/,
+  /\bdespid(?:o|io|ieron|e|en|ido|ida)\b/,
+  /\bsalari(?:o|os)\b/,
+  /\bprestacion(?:es)?\s+laboral(?:es)?\b/,
+  /\bmateria\s+laboral\b/,
+  /\brelacion\s+(?:laboral|de\s+trabajo)\b/,
+  /\bcontrato\s+(?:individual\s+)?de\s+trabajo\b/,
+  /\blaudo\b/,
+];
+
+function laborIndicatorScore(corpus: string): number {
+  return LABOR_INDICATOR_PATTERNS.filter((pattern) => pattern.test(corpus)).length;
+}
+
+function laborMatterForCorpus(corpus: string, layout: string): boolean {
+  const opening = layout.split('\n').slice(0, 20).join('\n').slice(0, 1200);
+  const explicitLaborHeading =
+    /\b(?:demanda|escrito\s+inicial)\b[^\n]{0,80}\blaboral(?:es)?\b/.test(opening)
+    || /\bmateria\s+laboral\b/.test(opening);
+  if (explicitLaborHeading) return true;
+  const explicitNonLaborHeading = /\b(?:civil|mercantil|familiar|administrativ)\b/.test(opening);
+  return !explicitNonLaborHeading && laborIndicatorScore(corpus) >= 2;
+}
+
+function normalizeWithLines(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*/g, '\n')
+    .trim();
+}
+
+function hasPrimaryDemandStructure(corpus: string, layout: string): boolean {
+  const opening = layout.split('\n').slice(0, 12).join('\n').slice(0, 600);
+  const demandHeading = /(?:^|\n)\s*(?:demanda|escrito\s+inicial)(?:\s+(?:ordinaria|extraordinaria|de|laboral|civil|mercantil|contenciosa))?\b/.test(opening);
+  if (!demandHeading) return false;
+  const initiation = /\b(?:vengo\s+a\s+(?:demandar|promover|ejercer)|promuevo\s+(?:demanda|juicio)|interpongo\s+(?:demanda|accion)|demando)\b/.test(corpus);
+  const pleadingStructure = /\b(?:hechos|puntos\s+petitorios|prestaciones|pretensiones)\b/.test(corpus);
+  const forum = /\b(?:juez|juzgado)\s+de\b/.test(corpus) || /\bh\.\s*tribunal\b/.test(corpus);
+  const substantiveMatter = laborIndicatorScore(corpus) >= 2 || /\b(?:civil|mercantil|familiar)\b/.test(opening);
+  return initiation || pleadingStructure || forum || substantiveMatter;
+}
+
 export function inferSourceOutputType(
   sourceDocuments: UploadedSourceDocument[],
   sourceMatter?: string,
 ): InferredSourceDocumentType {
-  const corpus = normalize(sourceText(sourceDocuments));
-  const explicitType = sourceDocuments
+  const classifiedDocuments = classificationDocuments(sourceDocuments);
+  const corpus = normalize(sourceText(classifiedDocuments));
+  const layout = normalizeWithLines(sourceText(classifiedDocuments));
+  const explicitType = classifiedDocuments
     .map((source) => source.classification?.sourceDocumentType || source.classification?.documentType)
     .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
 
   // Una clasificación explícita desconocida debe permanecer desconocida. No
   // se sustituye por una conjetura textual que pueda abrir otra ruta.
   if (explicitType) return normalizeSourceDocumentType(explicitType) || UNKNOWN_SOURCE_DOCUMENT_TYPE;
+  const labor = laborMatterForCorpus(corpus, layout) || matterLabel(sourceMatter) === 'LABORAL';
+  const mercantile = /mercantil|juicio\s+(?:ejecutivo|ordinario)\s+mercantil/.test(corpus);
+  const familiar = /familiar|alimentos|divorcio|custodia/.test(corpus) || matterLabel(sourceMatter) === 'FAMILIAR';
+  const civil = /\bcivil\b/.test(corpus) || matterLabel(sourceMatter) === 'CIVIL' || familiar;
+  const hasInitialWriting = /escrito\s+inicial/.test(corpus);
+
+  // La estructura primaria del escrito controla las menciones incidentales de
+  // sentencias, ejecutorias o amparos citados dentro de una demanda.
+  if (hasPrimaryDemandStructure(corpus, layout)) {
+    const opening = layout.split('\n').slice(0, 12).join('\n').slice(0, 600);
+    if (/\b(?:demanda|escrito\s+inicial)\b[^\n]{0,80}\bamparo\s+directo\b/.test(opening)
+      || /\bjuicio\s+de\s+amparo\s+directo\b/.test(opening)) {
+      return 'DEMANDA_AMPARO_DIRECTO';
+    }
+    if (/\b(?:demanda|escrito\s+inicial)\b[^\n]{0,80}\bamparo\b/.test(opening)) {
+      return 'DEMANDA_AMPARO';
+    }
+    if (hasInitialWriting && labor) return 'ESCRITO_INICIAL_LABORAL';
+    if (hasInitialWriting && mercantile) return 'ESCRITO_INICIAL_MERCANTIL';
+    if (hasInitialWriting && civil) return 'ESCRITO_INICIAL_CIVIL';
+    if (labor) return 'DEMANDA_LABORAL';
+    if (mercantile) return 'DEMANDA_MERCANTIL';
+    if (civil) return 'DEMANDA_CIVIL';
+    return 'DEMANDA';
+  }
+  // Una simple referencia a un número de amparo dentro de una réplica no
+  // convierte el escrito en una sentencia. La ruta de sentencia exige, además
+  // del encabezado, señales documentales propias de una resolución.
+  const hasAmparoDirectoHeading =
+    /\bamparo\s+directo\s*[:\-]\s*\d/.test(corpus) ||
+    /\bamparo\s+directo\s+n[uú]mero\b/.test(corpus) ||
+    /\bjuicio\s+de\s+amparo\s+directo\b/.test(corpus);
+  const hasAmparoResolutionMarkers = /\b(tribunal\s+colegiado|magistrado\s+ponente|secretar|visto|resultando|considerando|resolutiv)\b/.test(corpus);
+  if (
+    (hasAmparoDirectoHeading && hasAmparoResolutionMarkers) ||
+    (/\bamparo\s+directo\b/.test(corpus) && hasAmparoResolutionMarkers)
+  ) {
+    return 'SENTENCIA_AMPARO_DIRECTO';
+  }
   if (/\b(?:replica|réplica)\b/.test(corpus)) return 'REPLICA';
   if (/\bduplica\b/.test(corpus)) return 'DUPLICA';
   if (/contestacion\s+de\s+(?:la\s+)?demanda/.test(corpus)) return 'CONTESTACION_DEMANDA';
@@ -241,12 +339,7 @@ export function inferSourceOutputType(
   if (/pago\s+mercantil/.test(corpus)) return 'PAGO_MERCANTIL';
   if (/documento\s+mercantil\s+auxiliar/.test(corpus)) return 'DOCUMENTO_MERCANTIL_AUXILIAR';
 
-  const hasInitialWriting = /escrito\s+inicial/.test(corpus);
   const hasDemand = /\bdemanda\b/.test(corpus) || /\b(prestaciones|pretensiones|hechos)\b/.test(corpus);
-  const mercantile = /mercantil|juicio\s+(?:ejecutivo|ordinario)\s+mercantil/.test(corpus);
-  const labor = /laboral|trabajo|trabajador|patron|despido/.test(corpus) || matterLabel(sourceMatter) === 'LABORAL';
-  const familiar = /familiar|alimentos|divorcio|custodia/.test(corpus) || matterLabel(sourceMatter) === 'FAMILIAR';
-  const civil = /\bcivil\b/.test(corpus) || matterLabel(sourceMatter) === 'CIVIL' || familiar;
 
   if (hasInitialWriting && labor) return 'ESCRITO_INICIAL_LABORAL';
   if (hasInitialWriting && mercantile) return 'ESCRITO_INICIAL_MERCANTIL';
@@ -258,10 +351,10 @@ export function inferSourceOutputType(
   return UNKNOWN_SOURCE_DOCUMENT_TYPE;
 }
 
-function inferSourceMatter(sourceType: InferredSourceDocumentType, corpus: string, fallback?: string): string {
+function inferSourceMatter(sourceType: InferredSourceDocumentType, corpus: string, fallback?: string, layout = corpus): string {
   if (sourceType === UNKNOWN_SOURCE_DOCUMENT_TYPE) return matterLabel(fallback);
   if (sourceDocumentMatter(sourceType as SourceDocumentType) === 'MERCANTIL') return 'MERCANTIL';
-  if (/LABORAL/.test(sourceType) || /laboral|trabajo|trabajador|patron|despido/.test(corpus)) return 'LABORAL';
+  if (/LABORAL/.test(sourceType) || laborMatterForCorpus(corpus, layout)) return 'LABORAL';
   if (/ADMINISTRATIVA/.test(sourceType) || /administrativ/.test(corpus)) return 'ADMINISTRATIVA';
   if (/familiar|alimentos|divorcio|custodia|patria\s+potestad/.test(corpus) || matterLabel(fallback) === 'FAMILIAR') return 'FAMILIAR';
   if (/SENTENCIA_AMPARO|^SENTENCIA/.test(sourceType)) {
@@ -274,6 +367,25 @@ function inferSourceMatter(sourceType: InferredSourceDocumentType, corpus: strin
   if (sourceType.includes('CIVIL') || /\bcivil\b/.test(corpus)) return 'CIVIL';
   if (/AMPARO|ACTO_DE_AUTORIDAD/.test(sourceType) || /amparo|constitucional/.test(corpus)) return 'AMPARO';
   return matterLabel(fallback);
+}
+
+/**
+ * Returns the substantive matter for the same source corpus used by the
+ * compatibility gate. Document type and substantive matter are separate
+ * dimensions: an amparo-directo resolution may arise from a labor case.
+ */
+export function inferSourceMatterForDocuments(
+  sourceDocuments: UploadedSourceDocument[],
+  sourceMatterFallback?: string,
+): string {
+  const sourceType = inferSourceOutputType(sourceDocuments, sourceMatterFallback);
+  const classifiedDocuments = classificationDocuments(sourceDocuments);
+  return inferSourceMatter(
+    sourceType,
+    normalize(sourceText(classifiedDocuments)),
+    sourceMatterFallback,
+    normalizeWithLines(sourceText(classifiedDocuments)),
+  );
 }
 
 function explicitPolicy(
@@ -741,9 +853,15 @@ export function evaluateSourceOutputCompatibility(
   rules: SourceOutputCompatibilityRuleMap = SOURCE_OUTPUT_COMPATIBILITY_RULES,
 ): SourceOutputCompatibilityResult {
   const selectedDocumentType = normalizeId(input.selectedDocumentType);
-  const corpus = normalize(sourceText(input.sourceDocuments));
-  const sourceDocumentType = inferSourceOutputType(input.sourceDocuments, input.sourceMatter);
-  const sourceMatter = inferSourceMatter(sourceDocumentType, corpus, input.sourceMatter);
+  const classifiedDocuments = classificationDocuments(input.sourceDocuments);
+  const corpus = normalize(sourceText(classifiedDocuments));
+  const sourceDocumentType = inferSourceOutputType(classifiedDocuments, input.sourceMatter);
+  const sourceMatter = inferSourceMatter(
+    sourceDocumentType,
+    corpus,
+    input.sourceMatter,
+    normalizeWithLines(sourceText(classifiedDocuments)),
+  );
   const metadataSourceDocumentType = sourceDocumentType;
 
   if (!selectedDocumentType) {

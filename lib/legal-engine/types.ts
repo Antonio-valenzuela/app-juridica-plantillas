@@ -249,8 +249,12 @@ export interface ContentBlock {
   generationRequirement?: 'AI_REQUIRED' | 'DETERMINISTIC' | 'PRESERVED_HUMAN' | 'OPTIONAL';
   generationStatus?: 'pending' | 'drafting' | 'generated' | 'partial' | 'truncated' | 'failed';
   semanticEvaluation?: import('./semanticEvaluator').BlockQualityEvaluation;
+  /** All task evaluations represented after safe exact duplicate consolidation. */
+  semanticEvaluations?: import('./semanticEvaluator').BlockQualityEvaluation[];
   issueDraftValidationStatus?: 'INVALID_FATAL' | 'INVALID_RETRYABLE' | 'VALID_NON_FINAL' | 'VALID_ACCEPTED';
   issueDraftResultHash?: string;
+  /** All canonical result hashes represented after safe exact duplicate consolidation. */
+  issueDraftResultHashes?: string[];
   taskId?: string;
   coverageItemIds?: string[];
   factIds?: string[];
@@ -265,6 +269,10 @@ export interface ContentBlock {
   provider?: string;
   model?: string | null;
   generationTaskId?: string;
+  /** Task kind used for deterministic post-generation consolidation. */
+  generationTaskType?: string;
+  /** All source task IDs represented after safe duplicate consolidation. */
+  generationTaskIds?: string[];
   generationId?: string;
   /** Strategic drafting linkage; never implies client adoption or finality. */
   strategicCandidateId?: string;

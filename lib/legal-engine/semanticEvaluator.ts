@@ -172,6 +172,20 @@ const GENERIC_LEGAL_CLICHES: readonly RegExp[] = [
   /\bse\s+niega\s+lisa\s+y\s+llanamente\b/gi,
 ];
 
+// Extraction locators and transport metadata are trace fields, never
+// lawyer-facing evidence treatment. Keep this list centralized so new
+// extraction adapters cannot silently reintroduce the same leakage.
+const INTERNAL_EVIDENCE_METADATA_PATTERNS: readonly RegExp[] = [
+  /\b(?:confianza|confidence|m[eé]todo\s+de\s+extracci[oó]n|extraction\s+method|source[_\s-]?mentioned|reference[_\s-]?only|context\s*hash|evidence[-\s]?mention[-\s\w]*|extracto\s+de\s+un\s+pdf|ocr)\b/i,
+  /\b(?:elementIndex|paragraphIndex|pageIndex|sourceUnitId|coverageItemId|evidenceMentionId|extractionMethod|contextHash)\b/i,
+  /\b(?:elementIndex|paragraphIndex|pageIndex|sourceUnitId|coverageItemId|evidenceMentionId|extractionMethod|contextHash)\s*[:=]\s*[^\s,;]+/i,
+];
+
+const NATURAL_EVIDENCE_LOCATOR_PATTERN = /\b(?:elemento|p[áa]rrafo|p[áa]gina)\s+\d+\b|\bpage\s*[:=]\s*\d+\b/i;
+const EXTRACTION_CONTEXT_PATTERN = /\b(?:extracci[oó]n|extra[ií]d[oa]|localizador|metadata|metadato|provenance|segment(?:o|aci[oó]n)|unidad(?:\s+de\s+fuente)?|document\s+item)\b/i;
+
+const SUBSTANTIVE_EVIDENCE_TREATMENT = /\b(?:relacion(?:a|ado|ada|an|arse)?|vinculad?|pertinen(?:te|cia)|relevan(?:te|cia)|suficien(?:te|cia)|alcance|l[ií]mite|prop[oó]sito|acredita|demuestra|corrobora|apoya|contrasta)\w*\b/i;
+
 // ── 4. HEURÍSTICAS DETERMINISTAS ANTI-GENERICIDAD Y DENSIDAD (5G, 5I) ─────
 
 /**
@@ -603,11 +617,33 @@ export function evaluateFactResponseDepth(
 
 // ── 10. DETECCIÓN DE AFIRMACIONES NO SUSTENTADAS Y FABRICACIONES (5L, 5J) ──
 
+function authorityAllowlistValues(authority: unknown): string[] {
+  if (typeof authority === 'string') return [authority];
+  if (typeof authority !== 'object' || authority === null) return [];
+  const record = authority as Record<string, unknown>;
+  const identity = typeof record.identity === 'object' && record.identity !== null
+    ? record.identity as Record<string, unknown>
+    : undefined;
+  const proposition = typeof record.proposition === 'object' && record.proposition !== null
+    ? record.proposition as Record<string, unknown>
+    : undefined;
+  return [
+    record.citationText,
+    record.citation,
+    record.registro,
+    record.rubro,
+    record.title,
+    identity?.canonicalCitation,
+    proposition?.text,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+}
+
 export function detectUnsupportedAssertions(
   text: string,
   task: GenerationTask,
   caseAnalysis?: CaseAnalysis,
 ): { penalty: number; hardFailReasons: string[]; deficiencies: string[] } {
+  void caseAnalysis;
   const hardFailReasons: string[] = [];
   const deficiencies: string[] = [];
   let penalty = 0;
@@ -638,10 +674,9 @@ export function detectUnsupportedAssertions(
     concreteCitations.push(match[0].trim());
   }
 
-  const allowedAuthorities = [
-    ...(task.scopedAuthorities || []).map((a: any) => typeof a === 'string' ? a : (a.registro || a.citation || a.rubro || '')),
-    ...(caseAnalysis?.authorities || []).map((a: any) => typeof a === 'string' ? a : (a.registro || a.citation || a.rubro || '')),
-  ].map((s) => s.toLowerCase());
+  const allowedAuthorities = (task.scopedAuthorities || [])
+    .flatMap((authority) => authorityAllowlistValues(authority))
+    .map((value) => value.toLowerCase());
 
   if (concreteCitations.length > 0) {
     const fabricatedConcrete = concreteCitations.filter((cit) => {
@@ -779,6 +814,33 @@ export function evaluateIssueDraftResult(
   const text = issueDraftText(result).toLowerCase();
   const deficiencies: string[] = [];
   const hardFailReasons: string[] = [];
+  const isEvidenceTask = (task.taskType || task.type) === 'EVIDENCE'
+    || pack.contentRole === 'EVIDENCE';
+
+  // Evidence prose must not expose extraction/transport metadata. Those values
+  // belong to provenance and trace, not to the lawyer-facing document body.
+  if (isEvidenceTask && (INTERNAL_EVIDENCE_METADATA_PATTERNS.some((pattern) => pattern.test(text))
+    || (NATURAL_EVIDENCE_LOCATOR_PATTERN.test(text) && EXTRACTION_CONTEXT_PATTERN.test(text)))) {
+    pushUnique(hardFailReasons, 'INTERNAL_METADATA_LEAK');
+  }
+
+  const evidenceDescriptionTokens = [
+    ...pack.evidenceMentions.map((item) => item.description),
+  ]
+    .flatMap(normalizedTokens)
+    .filter((token) => token.length >= 5 && !['evidencia', 'mencionada', 'mencionado', 'fuente', 'prueba', 'oferta'].includes(token));
+  const hasConcreteEvidenceDescription = evidenceDescriptionTokens.some((token) => text.includes(token));
+  const genericEvidenceSubjectMatches = text.match(/\bla\s+evidencia\s+mencionada\b/gi) || [];
+  if (isEvidenceTask
+    && /\b(?:la\s+evidencia(?:\s+expresamente)?\s+mencionada|la\s+evidencia\s+mencionada)\b/i.test(text)
+    && (!hasConcreteEvidenceDescription || genericEvidenceSubjectMatches.length >= 2)) {
+    pushUnique(hardFailReasons, 'EVIDENCE_GENERIC_TEXT');
+  }
+  if (isEvidenceTask && pack.evidenceMentions.length > 0 && !hasConcreteEvidenceDescription) {
+    // A permitted evidence ID is provenance, not substantive grounding. The
+    // visible treatment must identify at least one concrete source phrase.
+    pushUnique(hardFailReasons, 'EVIDENCE_GENERIC_TEXT');
+  }
   const allowedSourceIds = new Set([
     ...pack.claims.map((item) => item.id),
     ...pack.facts.map((item) => item.id),
@@ -838,7 +900,7 @@ export function evaluateIssueDraftResult(
   if (groundedFacts.length > 0) factualGrounding += 0.45;
   if (pack.facts.some((fact) => containsAnyToken(text, fact.proposition))) factualGrounding += 0.1;
   factualGrounding = Math.min(1, factualGrounding);
-  if (pack.facts.length > 0 && groundedFacts.length === 0) deficiencies.push('FACTUAL_GROUNDING_MISSING');
+  if (pack.facts.length > 0 && groundedFacts.length === 0 && !isEvidenceTask) deficiencies.push('FACTUAL_GROUNDING_MISSING');
 
   const evidenceIds = new Set([
     ...pack.evidenceMentions.map((item) => item.id),
@@ -849,6 +911,11 @@ export function evaluateIssueDraftResult(
   if (groundedEvidence.length > 0) evidenceGrounding += 0.45;
   if (pack.evidenceMentions.length === 0 && pack.evidenceOffers.length === 0) evidenceGrounding = 1;
   evidenceGrounding = Math.min(1, evidenceGrounding);
+  if (isEvidenceTask && groundedEvidence.length > 0 && groundedFacts.length === 0) {
+    // Evidence treatment may describe the proof itself without restating every
+    // related fact; the evidence linkage is the substantive grounding here.
+    factualGrounding = Math.max(factualGrounding, 0.65);
+  }
   if (evidenceIds.size > 0 && groundedEvidence.length === 0) deficiencies.push('EVIDENCE_GROUNDING_MISSING');
 
   let positionConsistency = 1;
@@ -872,8 +939,15 @@ export function evaluateIssueDraftResult(
       : 0.75;
 
   const descriptive = result.draftContract === 'DESCRIPTIVE';
+  const evidenceTreatmentText = result.evidentiaryDevelopment.join(' ').trim();
+  const hasSubstantiveEvidenceTreatment = !isEvidenceTask || SUBSTANTIVE_EVIDENCE_TREATMENT.test(evidenceTreatmentText);
+  if (isEvidenceTask && !hasSubstantiveEvidenceTreatment) {
+    deficiencies.push('EVIDENCE_TREATMENT_INCOMPLETE');
+  }
   const application = descriptive
-    ? (issueTermMatches > 0 ? 1 : result.sourceEntityIds.length > 0 ? 0.75 : 0)
+    ? isEvidenceTask
+      ? (hasSubstantiveEvidenceTreatment ? 1 : result.sourceEntityIds.length > 0 ? 0.3 : 0)
+      : (issueTermMatches > 0 ? 1 : result.sourceEntityIds.length > 0 ? 0.75 : 0)
     : result.application.trim().length > 0
       ? (containsAnyToken(result.application.toLowerCase(), pack.legalIssue.question) ? 1 : 0.75)
       : 0;
@@ -1046,11 +1120,20 @@ export function evaluateBlockQuality(
     argumentDepth = issueRes.score;
   }
 
-  // J. Soporte legal (5J: si no hay tesis en contexto, fundamento con normas y lógica es válido; para hechos no se exige cita de ley)
-  const isFactResponse = task.taskType === 'FACT_RESPONSE' || task.type === 'FACT_RESPONSE';
-  const hasNormCitations = /\b(?:art[íi]culos?|c[oó]digo|ley|constituci[oó]n|convenci[oó]n|jurisprudencia)\b/i.test(text);
-  const legalSupport = isFactResponse ? 0.85 : (hasNormCitations ? 0.85 : 0.45);
-  if (!hasNormCitations && !isFactResponse) {
+  // J. Soporte legal (5J): solo los perfiles argumentativos exigen fundamento
+  // normativo. Hechos, prueba y soporte de sección se califican por su vínculo
+  // con las fuentes asignadas, no por añadir una cita legal artificial.
+  const effectiveTaskType = task.taskType || task.type;
+  const descriptiveTask = effectiveTaskType === 'EVIDENCE' || effectiveTaskType === 'FACT_RESPONSE';
+  const requiresNormativeSupport = !descriptiveTask;
+  const hasConcreteNormCitation = /\b(?:art[íi]culos?|art\.)\s+\d+(?:\s*(?:bis|ter|qu[aá]ter))?(?:\s*(?:fracci[oó]n|p[aá]rrafo|inciso)\s+[a-z0-9ivxlcdm]+)?\b/i.test(text)
+    || /\b(?:ley|c[oó]digo|constituci[oó]n|convenci[oó]n)\s+(?:federal|general|nacional|local|del|de\s+la|de\s+los|de\s+las)\b/i.test(text);
+  const hasAuthorizedAuthorityText = Boolean(task.authorityIds?.length)
+    && (task.scopedAuthorities || []).some((authority) => authorityAllowlistValues(authority)
+      .some((authorized) => authorized.length > 4 && text.toLowerCase().includes(authorized.toLowerCase())));
+  const hasNormCitations = hasConcreteNormCitation || hasAuthorizedAuthorityText;
+  const legalSupport = requiresNormativeSupport ? (hasNormCitations ? 0.85 : 0.45) : 0.85;
+  if (!hasNormCitations && requiresNormativeSupport) {
     deficiencies.push('Ausencia de invocación de preceptos normativos aplicables.');
   }
 
@@ -1078,6 +1161,7 @@ export function evaluateBlockQuality(
     specificity >= SEMANTIC_THRESHOLDS.PASS_SPECIFICITY &&
     (!hasScopedFacts || factsRes.score >= SEMANTIC_THRESHOLDS.PASS_FACTUAL_COVERAGE) &&
     (!hasScopedEvidence || evidenceRes.score >= SEMANTIC_THRESHOLDS.PASS_EVIDENCE_LINKAGE) &&
+    (!requiresNormativeSupport || hasNormCitations) &&
     repetition.penalty <= SEMANTIC_THRESHOLDS.MAX_REPETITION_PENALTY;
 
   let verdict: EvaluationVerdict = 'PASS';

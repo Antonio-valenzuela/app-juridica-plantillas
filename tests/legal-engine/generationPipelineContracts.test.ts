@@ -24,7 +24,7 @@ import { buildLegalIssueMatrix } from '@/lib/legal-engine/legalIssueMatrix';
 import { buildRichCoverageMatrix } from '@/lib/legal-engine/richCoverage';
 import { emptyRichCaseAnalysis } from '@/tests/fixtures/richCoverageFixtures';
 import { createSourceProvenance } from '@/lib/legal-engine/case-extraction/provenance';
-import type { IssueGenerationOutcome } from '@/lib/legal-engine/issueDraftResult';
+import { validateIssueDraftModelOutput, type IssueGenerationOutcome } from '@/lib/legal-engine/issueDraftResult';
 
 // ── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -114,10 +114,10 @@ function makeTask(overrides: Partial<GenerationTask> = {}): GenerationTask {
 function deterministicFakeProvider(text: string) {
   return async (request: any) => {
     const context = request?.legalContext;
-    const issue = context?.legalIssue;
-    const legalIssueId = issue?.id || 'issue-test-1';
-    const coverageItemIds = context?.coverage?.map((item: any) => item.id) || ['cov-test-1'];
-    const issueType = issue?.issueType || 'FACT_DISPUTE';
+    const draftContract = context?.draftContract;
+    if (draftContract !== 'DESCRIPTIVE' && draftContract !== 'ARGUMENTATIVE') {
+      throw new Error('FAKE_PROVIDER_DRAFT_CONTRACT_REQUIRED');
+    }
     const sourceEntityIds = [
       ...(context?.claims?.map((item: any) => item.id) || []),
       ...(context?.facts?.map((item: any) => item.id) || ['fact-test-1']),
@@ -127,26 +127,17 @@ function deterministicFakeProvider(text: string) {
     ];
     const authorityMentionIds = context?.authorities?.map((item: any) => item.id) || [];
     const raw = {
-      legalIssueId,
-      coverageItemIds,
-      issueType,
-      thesis: text,
       factualDevelopment: ['El hecho fue determinado por el tribunal como acreditado.'],
       evidentiaryDevelopment: ['La mención probatoria relacionada se conserva como mención sin contradicción.'],
       legalDevelopment: ['El precepto aplicable se conserva como no verificado.'],
-      application: 'Aplicación referida al hecho expresamente identificado.',
-      conclusion: 'Conclusión provisional fundada en fuente.',
+      ...(draftContract === 'ARGUMENTATIVE' ? {
+        thesis: text,
+        application: 'Aplicación referida al hecho expresamente identificado.',
+        conclusion: 'Conclusión provisional fundada en fuente.',
+      } : {}),
       sourceEntityIds,
       authorityMentionIds,
       unresolvedRequirements: [],
-      generationMetadata: {
-        promptVersion: request?.promptVersion || 'FACT_DISPUTE_V1',
-        contextHash: request?.contextHash || 'ctx-hash-test',
-        providerRequested: 'test-fake',
-        providerActuallyUsed: 'test-fake',
-        model: 'fake-deterministic',
-        attemptCount: request?.attempt || 1,
-      },
     };
     return {
       success: true,
@@ -301,6 +292,58 @@ describe('Contract 1 — eligible substantive task reaches provider', () => {
 
 // ── CONTRATO 2 ───────────────────────────────────────────────────────────────
 describe('Contract 2 — accepted provider output becomes DraftBlock', () => {
+  it('deterministic fake emits only descriptive model-owned fields for a descriptive request', async () => {
+    const response = await deterministicFakeProvider('Texto descriptivo')({
+      legalContext: {
+        draftContract: 'DESCRIPTIVE',
+        facts: [{ id: 'fact-test-1' }],
+        claims: [],
+        evidenceMentions: [],
+        evidenceOffers: [],
+        sourceArguments: [],
+        authorities: [],
+      },
+    });
+
+    const validation = validateIssueDraftModelOutput(response.structuredOutput, 'DESCRIPTIVE');
+
+    expect(validation).toMatchObject({ valid: true, errors: [] });
+    expect(response.structuredOutput).not.toHaveProperty('thesis');
+    expect(response.structuredOutput).not.toHaveProperty('application');
+    expect(response.structuredOutput).not.toHaveProperty('conclusion');
+    expect(response.structuredOutput).not.toHaveProperty('legalIssueId');
+    expect(response.structuredOutput).not.toHaveProperty('coverageItemIds');
+    expect(response.structuredOutput).not.toHaveProperty('issueType');
+    expect(response.structuredOutput).not.toHaveProperty('generationMetadata');
+  });
+
+  it('deterministic fake emits required argumentative model-owned fields for an argumentative request', async () => {
+    const response = await deterministicFakeProvider('Tesis de prueba')({
+      legalContext: {
+        draftContract: 'ARGUMENTATIVE',
+        facts: [{ id: 'fact-test-1' }],
+        claims: [],
+        evidenceMentions: [],
+        evidenceOffers: [],
+        sourceArguments: [],
+        authorities: [],
+      },
+    });
+
+    const validation = validateIssueDraftModelOutput(response.structuredOutput, 'ARGUMENTATIVE');
+
+    expect(validation).toMatchObject({ valid: true, errors: [] });
+    expect(response.structuredOutput).toMatchObject({
+      thesis: 'Tesis de prueba',
+      application: 'Aplicación referida al hecho expresamente identificado.',
+      conclusion: 'Conclusión provisional fundada en fuente.',
+    });
+    expect(response.structuredOutput).not.toHaveProperty('legalIssueId');
+    expect(response.structuredOutput).not.toHaveProperty('coverageItemIds');
+    expect(response.structuredOutput).not.toHaveProperty('issueType');
+    expect(response.structuredOutput).not.toHaveProperty('generationMetadata');
+  });
+
   it('ACCEPTED outcome produces a block with non-empty text', async () => {
     const analysis = caseAnalysisWithEstablishedFact();
     const doc = docWithSections({ id: 'sec-hechos', type: 'facts', title: 'HECHOS' });

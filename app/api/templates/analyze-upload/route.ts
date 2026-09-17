@@ -7,6 +7,10 @@ import { createSourceDocument } from '@/lib/legal-engine/context';
 import { readDocumentLifecycle } from '@/lib/legal-engine/documentLifecycle';
 import type { DocumentLifecycleMetadata } from '@/lib/legal-engine/documentLifecycle';
 import { analyzePersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
+import {
+  inferSourceMatterForDocuments,
+  inferSourceOutputType,
+} from '@/lib/legal-engine/sourceOutputCompatibility';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -65,6 +69,10 @@ export interface AnalyzeResult {
   classification: {
     es_juridico: boolean;
     tipo_documento: string;
+    /** Canonical source type used by the compatibility gate. */
+    sourceDocumentType?: string;
+    /** Substantive matter inferred from the same source corpus. */
+    materia?: string;
     confianza: number;
     razon: string;
     secciones_detectadas: string[];
@@ -124,6 +132,28 @@ function classifyLegalText(text: string): AnalyzeResult['classification'] {
       : 'No se detectaron suficientes indicios jurídicos.',
     secciones_detectadas: secciones,
   };
+}
+
+const SOURCE_CLASSIFICATION_LABELS: Readonly<Record<string, string>> = {
+  DEMANDA: 'Demanda',
+  DEMANDA_CIVIL: 'Demanda civil',
+  DEMANDA_MERCANTIL: 'Demanda mercantil',
+  DEMANDA_LABORAL: 'Demanda laboral',
+  DEMANDA_AMPARO: 'Demanda de amparo',
+  DEMANDA_AMPARO_DIRECTO: 'Demanda de amparo directo',
+  SENTENCIA_O_RESOLUCION: 'Sentencia o resolución',
+  SENTENCIA_AMPARO: 'Sentencia de amparo',
+  SENTENCIA_AMPARO_DIRECTO: 'Sentencia de amparo directo',
+  RESOLUCION_ADMINISTRATIVA: 'Resolución administrativa',
+  LAUDO: 'Laudo',
+  ACUERDO: 'Acuerdo',
+  ACTO_DE_AUTORIDAD: 'Acto de autoridad',
+  INFORME_JUSTIFICADO: 'Informe justificado',
+  INFORME_PREVIO: 'Informe previo',
+};
+
+function canonicalClassificationLabel(sourceDocumentType: string, fallback: string): string {
+  return SOURCE_CLASSIFICATION_LABELS[sourceDocumentType] || fallback;
 }
 
 // ── POST /api/templates/analyze-upload ────────────────────────────────────────
@@ -204,7 +234,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Classify legal content (only on validated text) ───────────────────────
-    const classification = result.text.length > 50
+    const classificationBase = result.text.length > 50
       ? classifyLegalText(result.text)
       : {
           es_juridico: false,
@@ -213,6 +243,14 @@ export async function POST(request: NextRequest) {
           razon: 'Texto insuficiente.',
           secciones_detectadas: [],
         };
+    const sourceDocumentType = inferSourceOutputType([sourceDocument]);
+    const materia = inferSourceMatterForDocuments([sourceDocument]);
+    const classification = {
+      ...classificationBase,
+      sourceDocumentType,
+      materia,
+      tipo_documento: canonicalClassificationLabel(sourceDocumentType, classificationBase.tipo_documento),
+    };
 
     const analysis = reconstructCaseAnalysis([sourceDocument]);
     const templateAnalysis = analyzePersonalTemplateText(result.text, {

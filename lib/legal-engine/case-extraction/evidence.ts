@@ -16,9 +16,14 @@ export interface DocumentsAndEvidenceResult {
 }
 
 const EVIDENCE_SECTION_RE = /^(?:PRUEBAS?|MEDIOS?\s+DE\s+PRUEBA|DOCUMENTALES?|ANEXOS?|EVIDENCIA)\s*:/i;
-const CONCRETE_EVIDENCE_RE = /\b(?:pruebas?\s+(?:documental(?:es)?|confesional(?:es)?|testimonial(?:es)?|pericial(?:es)?|presuncional(?:es)?|instrumental(?:es)?)|documental(?:es)?\s+de\s+informes|documental(?:es)?|confesional(?:es)?|testimonial(?:es)?|pericial(?:es)?|presuncional(?:es)?|instrumental(?:es)?\s+de\s+actuaciones|contratos?|pagar[eé]s?|recibos?|comprobantes?|requerimientos?|constancia(?:s)?\s+(?:de\s+[^,.;\n]+|laboral(?:es)?|de\s+notificaci[oó]n)|nombramientos?|actas?\s+de\s+[^,.;\n]+|expediente\s+(?:natural|laboral|de\s+origen))(?=\s|$|[.,;:!?])/gi;
+const CONCRETE_EVIDENCE_RE = /\b(?:pruebas?\s+(?:documental(?:es)?|confesional(?:es)?|testimonial(?:es)?|pericial(?:es)?|presuncional(?:es)?|instrumental(?:es)?)|documental(?:es)?\s+de\s+informes|documental(?:es)?|confesional(?:es)?|testimonial(?:es)?|pericial(?:es)?|presuncional(?:es)?|instrumental(?:es)?\s+de\s+actuaciones|contratos?|escrituras?\s+p[úu]blicas?|pagar[eé]s?|recibos?|comprobantes?|requerimientos?|constancia(?:s)?\s+(?:de\s+[^,.;\n]+|laboral(?:es)?|de\s+notificaci[oó]n)|nombramientos?|actas?\s+de\s+[^,.;\n]+|expediente\s+(?:natural|laboral|de\s+origen))(?=\s|$|[.,;:!?])/gi;
 const CONCRETE_EVIDENCE_TEST_RE = new RegExp(CONCRETE_EVIDENCE_RE.source, 'i');
-const EVIDENCE_CONTEXT_RE = /\b(?:en\s+autos|autos\s+del\s+(?:presente\s+)?juicio|actuaciones\s+que\s+integran|del\s+laudo|juicio\s+(?:laboral|de\s+origen)|parte\s+(?:actora|demandada)\s+(?:ofreci[oó]|aport[oó]|exhibi[oó])|ofrecid[oa]s?|aportad[oa]s?|exhibid[oa]s?|admitid[oa]s?|desahogad[oa]s?|a\s+cargo\s+de|a\s+foja\s+\d+|ofrezco)\b/i;
+const CONCRETE_EVIDENCE_LIST_RE = new RegExp(CONCRETE_EVIDENCE_RE.source, 'gi');
+const PUBLIC_DEED_RE = /^escrituras?\s+p[úu]blicas?$/i;
+const GENERIC_EVIDENCE_LABEL_RE = /^(?:pruebas?\s+documental(?:es)?|documentales?)$/i;
+const PUBLIC_DEED_DIRECT_CONTEXT_RE = /(?:\ben\s+autos\s+(?:obra(?:n)?|consta(?:n)?)(?!\s+que\b)|\bse\s+(?:exhibe|aporta)|\b(?:(?:la\s+)?(?:parte\s+)?(?:actora|actor|demandada|demandado|quejosa|quejoso|promovente)\s+(?:ofreció|exhibió|aportó)))\s*(?:(?:la|el|una|un)\s*)?$|(?:\b(?:se\s+ofrece|ofrezco|ofrecemos)\s+(?:como\s+prueba(?:\s+documental)?\s+)?(?:(?:la|el|una|un)\s*)?)$/i;
+const EVIDENCE_LIST_DELIMITER_RE = /^\s*(?:(?:(?:n[úu]mero|n[.°º]?|folio)\s*)?\d+(?:,\d{3})*(?:-[A-Z0-9]+)?\s*)?(?:,|y|e)\s+(?:(?:la|el|una|un)\s*)?$/i;
+const EVIDENCE_CONTEXT_RE = /\b(?:en\s+autos|autos\s+del\s+(?:presente\s+)?juicio|actuaciones\s+que\s+integran|del\s+laudo|juicio\s+(?:laboral|de\s+origen)|ofrecid[oa]s?|aportad[oa]s?|exhibid[oa]s?|admitid[oa]s?|desahogad[oa]s?|se\s+(?:ofrec(?:e|ió|ieron)|exhib(?:e|ió|ieron)|aport(?:a|ó|aron))|a\s+cargo\s+de|a\s+foja\s+\d+|ofrezco)\b|\b(?:la\s+)?(?:parte\s+)?(?:actora|actor|demandada|demandado|quejosa|quejoso|promovente)\s+(?:ofreció|aportó|exhibió)(?=\s|$)/i;
 const JURISPRUDENCE_RE = /\b(?:jurisprudencia|tesis|precedente|m[aá]ximo\s+tribunal)\b/i;
 
 interface EvidenceSegment {
@@ -39,7 +44,10 @@ function segmentsForEvidence(body: string): string[] {
   // qualifiers and relations. Keep those as one mention; split commas only
   // for compact list prose with no narrative cue.
   if (/\b(?:consistente|a\s+cargo|para\s+acreditar|relacionad[oa]|vinculad[oa])\b/i.test(body)) return [body.trim()];
-  const commaSegments = body.split(/[,;]+/).map((part) => part.trim()).filter(Boolean);
+  const commaSegments = body
+    .split(/;+|,(?!\d{3}(?:\D|$))/)
+    .map((part) => part.trim())
+    .filter(Boolean);
   if (commaSegments.length > 1) {
     return commaSegments.flatMap((part) => part.split(/\s+y\s+/i).map((item) => item.trim()).filter(Boolean));
   }
@@ -96,9 +104,10 @@ function extendEvidenceSegment(text: string, end: number): number {
     /^\s+a\s+cargo\s+(?:de|del)\s+[^,.;\n]+/i,
     /^\s+en\s+su\s+doble\s+aspecto/i,
     /^\s*,?\s*(?:exhibid[oa]s?|aportad[oa]s?)(?:\s+(?:con|en)\s+[^,.;\n]+)?/i,
-    /^\s+ofrecid[oa]s?\s+por\s+(?:la|el)\s+(?:parte\s+)?(?:actora|demandada|quejosa|promovente)/i,
+    /^\s+ofrecid[oa]s?\s+por\s+(?:la|el)\s+(?:parte\s+)?(?:actora|actor|demandada|demandado|quejosa|quejoso|promovente)/i,
     /^\s+de\s+(?:la|el)\s+(?:demandada|demandante|actor|hoy\s+actor)/i,
     /^\s+a\s+foja\s+\d+/i,
+    /^\s+(?:(?:n[úu]mero|n[.°º]?|folio)\s*)?\d+(?:,\d{3})*(?:-[A-Z0-9]+)?/i,
     /^\s+para\s+[^,.;\n]+/i,
   ];
   let currentEnd = end;
@@ -113,14 +122,55 @@ function extendEvidenceSegment(text: string, end: number): number {
   return currentEnd;
 }
 
+function hasPublicDeedDocumentContext(precedingClause: string): boolean {
+  if (PUBLIC_DEED_DIRECT_CONTEXT_RE.test(precedingClause)) return true;
+  const priorEvidence = Array.from(precedingClause.matchAll(CONCRETE_EVIDENCE_LIST_RE));
+  for (let index = 0; index < priorEvidence.length; index += 1) {
+    const firstEvidence = priorEvidence[index];
+    if (firstEvidence.index === undefined || !PUBLIC_DEED_DIRECT_CONTEXT_RE.test(precedingClause.slice(0, firstEvidence.index))) continue;
+    let previousEnd = firstEvidence.index + firstEvidence[0].length;
+    let isDirectList = true;
+    for (const followingEvidence of priorEvidence.slice(index + 1)) {
+      if (followingEvidence.index === undefined || !EVIDENCE_LIST_DELIMITER_RE.test(precedingClause.slice(previousEnd, followingEvidence.index))) {
+        isDirectList = false;
+        break;
+      }
+      previousEnd = followingEvidence.index + followingEvidence[0].length;
+    }
+    if (isDirectList && EVIDENCE_LIST_DELIMITER_RE.test(precedingClause.slice(previousEnd))) return true;
+  }
+  return false;
+}
+
+function hasExplicitPublicDeedDocumentCue(description: string, publicDeed: RegExpMatchArray): boolean {
+  if (publicDeed.index === undefined) return false;
+  const beforePublicDeed = description.slice(0, publicDeed.index);
+  const afterPublicDeed = description.slice(publicDeed.index + publicDeed[0].length);
+  return /\b(?:copia|testimonio|instrumento)(?:\s+(?:certificada|simple|notarial))?\s+de\s+(?:la|el)\s*$/i.test(beforePublicDeed)
+    || /(?:\bse\s+(?:exhibe|aporta|ofrece)\b|\bse\s+(?:exhibió|aportó|ofreció)(?=\s|$|[.,;:!?])|\b(?:(?:la|el)\s+)?(?:parte\s+)?(?:actora|actor|demandada|demandado|quejosa|quejoso|promovente)\s+(?:exhibió|aportó|ofreció)(?=\s|$|[.,;:!?]))\s*(?:(?:la|el|una|un)\s*)?$/i.test(beforePublicDeed)
+    || /^\s*(?:(?:n[úu]mero|n[.°º]?|folio)\s*)?\d+(?:,\d{3})*(?:-[A-Z0-9]+)?(?=\s|$|[.,;:!?])/i.test(afterPublicDeed);
+}
+
+function isUnsupportedExplicitPublicDeedDescription(description: string): boolean {
+  const concreteEvidence = Array.from(description.matchAll(CONCRETE_EVIDENCE_LIST_RE));
+  if (!concreteEvidence.some((match) => PUBLIC_DEED_RE.test(match[0]))) return false;
+  const firstMaterialEvidence = concreteEvidence.find((match) => !GENERIC_EVIDENCE_LABEL_RE.test(match[0]));
+  if (!firstMaterialEvidence || !PUBLIC_DEED_RE.test(firstMaterialEvidence[0])) return false;
+  return !hasExplicitPublicDeedDocumentCue(description, firstMaterialEvidence);
+}
+
 function embeddedEvidenceSegments(text: string): EvidenceSegment[] {
   const segments: EvidenceSegment[] = [];
   const seen = new Set<string>();
-  const listOffer = /\bparte\s+(?:actora|demandada|quejosa|promovente)\s+ofreci[oó]\s+(?:los\s+)?siguientes\s+medios?\s+de\s+convicci[oó]n\s*:/i.exec(text);
+  const listOffer = /\bparte\s+(?:actora|actor|demandada|demandado|quejosa|quejoso|promovente)\s+ofreci[oó]\s+(?:los\s+)?siguientes\s+medios?\s+de\s+convicci[oó]n\s*:/i.exec(text);
   const listStart = listOffer ? listOffer.index + listOffer[0].length : -1;
   const listEnd = listStart >= 0 ? text.indexOf('.', listStart) : -1;
   for (const match of text.matchAll(CONCRETE_EVIDENCE_RE)) {
     const start = match.index ?? 0;
+    const clauseStart = Math.max(text.lastIndexOf('.', start), text.lastIndexOf(';', start), text.lastIndexOf('\n', start)) + 1;
+    const precedingClause = text.slice(clauseStart, start);
+    if (PUBLIC_DEED_RE.test(match[0]) && !hasPublicDeedDocumentContext(precedingClause)) continue;
+    if (/^pruebas?\s+documental(?:es)?$/i.test(match[0]) && /^\s+(?:(?:la|el|una|un)\s+)?escrituras?\s+p[úu]blicas?\b/i.test(text.slice(start + match[0].length))) continue;
     const before = text.slice(Math.max(0, start - 24), start);
     if (/\b(?:dicha|referida|indicada|mencionada|anterior|incluida\s+la)\s*$/i.test(before)) continue;
     const end = extendEvidenceSegment(text, start + match[0].length);
@@ -198,6 +248,7 @@ function provenanceForSegment(candidate: ExtractionCandidate, segment: string): 
     section: item.section,
     paragraphIndex: item.paragraphIndex,
     elementIndex: item.elementIndex,
+    candidateId: item.candidateId,
     excerpt: segment,
     speakerRole: item.speakerRole,
     extractionMethod: item.extractionMethod,
@@ -210,7 +261,7 @@ function segmentsForCandidate(candidate: ExtractionCandidate, section?: string):
   if (hasExplicitEvidenceLabel(candidate, section)) {
     const { body, type } = stripEvidenceLabel(candidate.rawText);
     return segmentsForEvidence(body)
-      .filter((description) => CONCRETE_EVIDENCE_TEST_RE.test(description))
+      .filter((description) => CONCRETE_EVIDENCE_TEST_RE.test(description) && !isUnsupportedExplicitPublicDeedDescription(description))
       .map((description) => ({ description, type }));
   }
   return embeddedEvidenceSegments(candidate.rawText);
