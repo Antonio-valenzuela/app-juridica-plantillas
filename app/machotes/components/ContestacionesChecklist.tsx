@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { GenerationStatusBar } from './GenerationStatusBar';
 
 interface ContestacionesChecklistProps {
   hasDocument: boolean;
@@ -49,7 +48,6 @@ export function ContestacionesChecklist({
   analysisCompleted,
   configDefined,
   isGenerating,
-  generationJob,
   blockReason,
   isIncompatible,
   onGenerate,

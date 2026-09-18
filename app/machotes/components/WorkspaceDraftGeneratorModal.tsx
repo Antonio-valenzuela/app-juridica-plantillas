@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import type { UploadedSourceDocument, TemplateVersion } from '@/lib/legal-engine/types';
 import type { TemplateItem } from './TemplateLibraryManager';
-import { GenerationStatusBar, GenerationStatusData } from './GenerationStatusBar';
+import { type GenerationStatusData } from './GenerationStatusBar';
 import { analyzeWritingRequest, getDynamicIntakeFields } from '@/lib/legal-engine/writingIntake';
 import { rankTemplateCandidates } from '@/lib/templates/templateCompatibility';
 
@@ -73,7 +73,6 @@ export function WorkspaceDraftGeneratorModal({
   onAnalyzeCase,
   isGenerating,
   onOpenUploadCustomTemplateModal,
-  generationJob = null,
   initialTemplate = null,
   initialTemplateText = '',
 }: WorkspaceDraftGeneratorModalProps) {
@@ -385,9 +384,6 @@ export function WorkspaceDraftGeneratorModal({
 
         {/* Pie del Modal: progreso real + Botón Generar */}
         <div className="p-5 border-t border-slate-100 bg-[#fbf9f5] space-y-3">
-          {isGenerating && generationJob && (
-            <GenerationStatusBar job={generationJob} title="Generando escrito…" />
-          )}
           <div className="flex items-center justify-between">
           <button
             onClick={onClose}

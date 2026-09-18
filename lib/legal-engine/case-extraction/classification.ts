@@ -26,9 +26,22 @@ const SECTION_LABELS: Record<string, CandidateKind> = {
 
 function sectionFromCandidate(candidate: ExtractionCandidate): string | undefined {
   const provenanceSection = candidate.provenance.find((item) => item.section)?.section;
-  if (provenanceSection) return provenanceSection.replace(/[\s:;,.\-]+$/, '').trim().toUpperCase();
+  if (provenanceSection) {
+    const raw = provenanceSection.replace(/[\s:;,.\-]+$/, '').trim().toUpperCase();
+    if (/HECHO/i.test(raw)) return 'HECHOS';
+    if (/PRESTACI|PRETENS|PETICI/i.test(raw)) return 'PRESTACIONES';
+    if (/PRUEBA|EVIDENC/i.test(raw)) return 'PRUEBAS';
+    if (/DERECHO|FUNDAMENTO|AGRAVIO|ARGUMENTO/i.test(raw)) return 'ARGUMENTOS';
+    return raw;
+  }
   const prefix = candidate.rawText.match(/^\s*([^:.-]{3,80})\s*:/)?.[1];
-  return prefix?.trim().toUpperCase();
+  if (prefix) {
+    const raw = prefix.trim().toUpperCase();
+    if (/HECHO/i.test(raw)) return 'HECHOS';
+    if (/PRESTACI|PRETENS|PETICI/i.test(raw)) return 'PRESTACIONES';
+    return raw;
+  }
+  return undefined;
 }
 
 export function inferSpeakerRole(text: string): SpeakerRole | undefined {
@@ -92,14 +105,14 @@ function classifyOne(candidate: ExtractionCandidate): ExtractionCandidate {
     kind = 'PARTY';
     confidence = 0.99;
     reason = 'Explicit party-role label in source text.';
-  } else if (isSourceAssertion(text)) {
-    kind = 'ASSERTION';
-    confidence = 0.98;
-    reason = 'Attribution verb and speaking party are explicit; proposition remains a source assertion.';
   } else if (section && SECTION_LABELS[section]) {
     kind = SECTION_LABELS[section];
     confidence = 0.92;
     reason = `Candidate is inside the explicit ${section} section.`;
+  } else if (isSourceAssertion(text)) {
+    kind = 'ASSERTION';
+    confidence = 0.98;
+    reason = 'Attribution verb and speaking party are explicit; proposition remains a source assertion.';
   } else if (/\b(?:\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|[a-záéíóúñ]+\s+de\s+\d{4})\b/i.test(text)) {
     kind = 'DATE';
     confidence = 0.95;

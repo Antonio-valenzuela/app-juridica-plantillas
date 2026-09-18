@@ -56,6 +56,9 @@ export function extractClaims(
     if (candidate.kind !== 'CLAIM' && !CLAIM_SECTION_RE.test(candidate.rawText) && section !== 'PRESTACIONES') continue;
     const body = claimBody(candidate.rawText);
     if (!body) continue;
+    if (/^(?:CONTESTACI[OÓ]N\s+(?:DE\s+|A\s+LAS\s+)?PRESTACIONES|PRESTACIONES|PRETENSIONES|PETICIONES)$/i.test(body.replace(/[:.\-]+$/, '').trim())) {
+      continue;
+    }
     const reliefs = independentReliefs(body);
     if (reliefs.length === 1 && /\s+y\s+/i.test(body) && !reviewReasons.includes('AMBIGUOUS_RELIEF_CONJUNCTION_REQUIRES_REVIEW')) {
       reviewReasons.push('AMBIGUOUS_RELIEF_CONJUNCTION_REQUIRES_REVIEW');

@@ -162,8 +162,8 @@ function extractNumberedFacts(
   const facts: AnalyzedFact[] = [];
   const dateRegex = /(?:el\s+d[ií]a\s+)?(\d{1,2}\s+de\s+[a-zñáéíóú]+\s+de\s+\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/i;
 
-  // 1. Primero intentar extraer bajo sección "HECHOS" o "ANTECEDENTES"
-  const sectionHeadingRegex = /(?:^|\n)\s*(?:HECHOS(?:\s+DE\s+LA\s+DEMANDA)?|ANTECEDENTES(?:\s+DEL\s+CASO)?)\s*[:.\-]?\s*(?:\n|$)/gim;
+  // 1. Primero intentar extraer bajo sección "HECHOS", "ANTECEDENTES" o contestación de hechos
+  const sectionHeadingRegex = /(?:^|\n)\s*(?:(?:(?:Y\s+POR\s+OTRO\s+LADO,?\s+)?(?:DOY\s+)?CONTESTACI[OÓ]N\s+(?:A\s+LOS\s+|DE\s+)?HECHOS)|HECHOS(?:\s+DE\s+LA\s+DEMANDA)?|ANTECEDENTES(?:\s+DEL\s+CASO)?)\s*[:.\-]?\s*(?:\n|$)/gim;
 
   for (const entry of entries) {
     const secMatches = Array.from(entry.text.matchAll(sectionHeadingRegex));
@@ -204,7 +204,7 @@ function extractNumberedFacts(
         currentFactText = '';
       };
 
-      const itemRegex = /^(?:HECHO\s+)?([0-9]{1,3}|[IVX]{1,6}|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[EÉ]PTIMO|OCTAVO|NOVENO|D[EÉ]CIMO)\s*[.)\-:]\s*(.*)$/i;
+      const itemRegex = /^(?:HECHO\s+)?([0-9]{1,3}|[IVX]{1,6}|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[EÉ]PTIMO|OCTAVO|NOVENO|D[EÉ]CIMO)\s*[.)\-:]+\s*(.*)$/i;
 
       for (const line of lines) {
         const itemMatch = line.match(itemRegex);
@@ -270,17 +270,17 @@ function extractClaims(
   entries: Array<{ text: string; filename: string; documentId: string; page?: number }>
 ): { claims: string[]; claimResponses: AnalyzedClaim[] } {
   const result: AnalyzedClaim[] = [];
-  const heading = /(?:^|\n)\s*(?:PRESTACIONES|PRETENSIONES|PETICIONES)\s*[:.\-]?\s*/gim;
+  const heading = /(?:^|\n)\s*(?:CONTESTACI[OÓ]N\s+(?:DE\s+|A\s+LAS\s+)?PRESTACIONES|PRESTACIONES|PRETENSIONES|PETICIONES)\s*[:.\-]?\s*/gim;
   for (const entry of entries) {
     const matches = Array.from(entry.text.matchAll(heading));
     for (let i = 0; i < matches.length; i++) {
       const start = (matches[i].index || 0) + matches[i][0].length;
       const next = i + 1 < matches.length ? (matches[i + 1].index || entry.text.length) : entry.text.length;
       const raw = entry.text.slice(start, next)
-        .split(/\n\s*(?=(?:PRUEBAS|HECHOS?|EXCEPCIONES|FUNDAMENTOS|PETITORIOS)\b)/i)[0]
+        .split(/\n\s*(?=(?:PRUEBAS|HECHOS?|EXCEPCIONES|DEFENSAS|FUNDAMENTOS|PETITORIOS|Y\s+POR\s+OTRO\s+LADO|CONTESTACI[OÓ]N)\b)/i)[0]
         .trim();
       if (!raw) continue;
-      const lines = raw.split(/\n+/).map((line) => line.replace(/^\s*(?:\d+|[IVX]+|[A-Z])\s*[.)\-:]\s*/i, '').trim()).filter(Boolean);
+      const lines = raw.split(/\n+/).map((line) => line.replace(/^\s*(?:\d+|[IVX]+|[A-Z])\s*[.)\-:]+\s*/i, '').trim()).filter(Boolean);
       const items = lines.length > 1 ? lines : [raw.replace(/\s+/g, ' ')];
       for (const text of items) {
         if (text.length < 4) continue;

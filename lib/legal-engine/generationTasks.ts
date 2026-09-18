@@ -89,6 +89,7 @@ export interface GenerationTask {
   authorityIds?: string[];
   challengedReasoningIds?: string[];
   claimIds?: string[];
+  sourceDocIds?: string[];
 
   scopedFacts?: any[];
   scopedEvidence?: any[];
@@ -228,6 +229,17 @@ export function buildGenerationTasksForSection(
   coverageMatrix?: CoverageMatrix,
 ): GenerationTask[] {
   const tasks: GenerationTask[] = [];
+  const sourceDocIds = doc.sourceDocuments?.map((s) => s.id).filter(Boolean);
+  const finalizeTasks = (list: GenerationTask[]): GenerationTask[] => {
+    if (sourceDocIds && sourceDocIds.length > 0) {
+      for (const t of list) {
+        if (!t.sourceDocIds) {
+          t.sourceDocIds = sourceDocIds;
+        }
+      }
+    }
+    return list;
+  };
   const sectionId = secPlan.templateSectionId;
   const sectionTitle = secPlan.title;
   const isContestacion = /contestaci[oó]n/i.test(doc.documentTypeLabel || doc.documentType);
@@ -324,7 +336,7 @@ export function buildGenerationTasksForSection(
     // Rich sections may also carry independent conflict/missing-data Coverage;
     // let the rich pass below append those generic tasks. Legacy sections keep
     // the historical early return and task shape unchanged.
-    if (!(isRich && coverageMatrix)) return tasks;
+    if (!(isRich && coverageMatrix)) return finalizeTasks(tasks);
   }
 
   // ── CASO B: TAREAS POR PRESTACIÓN EN CONTESTACIÓN (4E) ────────────────────
@@ -376,7 +388,7 @@ export function buildGenerationTasksForSection(
     // Rich sections may also carry independent conflict/missing-data Coverage;
     // let the rich pass below append those generic tasks. Legacy sections keep
     // the historical early return and task shape unchanged.
-    if (!(isRich && coverageMatrix)) return tasks;
+    if (!(isRich && coverageMatrix)) return finalizeTasks(tasks);
   }
 
   // ── CASO C: TAREAS POR HECHO EN CONTESTACIÓN (4F) ─────────────────────────
@@ -433,7 +445,7 @@ export function buildGenerationTasksForSection(
     // Rich sections may also carry independent conflict/missing-data Coverage;
     // let the rich pass below append those generic tasks. Legacy sections keep
     // the historical early return and task shape unchanged.
-    if (!(isRich && coverageMatrix)) return tasks;
+    if (!(isRich && coverageMatrix)) return finalizeTasks(tasks);
   }
 
   if (isRich && coverageMatrix) {
@@ -601,7 +613,7 @@ export function buildGenerationTasksForSection(
       });
     }
 
-    if (tasks.length > 0) return tasks;
+    if (tasks.length > 0) return finalizeTasks(tasks);
   }
 
   // ── CASO D: TAREA GENERAL DE SECCIÓN (SOPORTE DE SECCIÓN ÚNICA) ───────────
@@ -658,7 +670,7 @@ export function buildGenerationTasksForSection(
       const residualCoverageIds = fallbackCoverageIds.filter((coverageItemId) => !groupedCoverageIds.has(coverageItemId)
         && !coverageMatrix.items.find((item) => item.id === coverageItemId)?.metadata?.compatibilityAlias);
       fallbackCoverageIds = residualCoverageIds;
-      if (residualCoverageIds.length === 0) return tasks;
+      if (residualCoverageIds.length === 0) return finalizeTasks(tasks);
     }
   }
 
@@ -688,7 +700,7 @@ export function buildGenerationTasksForSection(
     authorityIds: [],
   });
 
-  return tasks;
+  return finalizeTasks(tasks);
 }
 
 export function buildLegalResearchTaskForIssue(

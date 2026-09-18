@@ -146,6 +146,45 @@ function resolveResearchEligibility(input: {
   };
 }
 
+export type IssueGenerationClass = 'SOURCE_GROUNDED' | 'RESEARCH_DEPENDENT';
+
+export function classifyIssueGeneration(input: {
+  issue?: LegalIssueItem;
+  taskType?: string;
+}): IssueGenerationClass {
+  const { issue, taskType } = input;
+  if (taskType === 'LEGAL_RESEARCH') return 'RESEARCH_DEPENDENT';
+  if (
+    taskType === 'FACT_RESPONSE' ||
+    taskType === 'CLAIM' ||
+    taskType === 'EVIDENCE' ||
+    taskType === 'SECTION_SUPPORT' ||
+    taskType === 'COVERAGE_ITEM'
+  ) {
+    return 'SOURCE_GROUNDED';
+  }
+  if (!issue) return 'RESEARCH_DEPENDENT';
+  if (issue.issueType === 'AUTHORITY_RESEARCH') return 'RESEARCH_DEPENDENT';
+  if (issue.status === 'NEEDS_RESEARCH' || issue.researchStatus === 'NEEDS_RESEARCH') {
+    return 'RESEARCH_DEPENDENT';
+  }
+  if (
+    issue.issueType === 'FACT_DISPUTE' ||
+    issue.issueType === 'CLAIM_ELEMENT' ||
+    issue.issueType === 'EVIDENCE_RELEVANCE' ||
+    issue.issueType === 'EVIDENCE_SUFFICIENCY' ||
+    issue.issueType === 'PETITION_SUPPORT' ||
+    issue.issueType === 'PROCEDURAL_ISSUE' ||
+    issue.issueType === 'SOURCE_ARGUMENT'
+  ) {
+    return 'SOURCE_GROUNDED';
+  }
+  if (issue.researchStatus === 'NOT_REQUIRED') {
+    return 'SOURCE_GROUNDED';
+  }
+  return 'RESEARCH_DEPENDENT';
+}
+
 export function resolveEffectiveIssueGenerationEligibility(input: {
   issue?: LegalIssueItem;
   derivedReadiness?: DerivedIssueReadiness;
@@ -154,12 +193,43 @@ export function resolveEffectiveIssueGenerationEligibility(input: {
   taskType?: string;
 }): EffectiveIssueGenerationEligibility {
   const { issue, derivedReadiness, researchBundle, formal, taskType } = input;
+  if (formal) return blockedEffectiveEligibility(issue, 'FORMAL_DETERMINISTIC_TASK');
+  if (taskType === 'LEGAL_RESEARCH') return blockedEffectiveEligibility(issue, 'LEGAL_RESEARCH_PLAN_ONLY');
+
+  const generationClass = classifyIssueGeneration({ issue, taskType });
+  if (generationClass === 'SOURCE_GROUNDED') {
+    if (issue) {
+      if (issue.status === 'BLOCKED_BY_CONFLICT' || (issue.conflictIds && issue.conflictIds.length > 0 && issue.status !== 'READY_FOR_GENERATION')) {
+        return blockedEffectiveEligibility(issue, 'BLOCKED_BY_CONFLICT');
+      }
+      if (issue.relationStatus === 'UNLINKED' || issue.status === 'UNLINKED') {
+        return blockedEffectiveEligibility(issue, 'UNLINKED_COVERAGE_REQUIRES_REVIEW');
+      }
+      if (issue.status === 'UNKNOWN') {
+        return blockedEffectiveEligibility(issue, 'UNKNOWN_ISSUE_STATUS_REQUIRES_REVIEW');
+      }
+    }
+    if (researchBundle && derivedReadiness?.researchReadiness === 'READY_FOR_GENERATION_WITH_VERIFIED_RESEARCH') {
+      return resolveResearchEligibility({ issue: issue!, derivedReadiness, researchBundle, formal, taskType });
+    }
+    const effectiveStatus = issue?.status === 'NEEDS_CLIENT_POSITION' ? 'GENERATABLE_REQUIRES_REVIEW' : 'READY_FOR_GENERATION';
+    const reason = 'READY_SOURCE_GROUNDED';
+    return {
+      eligible: true,
+      legalIssueId: issue?.id as any,
+      status: issue?.status ?? 'READY_FOR_GENERATION',
+      canonicalStatus: issue?.status ?? 'READY_FOR_GENERATION',
+      effectiveStatus,
+      reason,
+      verifiedAuthorityIds: [],
+    };
+  }
+
   if (!issue) return blockedEffectiveEligibility(undefined, 'ISSUE_NOT_RESOLVED');
   const blocker = canonicalBlockerReason(issue);
   if (blocker) return blockedEffectiveEligibility(issue, blocker);
   if (issue.relationStatus !== 'EXPLICIT') return blockedEffectiveEligibility(issue, 'RELATION_NOT_EXPLICIT');
-  if (formal) return blockedEffectiveEligibility(issue, 'FORMAL_DETERMINISTIC_TASK');
-  if (taskType === 'LEGAL_RESEARCH') return blockedEffectiveEligibility(issue, 'LEGAL_RESEARCH_PLAN_ONLY');
+
   if (issue.status === 'READY_FOR_GENERATION') {
     return {
       eligible: true,
@@ -253,10 +323,29 @@ export interface IssueContextPack {
 
 export function selectIssueDraftContract(
   pack: Pick<IssueContextPack, 'contentRole' | 'legalIssue' | 'facts' | 'clientPosition'>,
+  task?: Pick<GenerationTask, 'taskType' | 'type'>,
 ): IssueDraftContract | undefined {
+  const taskType = task?.taskType || task?.type;
   if (pack.contentRole === 'EVIDENCE'
     && (pack.legalIssue.issueType === 'EVIDENCE_RELEVANCE' || pack.legalIssue.issueType === 'EVIDENCE_SUFFICIENCY')) {
     return 'DESCRIPTIVE';
+  }
+
+  if (taskType === 'FACT_RESPONSE' || taskType === 'CLAIM') {
+    return 'DESCRIPTIVE';
+  }
+
+  if (taskType === 'ISSUE') {
+    if (pack.contentRole === 'ISSUE_ARGUMENT' || pack.contentRole === 'PETITION') return 'ARGUMENTATIVE';
+    if (pack.contentRole === 'FACT_RESPONSE') return 'DESCRIPTIVE';
+    return undefined;
+  }
+
+  if (taskType === 'SECTION_SUPPORT') {
+    if (pack.legalIssue.issueType === 'FACT_DISPUTE' || pack.legalIssue.issueType === 'CLAIM_ELEMENT') return 'DESCRIPTIVE';
+    if (pack.contentRole === 'FACT_RESPONSE') return 'DESCRIPTIVE';
+    if (pack.contentRole === 'ISSUE_ARGUMENT' || pack.contentRole === 'PETITION') return 'ARGUMENTATIVE';
+    return undefined;
   }
 
   if (pack.contentRole === 'FACT_RESPONSE' && pack.legalIssue.issueType === 'FACT_DISPUTE') {
@@ -527,7 +616,7 @@ export function buildIssueContextPack(
 }
 
 export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): IssuePrompt {
-  const draftContract = selectIssueDraftContract(pack);
+  const draftContract = selectIssueDraftContract(pack, task);
   if (!draftContract) throw new IssueContextScopeError('ISSUE_DRAFT_CONTRACT_UNRESOLVED', pack.legalIssue.id);
   const fieldRequirements = getIssueDraftContractRequirements(draftContract, {
     hasLinkedEvidence: pack.evidenceMentions.length > 0 || pack.evidenceOffers.length > 0,
@@ -1139,7 +1228,7 @@ export async function executeIssueScopedGeneration(
   const pack = buildIssueContextPack(task, { ...doc, coverageMatrix }, caseAnalysis, matrix!, {
     verifiedResearch: eligibility.verifiedResearch,
   });
-  const draftContract = selectIssueDraftContract(pack);
+  const draftContract = selectIssueDraftContract(pack, task);
   if (!draftContract) return traceOutcome(localIssueOutcome(task, 'ISSUE_DRAFT_CONTRACT_UNRESOLVED', 'BLOCKED'));
   const prompt = buildIssuePrompt(pack, task);
   const requestPack: IssueContextPack = { ...pack, draftContract };
@@ -1247,6 +1336,7 @@ export async function executeIssueScopedGeneration(
 
     const modelValidation = validateIssueDraftModelOutput(parsed, draftContract, activePrompt.fieldRequirements);
     if (!modelValidation.valid || !modelValidation.output) {
+      console.log('[issueScopedGeneration:modelValidation_error]', task.id, modelValidation.errors);
       const validation: IssueDraftValidation = {
         status: 'INVALID_FATAL',
         errors: modelValidation.errors,
@@ -1322,6 +1412,7 @@ export async function executeIssueScopedGeneration(
       return runAttempt(2, retryPrompt, attempts.map((item) => ({ ...item, status: 'VALIDATION_WEAK' })));
     }
     if (!validation.result || validation.status === 'INVALID_FATAL' || validation.status === 'INVALID_RETRYABLE') {
+      console.log('[issueScopedGeneration:validation_error]', task.id, validation.errors);
       recordAttemptTrace(response, 'VALIDATION_FAILED', validation);
       return {
         legalIssueId: eligibility.legalIssueId!,
@@ -1335,6 +1426,7 @@ export async function executeIssueScopedGeneration(
 
     const evaluation = evaluateIssueDraftResult(validation.result, task, doc, pack);
     if (evaluation.verdict === 'FAIL') {
+      console.log('[issueScopedGeneration:semantic_fail]', task.id, evaluation.verdict, evaluation.hardFailReasons, evaluation.deficiencies);
       recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
       return {
         legalIssueId: eligibility.legalIssueId!,
@@ -1357,6 +1449,7 @@ export async function executeIssueScopedGeneration(
       return runAttempt(2, retryPrompt, attempts.map((item) => ({ ...item, status: 'SEMANTIC_WEAK' })));
     }
     if (evaluation.verdict === 'WEAK') {
+      console.log('[issueScopedGeneration:semantic_weak]', task.id, evaluation.verdict, evaluation.deficiencies);
       recordAttemptTrace(response, 'SEMANTIC_FAILED', validation, validation.result, evaluation);
       return {
         legalIssueId: eligibility.legalIssueId!,

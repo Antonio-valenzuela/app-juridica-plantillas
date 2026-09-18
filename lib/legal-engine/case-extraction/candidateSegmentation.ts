@@ -6,7 +6,7 @@ export interface SegmentationResult {
   stats: SegmentationStats;
 }
 
-const LIST_SECTION_RE = /^(?:HECH(?:O|OS)|ANTECEDENTE(?:S)?|PRESTACION(?:ES)?|PRETENSION(?:ES)?|PETICION(?:ES)?|PETITORIO(?:S)?|PRUEBA(?:S)?|DOCUMENTAL(?:ES)?|ANEXO(?:S)?|ARGUMENTO(?:S)?|FUNDAMENTO(?:S)?|DERECHO|CONCEPTO(?:S)?\s+DE\s+VIOLACI[ÓO]N|AGRAVIO(?:S)?)$/i;
+const LIST_SECTION_RE = /^(?:(?:(?:Y\s+POR\s+OTRO\s+LADO,?\s+)?(?:DOY\s+)?CONTESTACI[ÓO]N\s+(?:A\s+LOS\s+|DE\s+)?HECHOS)|HECH(?:O|OS)|ANTECEDENTE(?:S)?|(?:CONTESTACI[ÓO]N\s+(?:DE\s+|A\s+LAS\s+)?PRESTACIONES)|PRESTACION(?:ES)?|PRETENSION(?:ES)?|PETICION(?:ES)?|PETITORIO(?:S)?|PRUEBA(?:S)?|DOCUMENTAL(?:ES)?|ANEXO(?:S)?|ARGUMENTO(?:S)?|FUNDAMENTO(?:S)?|DERECHO|CONCEPTO(?:S)?\s+DE\s+VIOLACI[ÓO]N|AGRAVIO(?:S)?)$/i;
 
 function normalizeHeading(text: string): string | undefined {
   const normalized = text
@@ -14,7 +14,13 @@ function normalizeHeading(text: string): string | undefined {
     .replace(/[\s:;,.\-]+$/, '')
     .trim()
     .toUpperCase();
-  return LIST_SECTION_RE.test(normalized) ? normalized : undefined;
+  if (LIST_SECTION_RE.test(normalized)) {
+    if (/HECHO/i.test(normalized)) return 'HECHOS';
+    if (/PRESTACI|PRETENS|PETICI/i.test(normalized)) return 'PRESTACIONES';
+    if (/PRUEBA|EVIDENC/i.test(normalized)) return 'PRUEBAS';
+    return normalized;
+  }
+  return undefined;
 }
 
 function headingWithTail(text: string): { heading?: string; tail?: string } {

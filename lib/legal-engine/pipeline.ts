@@ -1010,7 +1010,8 @@ export function buildDraftingPlan(
     let counterargumentStrategy: string | undefined;
     const isPrestacionesSec = /prestaci|pretensi/i.test(sec.title);
     const isHechosSec = /hecho|antecedente/i.test(sec.title);
-    const isArgumentOrAgravio = !isPrestacionesSec && !isHechosSec && (sec.type === 'argument' || /agravio|concepto.*violaci/i.test(sec.title));
+    const isObjetoSec = /objeto.*escrito/i.test(sec.title);
+    const isArgumentOrAgravio = !isPrestacionesSec && !isHechosSec && !isObjetoSec && (sec.type === 'argument' || /agravio|concepto.*violaci/i.test(sec.title));
     const richIssuesForSection = (legalIssueMatrix?.issues || [])
       .filter((issue) => issue.coverageItemIds.some((id) => coverageItemIds.includes(id)));
     if (isArgumentOrAgravio && isRich && richIssuesForSection.length > 0) {
@@ -1185,7 +1186,7 @@ export function buildDraftingPlan(
         ? (caseAnalysis?.richCaseAnalysis?.facts || []).map((fact) => fact.proposition)
         : caseAnalysis?.facts?.length
           ? caseAnalysis.facts.map((fact) => `${fact.number}: ${fact.text}`)
-          : caseAnalysis?.proceduralTimeline.map((e) => `${e.date}: ${e.event}`) || [],
+          : caseAnalysis?.proceduralTimeline?.map((e) => `${e.date}: ${e.event}`) || [],
       legalIssues,
       historicalReferences: [],
       expectedDepth,
@@ -2772,7 +2773,18 @@ export async function generateSection(
   const sourceBackedProceduralReferenceSection = sec.type === 'background'
     && hasSourceBackedProceduralEvent
     && hasReferenceOnlyProceduralCoverage;
+  const hasFacts = Boolean(caseAnalysis?.facts?.length || caseAnalysis?.richCaseAnalysis?.facts?.length);
+  const hasClaims = Boolean(caseAnalysis?.claims?.length || caseAnalysis?.claimResponses?.length || caseAnalysis?.richCaseAnalysis?.claims?.length);
+  const isContestacion = isContestacionType(doc.documentType, doc.documentTypeLabel);
+  const isSubstantiveContestacionSection = isContestacion && (
+    (/hecho/i.test(sectionTitleKey) && hasFacts) ||
+    (/prestaci|pretensi/i.test(sectionTitleKey) && (hasClaims || hasFacts)) ||
+    (/excepcion|defensa/i.test(sectionTitleKey) && (hasConfirmedDefenses || hasFacts)) ||
+    (/prueba|evidencia/i.test(sectionTitleKey) && (hasEvidence || hasFacts)) ||
+    (/alegato/i.test(sectionTitleKey) && (hasConfirmedDefenses || hasConfirmedFactPositions || hasFacts))
+  );
   const aiEligibleSection = !formalSection && (
+    isSubstantiveContestacionSection ||
     (/excepcion|defensa/.test(sectionTitleKey) && hasConfirmedDefenses) ||
     (/prueba|evidencia/.test(sectionTitleKey) && hasEvidence) ||
     (/alegato/.test(sectionTitleKey) && (hasConfirmedDefenses || hasConfirmedFactPositions)) ||
@@ -3029,7 +3041,7 @@ export async function generateSection(
     }
   }
 
-  if (customGenerator) {
+  if (customGenerator && aiEligibleSection) {
     const customText = await customGenerator({ section: sec, doc });
     const sanitized = sanitizeGeneratedText(String(customText));
     sec.content = [{
@@ -3142,6 +3154,12 @@ export async function runGenerationPipeline(
 
   const explicitSelectedDocumentType = input.selectedDocumentType?.trim()
     || (input.taxonomy?.documentType && input.taxonomy.documentType !== 'otro' ? input.taxonomy.documentType.trim() : undefined);
+  const isNewWritingWorkflow = input.flow === 'NEW_WRITING' || input.workflow?.flow === 'NEW_WRITING';
+  const hasCurrentDocumentSelection = Boolean(
+    explicitSelectedDocumentType
+    || input.documentTypeLabel?.trim()
+    || input.taxonomy?.documentType?.trim(),
+  );
   const sourceDetectedTypeBeforeGeneration = inferSourceDocumentType(sources);
   let preflightRouting: DocumentRoutingResolution | undefined;
   let preflightSourceOutputCompatibility: SourceOutputCompatibilityResult | undefined;
@@ -3252,13 +3270,15 @@ export async function runGenerationPipeline(
       } as any;
     }
     // FASE 10 — CONTINUIDAD DE IDENTIDAD en regeneraciones: un documento
-    // existente conserva SU tipo documental (y por tanto SU plantilla) salvo
-    // que el abogado pida expresamente otro rótulo. La instrucción nueva no
-    // puede cambiar la identidad del documento.
+    // existente conserva SU tipo documental (y por tanto SU plantilla) cuando
+    // se trata de una regeneración sin una selección actual. Una redacción
+    // NEW_WRITING o una selección explícita inaugura la identidad del escrito
+    // y no puede contaminarse con la plantilla de una pestaña anterior.
     if (
       input.existingDocument?.documentType &&
       !input.existingClassification &&
-      !input.documentTypeLabel
+      !hasCurrentDocumentSelection &&
+      !isNewWritingWorkflow
     ) {
       const prev = input.existingDocument;
       doc.classification = {
@@ -3476,6 +3496,66 @@ export async function runGenerationPipeline(
       documentTypeLabel: input.documentTypeLabel,
       sourceDocumentType: inferSourceDocumentType(sources, caseAnalysis),
       outputFilename: doc.title,
+    });
+    const documentTypeResolutionSource = explicitSelectedDocumentType
+      ? (input.selectedDocumentType?.trim() ? 'EXPLICIT_UI' : 'EXPLICIT_TAXONOMY')
+      : input.documentTypeLabel?.trim()
+        ? 'EXPLICIT_LABEL'
+        : routing.fallbackUsed
+          ? 'SAFE_FALLBACK'
+          : isNewWritingWorkflow
+            ? 'NEW_WRITING_INTAKE'
+            : input.existingDocument?.documentType
+              ? 'CURRENT_DOCUMENT'
+              : 'INFERRED_REQUEST';
+    const matterResolutionSource = input.taxonomy?.matter
+      ? 'EXPLICIT_TAXONOMY'
+      : input.matter?.trim()
+        ? 'EXPLICIT_UI'
+        : isNewWritingWorkflow
+          ? 'NEW_WRITING_INTAKE'
+          : input.existingDocument?.matter
+            ? 'CURRENT_DOCUMENT'
+            : 'INFERRED_REQUEST';
+    const jurisdictionResolutionSource = input.taxonomy?.jurisdiction
+      ? 'EXPLICIT_TAXONOMY'
+      : input.jurisdiction?.trim()
+        ? 'EXPLICIT_UI'
+        : isNewWritingWorkflow
+          ? 'NEW_WRITING_INTAKE'
+          : input.existingDocument?.jurisdiction
+            ? 'CURRENT_DOCUMENT'
+            : 'INFERRED_REQUEST';
+    const requestedDocumentType = explicitSelectedDocumentType
+      || input.documentTypeLabel?.trim()
+      || input.workflow?.intake?.documentType
+      || input.intake?.documentType
+      || null;
+    const requestedMatter = input.taxonomy?.matter
+      ? resolveMatterLabel(input.taxonomy)
+      : input.matter?.trim()
+        || input.workflow?.intake?.matter
+        || input.intake?.matter
+        || null;
+    const requestedJurisdiction = input.taxonomy?.jurisdiction
+      ? resolveJurisdictionLabel(input.taxonomy)
+      : input.jurisdiction?.trim()
+        || input.workflow?.intake?.jurisdiction
+        || input.intake?.jurisdiction
+        || null;
+    traceContext?.recordRoutingResolution({
+      requestedDocumentType,
+      resolvedDocumentType: routing.resolvedTemplate,
+      requestedMatter,
+      resolvedMatter: doc.matter || null,
+      requestedJurisdiction,
+      resolvedJurisdiction: doc.jurisdiction || null,
+      documentTypeResolutionSource,
+      matterResolutionSource,
+      jurisdictionResolutionSource,
+      fallbackReason: routing.fallbackUsed
+        ? 'No se resolvió un tipo documental canónico explícito o inferido; se aplicó el fallback seguro de escrito libre.'
+        : null,
     });
     const docTemplate = routing.template;
     doc.documentType = routing.resolvedTemplate;
@@ -3707,7 +3787,7 @@ export async function runGenerationPipeline(
           (secPlan.factResponsePlans && secPlan.factResponsePlans.length > 0)
         )
       );
-      const isStructuredContestResponse = !hasDetailedContestPlans && isDemandContestacionType(doc.documentType, doc.documentTypeLabel) && /hechos|prestacion|pretension/i.test(section.title);
+      const isStructuredContestResponse = !generatedRaw.aiUsed && !hasDetailedContestPlans && isDemandContestacionType(doc.documentType, doc.documentTypeLabel) && /hechos|prestacion|pretension/i.test(section.title);
       const generated = isStructuredContestResponse
         ? {
             ...generatedRaw,

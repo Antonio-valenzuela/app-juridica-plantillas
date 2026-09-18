@@ -843,17 +843,6 @@ export function CaseDocumentsReader({
         </aside>
       </div>
 
-      {/* Barra inferior de progreso */}
-      {generationJob && (
-        <div className="sticky bottom-4 z-20">
-          <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-xl">
-            <GenerationStatusBar
-              job={generationJob}
-              title="Generando contestación…"
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

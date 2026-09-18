@@ -27,6 +27,14 @@ export type GenerationOrigin =
 
 export type GeneratedBy = 'AI' | 'DETERMINISTIC' | 'USER' | 'FALLBACK' | 'SOURCE_DIRECT';
 export type ProviderActuallyUsed = 'NVIDIA' | 'LOCAL' | 'NONE';
+export type GenerationRoutingResolutionSource =
+  | 'EXPLICIT_UI'
+  | 'EXPLICIT_TAXONOMY'
+  | 'EXPLICIT_LABEL'
+  | 'NEW_WRITING_INTAKE'
+  | 'CURRENT_DOCUMENT'
+  | 'INFERRED_REQUEST'
+  | 'SAFE_FALLBACK';
 
 export type CoverageTraceStatusReason =
   | 'VALID_SUBSTANTIVE_BLOCK'
@@ -237,6 +245,16 @@ export interface GenerationTrace {
   completedAt?: string;
   documentType: string;
   matter: string;
+  requestedDocumentType?: string | null;
+  resolvedDocumentType?: string | null;
+  requestedMatter?: string | null;
+  resolvedMatter?: string | null;
+  requestedJurisdiction?: string | null;
+  resolvedJurisdiction?: string | null;
+  documentTypeResolutionSource?: GenerationRoutingResolutionSource;
+  matterResolutionSource?: GenerationRoutingResolutionSource;
+  jurisdictionResolutionSource?: GenerationRoutingResolutionSource;
+  fallbackReason?: string | null;
   workflow?: string;
   providerRequested?: string;
   providerActuallyUsed?: ProviderActuallyUsed;
@@ -291,6 +309,18 @@ export interface GenerationTraceContext {
   snapshotDocumentPlan(value: unknown): void;
   snapshotCoverageBefore(value: CoverageMatrix | undefined): void;
   snapshotCoverageAfter(value: CoverageMatrix | undefined): void;
+  recordRoutingResolution(value: {
+    requestedDocumentType?: string | null;
+    resolvedDocumentType?: string | null;
+    requestedMatter?: string | null;
+    resolvedMatter?: string | null;
+    requestedJurisdiction?: string | null;
+    resolvedJurisdiction?: string | null;
+    documentTypeResolutionSource?: GenerationRoutingResolutionSource;
+    matterResolutionSource?: GenerationRoutingResolutionSource;
+    jurisdictionResolutionSource?: GenerationRoutingResolutionSource;
+    fallbackReason?: string | null;
+  }): void;
   recordTaskPlanned(task: GenerationTask, contextPack?: unknown): void;
   recordTaskExecution(entry: TaskExecutionTrace): void;
   recordIssueGenerationAttempt(entry: IssueGenerationAttemptTrace): void;
@@ -488,6 +518,10 @@ export function createGenerationTraceContext(input: {
     snapshotCoverageAfter(value) {
       if (!enabled) return;
       trace.coverageMatrixAfterGeneration = snapshotCoverage(value, trace.coverageMatrixBeforeGeneration, buildTaskLinks(), buildLegalIssueLinks(input.doc.legalIssueMatrix));
+    },
+    recordRoutingResolution(value) {
+      if (!enabled) return;
+      Object.assign(trace, sanitizeTraceValue(value));
     },
     recordTaskPlanned(task, contextPack) {
       if (!enabled) return;

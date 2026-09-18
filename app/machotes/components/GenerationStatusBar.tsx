@@ -47,7 +47,7 @@ export function GenerationStatusBar({
   const usingFallback = isRunning && job.aiProvider === 'fallback';
 
   return (
-    <div className="rounded-xl bg-white px-4 py-3">
+    <div data-testid="generation-status-bar" className="rounded-xl bg-white px-4 py-3">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           {isRunning && (

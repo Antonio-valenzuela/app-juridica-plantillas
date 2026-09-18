@@ -649,6 +649,86 @@ describe('FASE 4 issue eligibility and plan linkage', () => {
 });
 
 describe('FASE 4 allow-listed issue context and prompt strategies', () => {
+  describe('task-to-draft-contract invariant', () => {
+    const descriptivePayload = {
+      factualDevelopment: ['Desarrollo descriptivo respaldado por la fuente.'],
+      evidentiaryDevelopment: ['La evidencia vinculada se describe sin ampliar su alcance.'],
+      sourceEntityIds: ['fixture-f-claim-1'],
+      unresolvedRequirements: [],
+    };
+
+    const argumentativePayload = {
+      thesis: 'TEST-ARGUMENTATIVE-CONTENT-XYZ sostiene la respuesta a la cuestión jurídica.',
+      factualDevelopment: ['El hecho vinculado delimita la cuestión jurídica.'],
+      evidentiaryDevelopment: ['La mención probatoria se usa sólo dentro de su alcance.'],
+      legalDevelopment: [],
+      application: 'TEST-ARGUMENTATIVE-CONTENT-XYZ aplica el planteamiento al material permitido.',
+      conclusion: 'TEST-ARGUMENTATIVE-CONTENT-XYZ concluye la cuestión sin ampliar el contexto.',
+      sourceEntityIds: ['fixture-f-claim-1', 'fixture-f-fact-1', 'fixture-f-evidence-mention-1'],
+      authorityMentionIds: [],
+      unresolvedRequirements: ['REQUIRES_LEGAL_RESEARCH'],
+    };
+
+    it('RED A: ISSUE in ISSUE_ARGUMENT selects one ARGUMENTATIVE contract for prompt schema and validator', () => {
+      const task = taskForIssue();
+      const pack = packFor('CLAIM_ELEMENT');
+      const prompt = buildIssuePrompt(pack, task);
+
+      expect(task.taskType).toBe('ISSUE');
+      expect(pack.contentRole).toBe('ISSUE_ARGUMENT');
+      expect(prompt.draftContract).toBe('ARGUMENTATIVE');
+      expect(prompt.outputSchema.required).toEqual(expect.arrayContaining(['thesis', 'application', 'conclusion']));
+      expect(validateIssueDraftModelOutput(argumentativePayload, prompt.draftContract, prompt.fieldRequirements)).toMatchObject({
+        valid: true,
+        errors: [],
+      });
+    });
+
+    it('RED B: SECTION_SUPPORT for claim-backed section support remains DESCRIPTIVE end to end', () => {
+      const task: GenerationTask = { ...taskForIssue(), taskType: 'SECTION_SUPPORT', type: 'SECTION_SUPPORT' };
+      const pack = packFor('CLAIM_ELEMENT');
+      const prompt = buildIssuePrompt(pack, task);
+
+      expect(pack.contentRole).toBe('ISSUE_ARGUMENT');
+      expect(prompt.draftContract).toBe('DESCRIPTIVE');
+      expect(prompt.outputSchema.required).not.toEqual(expect.arrayContaining(['thesis', 'application', 'conclusion']));
+      expect(validateIssueDraftModelOutput(descriptivePayload, prompt.draftContract, prompt.fieldRequirements)).toMatchObject({
+        valid: true,
+        errors: [],
+      });
+    });
+
+    it('RED C: FACT_RESPONSE preserves its DESCRIPTIVE provider and validator contract', () => {
+      const { analysis, doc, matrix, task: issueTask } = descriptiveExecutionContext();
+      const task: GenerationTask = { ...issueTask, taskType: 'FACT_RESPONSE', type: 'FACT_RESPONSE' };
+      const pack = buildIssueContextPack(task, doc, analysis, matrix);
+      const prompt = buildIssuePrompt(pack, task);
+      const payload = { ...descriptivePayload, sourceEntityIds: ['fixture-f-fact-1'] };
+
+      expect(pack.contentRole).toBe('FACT_RESPONSE');
+      expect(prompt.draftContract).toBe('DESCRIPTIVE');
+      expect(prompt.outputSchema.required).not.toEqual(expect.arrayContaining(['thesis', 'application', 'conclusion']));
+      expect(validateIssueDraftModelOutput(payload, prompt.draftContract, prompt.fieldRequirements)).toMatchObject({
+        valid: true,
+        errors: [],
+      });
+    });
+
+    it('RED D: CLAIM preserves its DESCRIPTIVE provider and validator contract', () => {
+      const task: GenerationTask = { ...taskForIssue(), taskType: 'CLAIM', type: 'CLAIM' };
+      const pack = packFor('CLAIM_ELEMENT');
+      const prompt = buildIssuePrompt(pack, task);
+
+      expect(pack.contentRole).toBe('ISSUE_ARGUMENT');
+      expect(prompt.draftContract).toBe('DESCRIPTIVE');
+      expect(prompt.outputSchema.required).not.toEqual(expect.arrayContaining(['thesis', 'application', 'conclusion']));
+      expect(validateIssueDraftModelOutput(descriptivePayload, prompt.draftContract, prompt.fieldRequirements)).toMatchObject({
+        valid: true,
+        errors: [],
+      });
+    });
+  });
+
   it('selects DESCRIPTIVE from FACT_RESPONSE plus an ESTABLISHED_FACT and emits no argument fields', () => {
     const { analysis, doc, matrix, task } = descriptiveExecutionContext();
     const pack = buildIssueContextPack(task, doc, analysis, matrix);
@@ -995,6 +1075,46 @@ describe('FASE 4 allow-listed issue context and prompt strategies', () => {
 });
 
 describe('FASE 4 provider seam and post-provider validation', () => {
+  it('preserves TEST-ARGUMENTATIVE-CONTENT-XYZ from provider through parser validator DraftBlock assembly and editor model', async () => {
+    const { analysis, doc, task } = readyExecutionContext();
+    const sentinel = 'TEST-ARGUMENTATIVE-CONTENT-XYZ';
+    let providerContent = '';
+    const invokeProvider = vi.fn().mockImplementation(async (request: any) => {
+      providerContent = JSON.stringify(issueResultForRequest(request, {
+        thesis: `${sentinel} tesis concreta.`,
+        application: `${sentinel} aplicación concreta al material vinculado.`,
+        conclusion: `${sentinel} conclusión concreta.`,
+      }));
+      return {
+        success: true,
+        content: providerContent,
+        provider: 'nvidia',
+        providerActuallyUsed: 'nvidia',
+        model: 'fixture-model',
+      };
+    });
+
+    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+    expect(providerContent).toContain(sentinel);
+    expect(outcome.validation?.status).toBe('VALID_ACCEPTED');
+    expect(JSON.stringify(outcome.result)).toContain(sentinel);
+    expect(outcome.block?.text).toContain(sentinel);
+
+    const section = createDocumentNode({ id: task.sectionId, type: 'argument', title: task.sectionTitle, order: 1 });
+    const issueAssembly = assembleIssueDraftBlocks(section, [outcome]);
+    const assembled = assembleLegalDraft(makeAssemblyInput({
+      document: { ...doc, sections: [section] },
+      documentPlan: { sections: [section], planSource: 'GENERATED', templateId: 'fixture-argumentative-sentinel' },
+      candidateSections: [section],
+      candidateBlocks: [{ sectionId: task.sectionId, block: issueAssembly.blocks[0] }],
+      generationTasks: [makeAssemblyTask({ id: task.id, sectionId: task.sectionId, order: 0 })],
+    }));
+    const editorModel = assembled.document;
+
+    expect(assembled.orderedBlocks[0].text).toContain(sentinel);
+    expect(editorModel.sections[0].content.some((block) => block.text.includes(sentinel))).toBe(true);
+  });
+
   it('preserves provider substantive content through parsing, DraftBlock, assembly, and document output', async () => {
     const { analysis, doc, task } = descriptiveExecutionContext();
     const sentinel = 'TEST-SUBSTANTIVE-CONTENT-XYZ';
