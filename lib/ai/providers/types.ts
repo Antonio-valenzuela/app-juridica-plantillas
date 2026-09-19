@@ -23,6 +23,8 @@ export interface AIRequest {
   outputSchema?: Record<string, any>;
   temperature?: number;
   maxTokens?: number;
+  /** Reintentos opt-in por proveedor para timeouts, rate limits y 5xx. */
+  maxProviderRetries?: number;
   requestId?: string;
 }
 
@@ -62,18 +64,33 @@ export interface AIHealthResult {
   lastError?: string | null;
 }
 
-export interface AIProvider {
+export interface LegalAIProvider {
   id: AIProviderId;
   isAvailable(): Promise<boolean>;
   generate(request: AIRequest): Promise<AIProviderResult>;
-  healthCheck(): Promise<AIHealthResult>;
+  healthCheck?(): Promise<AIHealthResult>;
+}
+
+export type AIProvider = LegalAIProvider;
+
+export function redactSecrets(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/([\?&]key=)[^&\s"']+/gi, "$1[REDACTED]")
+    .replace(/key=[^&\s]+/gi, "key=[REDACTED]")
+    .replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
+    .replace(/Authorization:\s*[^\s"']+/gi, "Authorization: [REDACTED]")
+    .replace(/x-goog-api-key:\s*[^\s"']+/gi, "x-goog-api-key: [REDACTED]")
+    .replace(/x-api-key:\s*[^\s"']+/gi, "x-api-key: [REDACTED]")
+    .replace(/gsk_[a-zA-Z0-9_-]+/gi, "gsk_[REDACTED]")
+    .replace(/nvapi-[a-zA-Z0-9_-]+/gi, "nvapi-[REDACTED]")
+    .replace(/AIza[a-zA-Z0-9_-]+/gi, "AIza[REDACTED]")
+    .replace(/AQ\.[a-zA-Z0-9_-]+/gi, "AQ.[REDACTED]")
+    .replace(/sk-[a-zA-Z0-9_-]{20,}/gi, "sk-[REDACTED]");
 }
 
 export function sanitizeAiError(err: unknown): string {
   if (!err) return "Error desconocido";
   const msg = err instanceof Error ? err.message : String(err);
-  return msg
-    .replace(/key=[^&\s]+/gi, "key=[REDACTED]")
-    .replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
-    .slice(0, 300);
+  return redactSecrets(msg).slice(0, 300);
 }

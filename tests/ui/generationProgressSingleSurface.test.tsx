@@ -26,6 +26,19 @@ describe('Generation progress — single visible surface', () => {
     expect(countStatusBarMounts(modal)).toBe(0);
     expect(checklist).not.toContain("from './GenerationStatusBar'");
     expect(page).toContain('onCancel={handleCancelGeneration}');
+
+    expect(page).not.toContain('/* Barra determinada */');
+    expect(page).not.toContain('mach-progress-indeterminate');
+    expect(page).not.toContain('Fuentes y trazabilidad');
+
+    const metadataSubbarStart = reader.indexOf('/* Document Metadata sub-bar */');
+    const viewerBodyStart = reader.indexOf('/* Viewer Body */');
+    expect(metadataSubbarStart).toBeGreaterThanOrEqual(0);
+    expect(viewerBodyStart).toBeGreaterThan(metadataSubbarStart);
+    const metadataSubbar = reader.slice(metadataSubbarStart, viewerBodyStart);
+    expect(metadataSubbar).toContain('Texto extraído');
+    expect(metadataSubbar).toContain('Reemplazar documento');
+    expect(reader).not.toContain('Carga, consulta y navega el expediente base página por página.');
   });
 
   it('renderiza una sola superficie activa con cancelación disponible', () => {
@@ -43,5 +56,13 @@ describe('Generation progress — single visible surface', () => {
 
     expect(markup.match(/data-testid="generation-status-bar"/g)).toHaveLength(1);
     expect(markup.match(/Cancelar/g)).toHaveLength(1);
+  });
+
+  it('retira del Motor Jurídico el panel de análisis duplicado', () => {
+    const page = fs.readFileSync(pagePath, 'utf8');
+
+    expect(page).not.toContain('COLUMNA 2: ANÁLISIS JURÍDICO');
+    expect(page).not.toContain('Estado del asunto:');
+    expect(page).toContain('className="lg:col-span-12 bg-white border border-slate-200');
   });
 });

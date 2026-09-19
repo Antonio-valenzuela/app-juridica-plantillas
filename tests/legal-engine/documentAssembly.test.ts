@@ -157,4 +157,122 @@ describe('deterministic document assembly', () => {
     expect(result.document.sections.find((section) => section.id === 'sec-hechos')?.content.map((block) => block.text))
       .toContain(providerOutput);
   });
+
+  describe('fail-closed admission invariants for VALID_NON_FINAL and fallbacks', () => {
+    it('admits VALID_NON_FINAL AI block without fallback as draft for lawyer review', () => {
+      const block = makeNonFinalBlock({
+        id: 'blk-ai-non-final',
+        text: 'Desarrollo argumentativo del quejoso pendiente de refinamiento.',
+        generatedBy: 'AI',
+        fallbackStatus: undefined,
+        semanticEvaluation: undefined,
+      });
+      const result = assembleLegalDraft(inputWithBlocks(
+        [{ sectionId: 'sec-hechos', block }],
+        [makeTask({ id: 'task-blk-ai-non-final' })],
+      ));
+      expect(result.orderedBlocks.map((b) => b.id)).toContain('blk-ai-non-final');
+      expect(result.findings.some((f) => f.code === 'VALID_NON_FINAL_BLOCK_ADMITTED')).toBe(true);
+    });
+
+    it('admits VALID_NON_FINAL legitimate deterministic fallback as draft for lawyer review', () => {
+      const fallbackBlock = makeNonFinalBlock({
+        id: 'blk-legit-fallback',
+        text: 'Se expone el marco procesal y legal aplicable al caso conforme a la ley.',
+        generatedBy: 'DETERMINISTIC',
+        fallbackStatus: 'DETERMINISTIC_FALLBACK',
+        semanticEvaluation: undefined,
+      });
+      const result = assembleLegalDraft(inputWithBlocks(
+        [{ sectionId: 'sec-hechos', block: fallbackBlock }],
+        [makeTask({ id: 'task-blk-legit-fallback' })],
+      ));
+      expect(result.orderedBlocks.map((b) => b.id)).toContain('blk-legit-fallback');
+      expect(result.findings.some((f) => f.code === 'VALID_NON_FINAL_BLOCK_ADMITTED')).toBe(true);
+    });
+
+    it('excludes empty block even when marked VALID_NON_FINAL (fail-closed)', () => {
+      const emptyBlock = makeNonFinalBlock({
+        id: 'blk-empty-fallback',
+        text: '   ',
+        generatedBy: 'DETERMINISTIC',
+        fallbackStatus: 'DETERMINISTIC_FALLBACK',
+      });
+      const result = assembleLegalDraft(inputWithBlocks(
+        [{ sectionId: 'sec-hechos', block: emptyBlock }],
+        [makeTask({ id: 'task-blk-empty-fallback' })],
+      ));
+      expect(result.orderedBlocks.map((b) => b.id)).not.toContain('blk-empty-fallback');
+      expect(result.excludedDraftBlockIds).toContain('blk-empty-fallback');
+      expect(result.findings.some((f) => f.code === 'EMPTY_BLOCK_EXCLUDED')).toBe(true);
+    });
+
+    it('excludes block with unresolved seed markers even when marked VALID_NON_FINAL (fail-closed)', () => {
+      const markerBlock = makeNonFinalBlock({
+        id: 'blk-marker-fallback',
+        text: 'Texto con [DATO PENDIENTE: expediente] sin resolver.',
+        generatedBy: 'DETERMINISTIC',
+        fallbackStatus: 'DETERMINISTIC_FALLBACK',
+      });
+      const result = assembleLegalDraft(inputWithBlocks(
+        [{ sectionId: 'sec-hechos', block: markerBlock }],
+        [makeTask({ id: 'task-blk-marker-fallback' })],
+      ));
+      expect(result.orderedBlocks.map((b) => b.id)).not.toContain('blk-marker-fallback');
+      expect(result.excludedDraftBlockIds).toContain('blk-marker-fallback');
+      expect(result.findings.some((f) => f.code === 'UNRESOLVED_BLOCK_EXCLUDED')).toBe(true);
+    });
+
+    it('excludes block with semantic FAIL even when marked VALID_NON_FINAL (fail-closed)', () => {
+      const failBlock = makeNonFinalBlock({
+        id: 'blk-failed-eval',
+        text: 'Texto reprobado en evaluación semántica forense.',
+        semanticEvaluation: {
+          blockId: 'blk-failed-eval',
+          taskId: 'task-blk-failed-eval',
+          verdict: 'FAIL',
+          overallScore: 0.2,
+          factualCoverage: 0.1,
+          legalSupport: 0.1,
+          evidenceLinkage: 0,
+          issueResponsiveness: 0,
+          argumentDepth: 0,
+          specificity: 0,
+          completeness: 0,
+          repetitionPenalty: 0,
+          unsupportedAssertionPenalty: 0.8,
+          revisionMode: 'REWRITE',
+          deficiencies: ['Reprobado'],
+          coveredCoverageItemIds: [],
+          missingCoverageItemIds: ['cov-fixture'],
+          hardFailReasons: ['HARD_FAIL_CRITICAL'],
+        },
+      });
+      const result = assembleLegalDraft(inputWithBlocks(
+        [{ sectionId: 'sec-hechos', block: failBlock }],
+        [makeTask({ id: 'task-blk-failed-eval' })],
+      ));
+      expect(result.orderedBlocks.map((b) => b.id)).not.toContain('blk-failed-eval');
+      expect(result.excludedDraftBlockIds).toContain('blk-failed-eval');
+      expect(result.findings.some((f) => f.code === 'SEMANTIC_BLOCK_NOT_ACCEPTED')).toBe(true);
+    });
+
+    it('excludes unvalidated fallback block without VALID_NON_FINAL or formal acceptance', () => {
+      const rawFallback = makeNonFinalBlock({
+        id: 'blk-raw-fallback',
+        text: 'Texto de fallback sin estatus validado.',
+        issueDraftValidationStatus: undefined as any,
+        fallbackStatus: 'DETERMINISTIC_FALLBACK',
+        generationRequirement: 'AI_REQUIRED',
+        semanticEvaluation: undefined,
+      });
+      const result = assembleLegalDraft(inputWithBlocks(
+        [{ sectionId: 'sec-hechos', block: rawFallback }],
+        [makeTask({ id: 'task-blk-raw-fallback' })],
+      ));
+      expect(result.orderedBlocks.map((b) => b.id)).not.toContain('blk-raw-fallback');
+      expect(result.excludedDraftBlockIds).toContain('blk-raw-fallback');
+      expect(result.findings.some((f) => f.code === 'FALLBACK_BLOCK_EXCLUDED')).toBe(true);
+    });
+  });
 });

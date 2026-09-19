@@ -1,21 +1,31 @@
 /**
  * lib/ai/providerChain.ts
- * ÚNICA fuente de verdad para el orden de providers.
- * NVIDIA es primario cuando NVIDIA_PRIMARY_PROVIDER !== 'false'.
- * Usado por orchestrator y router (wrapper) para evitar selección duplicada contradictoria.
+ * Única fuente de verdad para el orden de providers.
+ * Orden predeterminado: Gemini (principal) → Groq (secundario) → NVIDIA (tercero) → local (determinístico).
  */
 
 export function getProviderChain(): string[] {
-  // NVIDIA ONLY: nvidia → local (determinístico). Mantiene AI_PROVIDER_CHAIN para compatibilidad pero filtra a nvidia/local.
-  const raw = (process.env.AI_PROVIDER_CHAIN || 'nvidia,local').trim();
-  let chain = raw.split(',').map((p) => p.trim().toLowerCase()).filter(Boolean)
-    .filter((p) => p === 'nvidia' || p === 'local');
-  if (chain.length === 0) chain = ['nvidia', 'local'];
-  if (!chain.includes('nvidia')) chain.unshift('nvidia');
-  if (!chain.includes('local')) chain.push('local');
-  // Deduplicar
+  const raw = (process.env.AI_PROVIDER_CHAIN || '').trim();
+  let chain: string[] = [];
+  if (raw) {
+    chain = raw.split(',').map((p) => p.trim().toLowerCase()).filter(Boolean)
+      .filter((p) => ['gemini', 'groq', 'nvidia', 'local'].includes(p));
+  }
+
+  if (chain.length === 0) {
+    chain = ['gemini', 'groq', 'nvidia', 'local'];
+  }
+
+  // Si NVIDIA_PRIMARY_PROVIDER === 'true', NVIDIA se coloca al frente
+  if (process.env.NVIDIA_PRIMARY_PROVIDER?.trim().toLowerCase() === 'true') {
+    chain = chain.filter((p) => p !== 'nvidia');
+    chain.unshift('nvidia');
+  }
+
+  // Deduplicar manteniendo orden
   const seen = new Set<string>();
   chain = chain.filter((p) => (seen.has(p) ? false : (seen.add(p), true)));
+  if (!chain.includes('local')) chain.push('local');
   return chain;
 }
 

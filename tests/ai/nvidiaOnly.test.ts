@@ -1,9 +1,20 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runLegalAI, runFastMode, runDeepReviewMode, getProvidersStatus } from '@/lib/ai/orchestrator';
 import { NVIDIAProvider } from '@/lib/ai/providers/nvidia';
 import { LocalProvider } from '@/lib/ai/providers/local';
 
 describe('J9 NVIDIA ONLY — sin Gemini/Groq/OpenRouter', () => {
+  const originalEnv = { ...process.env };
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    process.env.AI_PROVIDER_CHAIN = 'nvidia,local';
+    process.env.NVIDIA_PRIMARY_PROVIDER = 'true';
+  });
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.restoreAllMocks();
+  });
+
   it('1. NVIDIA disponible → provider=nvidia', async () => {
     vi.spyOn(NVIDIAProvider.prototype, 'isAvailable').mockResolvedValue(true);
     vi.spyOn(NVIDIAProvider.prototype, 'generate').mockResolvedValue({

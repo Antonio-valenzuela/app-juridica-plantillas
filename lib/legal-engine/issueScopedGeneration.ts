@@ -154,6 +154,12 @@ export function classifyIssueGeneration(input: {
 }): IssueGenerationClass {
   const { issue, taskType } = input;
   if (taskType === 'LEGAL_RESEARCH') return 'RESEARCH_DEPENDENT';
+  if (issue) {
+    if (issue.issueType === 'AUTHORITY_RESEARCH') return 'RESEARCH_DEPENDENT';
+    if (issue.status === 'NEEDS_RESEARCH' || issue.researchStatus === 'NEEDS_RESEARCH') {
+      return 'RESEARCH_DEPENDENT';
+    }
+  }
   if (
     taskType === 'FACT_RESPONSE' ||
     taskType === 'CLAIM' ||
@@ -164,10 +170,6 @@ export function classifyIssueGeneration(input: {
     return 'SOURCE_GROUNDED';
   }
   if (!issue) return 'RESEARCH_DEPENDENT';
-  if (issue.issueType === 'AUTHORITY_RESEARCH') return 'RESEARCH_DEPENDENT';
-  if (issue.status === 'NEEDS_RESEARCH' || issue.researchStatus === 'NEEDS_RESEARCH') {
-    return 'RESEARCH_DEPENDENT';
-  }
   if (
     issue.issueType === 'FACT_DISPUTE' ||
     issue.issueType === 'CLAIM_ELEMENT' ||
@@ -196,23 +198,18 @@ export function resolveEffectiveIssueGenerationEligibility(input: {
   if (formal) return blockedEffectiveEligibility(issue, 'FORMAL_DETERMINISTIC_TASK');
   if (taskType === 'LEGAL_RESEARCH') return blockedEffectiveEligibility(issue, 'LEGAL_RESEARCH_PLAN_ONLY');
 
+  if (issue) {
+    const blocker = canonicalBlockerReason(issue);
+    if (blocker) return blockedEffectiveEligibility(issue, blocker);
+    if (issue.relationStatus !== 'EXPLICIT') return blockedEffectiveEligibility(issue, 'RELATION_NOT_EXPLICIT');
+  }
+
   const generationClass = classifyIssueGeneration({ issue, taskType });
   if (generationClass === 'SOURCE_GROUNDED') {
-    if (issue) {
-      if (issue.status === 'BLOCKED_BY_CONFLICT' || (issue.conflictIds && issue.conflictIds.length > 0 && issue.status !== 'READY_FOR_GENERATION')) {
-        return blockedEffectiveEligibility(issue, 'BLOCKED_BY_CONFLICT');
-      }
-      if (issue.relationStatus === 'UNLINKED' || issue.status === 'UNLINKED') {
-        return blockedEffectiveEligibility(issue, 'UNLINKED_COVERAGE_REQUIRES_REVIEW');
-      }
-      if (issue.status === 'UNKNOWN') {
-        return blockedEffectiveEligibility(issue, 'UNKNOWN_ISSUE_STATUS_REQUIRES_REVIEW');
-      }
-    }
     if (researchBundle && derivedReadiness?.researchReadiness === 'READY_FOR_GENERATION_WITH_VERIFIED_RESEARCH') {
       return resolveResearchEligibility({ issue: issue!, derivedReadiness, researchBundle, formal, taskType });
     }
-    const effectiveStatus = issue?.status === 'NEEDS_CLIENT_POSITION' ? 'GENERATABLE_REQUIRES_REVIEW' : 'READY_FOR_GENERATION';
+    const effectiveStatus = issue?.status === 'GENERATABLE_REQUIRES_REVIEW' ? 'GENERATABLE_REQUIRES_REVIEW' : 'READY_FOR_GENERATION';
     const reason = 'READY_SOURCE_GROUNDED';
     return {
       eligible: true,
@@ -948,7 +945,10 @@ export function assembleIssueDraftBlocks(
 ): { blocks: import('./types').ContentBlock[]; warnings: string[] } {
   void section;
   const ordered = outcomes
-    .filter((item) => item.block && (item.status === 'ACCEPTED' || item.status === 'VALID_NON_FINAL' || item.status === 'FALLBACK'))
+    .filter((item) => item.block
+      && item.block.issueDraftValidationStatus !== 'INVALID_FATAL'
+      && item.block.issueDraftValidationStatus !== 'INVALID_RETRYABLE'
+      && (item.status === 'ACCEPTED' || item.status === 'VALID_NON_FINAL' || item.status === 'FALLBACK'))
     .sort((left, right) => {
       const order = (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER);
       if (order !== 0) return order;

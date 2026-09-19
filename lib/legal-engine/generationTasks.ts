@@ -43,6 +43,12 @@ import {
   type CoverageTransitionTrace,
 } from './generationTrace';
 import { getCoverageResolutionBlockReason, isHardCoverageResolutionBlock, isCoverageSatisfied } from './coveragePolicy';
+import {
+  buildContinuationPrompt,
+  calculateExtensionTokenBudget,
+  hasDuplicateContent,
+  type GenerationExtensionContract,
+} from './generationExtension';
 
 // ── 1. TIPOS Y DEFINICIONES (4B) ──────────────────────────────────────────
 
@@ -78,6 +84,8 @@ export interface GenerationTask {
   objective?: string;
   complexity: TaskComplexity;
   tokenBudget: number;
+  /** Objetivo informativo de palabras para el modo extended-legal. */
+  targetWords?: number;
   minOutputTokens?: number;
   status: GenerationTaskStatus;
   order?: number;
@@ -227,6 +235,7 @@ export function buildGenerationTasksForSection(
   doc: UniversalLegalDocument,
   caseAnalysis?: CaseAnalysis,
   coverageMatrix?: CoverageMatrix,
+  generationExtension?: GenerationExtensionContract,
 ): GenerationTask[] {
   const tasks: GenerationTask[] = [];
   const sourceDocIds = doc.sourceDocuments?.map((s) => s.id).filter(Boolean);
@@ -236,6 +245,19 @@ export function buildGenerationTasksForSection(
         if (!t.sourceDocIds) {
           t.sourceDocIds = sourceDocIds;
         }
+      }
+    }
+    const extension = generationExtension?.generationMode === 'extended-legal' ? generationExtension : undefined;
+    if (extension && list.length > 0) {
+      const sectionTargetWords = extension.sectionWordTargets?.[sectionId]
+        || Math.round(extension.targetWords / Math.max(1, 8));
+      const taskTargetWords = Math.max(250, Math.round(sectionTargetWords / list.length));
+      for (const task of list) {
+        task.targetWords = taskTargetWords;
+        task.tokenBudget = Math.max(
+          task.tokenBudget,
+          calculateExtensionTokenBudget(taskTargetWords, list.length, task.tokenBudget),
+        );
       }
     }
     return list;
@@ -1029,6 +1051,7 @@ export async function executeGenerationTask(
   lawyerProfile?: LawyerProfile,
   siblingBlocks: ContentBlock[] = [],
   trace?: GenerationTraceContext,
+  generationExtension?: GenerationExtensionContract,
 ): Promise<{ block: ContentBlock; result: GenerationTaskResult }> {
   const taskStartedAt = new Date().toISOString();
   const taskStartedMs = Date.now();
@@ -1337,7 +1360,7 @@ export async function executeGenerationTask(
   let isTruncated = false;
   let fallbackUsed = false;
   let tokensUsed = 0;
-  const providerRequested = 'nvidia';
+  const providerRequested = 'gemini';
   let providerUsed = 'deterministic_fallback';
   let providerModel: string | null = null;
   let providerActuallyUsed: ProviderActuallyUsed = 'NONE';
@@ -1345,6 +1368,7 @@ export async function executeGenerationTask(
   let fallbackReason: string | null = null;
   let continuationPasses = 0;
   const warnings: string[] = [];
+  const extendedContract = generationExtension?.generationMode === 'extended-legal' ? generationExtension : undefined;
 
   try {
     // ── Pase 1 ──────────────────────────────────────────────────────────────
@@ -1353,6 +1377,7 @@ export async function executeGenerationTask(
       userMessage,
       mode: 'fast',
       maxTokens: task.tokenBudget,
+      maxProviderRetries: extendedContract ? 1 : undefined,
     });
 
     const isLegalAiResponse = Boolean(
@@ -1369,32 +1394,58 @@ export async function executeGenerationTask(
       tokensUsed += aiRes.usage?.totalTokens || 0;
       providerUsed = aiRes.provider;
       providerModel = aiRes.model || null;
-      providerActuallyUsed = aiRes.provider === 'nvidia' ? 'NVIDIA' : aiRes.provider === 'local' ? 'LOCAL' : 'NONE';
+      providerActuallyUsed = aiRes.provider === 'nvidia'
+        ? 'NVIDIA'
+        : aiRes.provider === 'gemini'
+          ? 'GEMINI'
+          : aiRes.provider === 'groq'
+            ? 'GROQ'
+            : aiRes.provider === 'local' ? 'LOCAL' : 'NONE';
+      if (generationExtension) {
+        generationExtension.metrics.llmCalls += 1;
+        generationExtension.metrics.providerCalls[aiRes.provider] = (generationExtension.metrics.providerCalls[aiRes.provider] || 0) + 1;
+      }
       origin = aiRes.origin === 'SOURCE_DIRECT' || aiRes.origin === 'USER'
         ? aiRes.origin
         : 'AI_GENERATED_LEGAL_CONTENT';
       fallbackReason = aiRes.fallbackReason || null;
 
       // ── Pase de continuación si quedó truncado (4M) ───────────────────────
-      while (isTruncated && continuationPasses < TASK_LIMITS.MAX_CONTINUATIONS_PER_TASK) {
+      const maxContinuations = extendedContract
+        ? extendedContract.maxContinuationsPerSection
+        : TASK_LIMITS.MAX_CONTINUATIONS_PER_TASK;
+      while (isTruncated && continuationPasses < maxContinuations) {
         continuationPasses++;
         task.passes = (task.passes || 1) + 1;
 
-        const tailExcerpt = accumulatedText.slice(-250);
-        const continuationUserMessage = [
-          `TAREA: ${task.title}`,
-          `El desarrollo argumentativo anterior quedó inconcluso en este punto exacto:`,
-          `"...${tailExcerpt}"`,
-          '',
-          'INSTRUCCIÓN DE CONTINUACIÓN ESTRICTA (4M):',
-          'Continúa exactamente desde el argumento inconcluso sin repetir lo ya redactado y concluye de forma contundente el planteamiento jurídico.',
-        ].join('\n');
+        const continuationUserMessage = extendedContract
+          ? buildContinuationPrompt({
+              sectionTitle: task.sectionTitle,
+              previousText: accumulatedText,
+              outline: [task.title || task.sectionTitle, task.objective || 'Conclusión jurídica'],
+              coveredPoints: [task.title || task.sectionTitle],
+              pendingPoints: [task.objective || 'Cerrar el razonamiento'],
+              factIds: task.factIds || [],
+              sourceIds: task.sourceDocIds || [],
+            })
+          : [
+              `TAREA: ${task.title}`,
+              `El desarrollo argumentativo anterior quedó inconcluso en este punto exacto:`,
+              `"...${accumulatedText.slice(-250)}"`,
+              '',
+              'INSTRUCCIÓN DE CONTINUACIÓN ESTRICTA (4M):',
+              'Continúa exactamente desde el argumento inconcluso sin repetir lo ya redactado y concluye de forma contundente el planteamiento jurídico.',
+            ].join('\n');
 
         const contRes = await runFastMode({
           systemPrompt,
           userMessage: continuationUserMessage,
           mode: 'fast',
-          maxTokens: Math.min(3000, task.tokenBudget),
+          maxTokens: Math.min(
+            extendedContract ? extendedContract.maxGeneratedTokens : 3000,
+            task.tokenBudget,
+          ),
+          maxProviderRetries: extendedContract ? 1 : undefined,
         });
 
         const isLegalContinuation = Boolean(
@@ -1405,13 +1456,31 @@ export async function executeGenerationTask(
         );
 
         if (isLegalContinuation) {
+          if (extendedContract && hasDuplicateContent(accumulatedText, contRes.content)) {
+            extendedContract.metrics.rejectedDuplicateChunks += 1;
+            fallbackUsed = true;
+            fallbackReason = 'DUPLICATE_CONTINUATION_REJECTED';
+            warnings.push(`Continuación duplicada rechazada para ${task.id}; se conserva el contenido previo.`);
+            break;
+          }
           accumulatedText = stitchTruncatedText(accumulatedText, contRes.content);
           finishReason = contRes.finishReason || 'stop';
           isTruncated = Boolean(contRes.isTruncated || finishReason === 'length');
           tokensUsed += contRes.usage?.totalTokens || 0;
           providerUsed = contRes.provider;
           providerModel = contRes.model || providerModel;
-          providerActuallyUsed = contRes.provider === 'nvidia' ? 'NVIDIA' : contRes.provider === 'local' ? 'LOCAL' : providerActuallyUsed;
+          providerActuallyUsed = contRes.provider === 'nvidia'
+            ? 'NVIDIA'
+            : contRes.provider === 'gemini'
+              ? 'GEMINI'
+              : contRes.provider === 'groq'
+                ? 'GROQ'
+                : contRes.provider === 'local' ? 'LOCAL' : providerActuallyUsed;
+          if (extendedContract) {
+            extendedContract.metrics.llmCalls += 1;
+            extendedContract.metrics.continuationCalls += 1;
+            extendedContract.metrics.providerCalls[contRes.provider] = (extendedContract.metrics.providerCalls[contRes.provider] || 0) + 1;
+          }
         } else if (contRes.success && contRes.content) {
           fallbackUsed = true;
           providerUsed = contRes.provider;
@@ -1432,7 +1501,7 @@ export async function executeGenerationTask(
       if (isTruncated) {
         task.status = 'partial';
         task.isTruncated = true;
-        warnings.push(`Tarea ${task.id} quedó parcialmente truncada tras ${continuationPasses} continuaciones.`);
+        warnings.push(`Tarea ${task.id} quedó parcialmente truncada tras ${continuationPasses} continuaciones (límite=${maxContinuations}).`);
       } else {
         task.status = 'completed';
       }
@@ -1522,6 +1591,7 @@ export async function executeGenerationTask(
         userMessage: revisionPrompt.userMessage,
         mode: 'fast',
         maxTokens: task.tokenBudget,
+        maxProviderRetries: extendedContract ? 1 : undefined,
       });
 
       if (revRes.success && revRes.content) {

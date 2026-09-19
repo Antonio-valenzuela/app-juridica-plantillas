@@ -1,12 +1,11 @@
 export type AiMode = "empty_search_assistant" | "rag" | "classification" | "summary" | "general";
 
 export const providerCapabilities: Record<AiMode, string[]> = {
-  // NVIDIA ONLY: solo nvidia + local determinístico
-  empty_search_assistant: ["nvidia", "local"],
-  rag: ["nvidia", "local"],
-  classification: ["nvidia", "local"],
-  summary: ["nvidia", "local"],
-  general: ["nvidia", "local"],
+  empty_search_assistant: ["gemini", "groq", "nvidia", "local"],
+  rag: ["gemini", "groq", "nvidia", "local"],
+  classification: ["gemini", "groq", "nvidia", "local"],
+  summary: ["gemini", "groq", "nvidia", "local"],
+  general: ["gemini", "groq", "nvidia", "local"],
 };
 
 export function getAllowedProvidersForMode(mode: string): string[] {

@@ -229,6 +229,8 @@ function metadataLeak(text: string, packet: SectionContextPacket): boolean {
 function traceProvider(value: string | undefined): ProviderActuallyUsed {
   const normalized = String(value || '').toLowerCase();
   if (normalized === 'nvidia') return 'NVIDIA';
+  if (normalized === 'gemini') return 'GEMINI';
+  if (normalized === 'groq') return 'GROQ';
   if (normalized === 'local') return 'LOCAL';
   return 'NONE';
 }

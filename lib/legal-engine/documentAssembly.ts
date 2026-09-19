@@ -103,7 +103,8 @@ function isManualBlock(block: ContentBlock): boolean {
 }
 
 function isFormalCandidate(block: ContentBlock): boolean {
-  return block.generatedBy === 'DETERMINISTIC' || block.generationRequirement === 'DETERMINISTIC';
+  return (block.generatedBy === 'DETERMINISTIC' || block.generationRequirement === 'DETERMINISTIC')
+    && !isFallbackBlock(block);
 }
 
 function admitBlock(
@@ -125,14 +126,7 @@ function admitBlock(
     return { admitted: true, task: taskForBlock(block, taskById), classRank: 1 };
   }
 
-  if (isFallbackBlock(block)) {
-    return {
-      admitted: false,
-      classRank: 9,
-      finding: finding('FALLBACK_BLOCK_EXCLUDED', 'REVIEW', `El bloque ${block.id} es fallback y no entra como contenido sustantivo final.`, block, [sectionId]),
-    };
-  }
-
+  // 1. FAIL-CLOSED: Bloque con estado explícitamente inválido
   if (block.issueDraftValidationStatus === 'INVALID_FATAL' || block.issueDraftValidationStatus === 'INVALID_RETRYABLE') {
     return {
       admitted: false,
@@ -141,10 +135,40 @@ function admitBlock(
     };
   }
 
+  // 2. FAIL-CLOSED: Bloque vacío (formal o sustantivo)
+  if (!normalizedText(block.text)) {
+    return {
+      admitted: false,
+      classRank: 9,
+      finding: finding('EMPTY_BLOCK_EXCLUDED', 'REVIEW', `El bloque ${block.id} está vacío.`, block, [sectionId]),
+    };
+  }
+
+  // 3. FAIL-CLOSED: Truncamiento o dependencias no resueltas (seed markers / [DATO PENDIENTE...])
+  if (block.generationStatus === 'truncated' || hasSeedMarkers(block.text) || hasUnresolvedFactualDependencies(block.text)) {
+    return {
+      admitted: false,
+      classRank: 9,
+      finding: finding('UNRESOLVED_BLOCK_EXCLUDED', 'REVIEW', `El bloque ${block.id} tiene truncamiento o dependencia pendiente.`, block, [sectionId]),
+    };
+  }
+
+  // 4. FAIL-CLOSED: Reprobación semántica dura
+  if (block.semanticEvaluation && (block.semanticEvaluation.verdict === 'FAIL' || (block.semanticEvaluation.hardFailReasons || []).length > 0)) {
+    return {
+      admitted: false,
+      classRank: 9,
+      finding: finding('SEMANTIC_BLOCK_NOT_ACCEPTED', 'REVIEW', `El bloque ${block.id} no alcanza el contrato semántico PASS.`, block, [sectionId]),
+    };
+  }
+
+  // 5. Candidato formal determinístico válido
+  if (isFormalCandidate(block)) {
+    return { admitted: true, task: taskForBlock(block, taskById), classRank: 0 };
+  }
+
+  // 6. VALID_NON_FINAL admitido como borrador para revisión únicamente si superó los filtros fail-closed anteriores
   if (block.issueDraftValidationStatus === 'VALID_NON_FINAL') {
-    // VALID_NON_FINAL blocks remain drafts for lawyer review; downstream
-    // coverage, readiness, quality, and export gates still treat them as
-    // non-final.
     return {
       admitted: true,
       task: taskForBlock(block, taskById),
@@ -153,17 +177,16 @@ function admitBlock(
     };
   }
 
-  if (isFormalCandidate(block)) {
-    if (!normalizedText(block.text)) {
-      return {
-        admitted: false,
-        classRank: 9,
-        finding: finding('EMPTY_BLOCK_EXCLUDED', 'REVIEW', `El bloque formal ${block.id} está vacío.`, block, [sectionId]),
-      };
-    }
-    return { admitted: true, task: taskForBlock(block, taskById), classRank: 0 };
+  // 7. Bloques de fallback no validados para borrador quedan excluidos
+  if (isFallbackBlock(block)) {
+    return {
+      admitted: false,
+      classRank: 9,
+      finding: finding('FALLBACK_BLOCK_EXCLUDED', 'REVIEW', `El bloque ${block.id} es fallback y no entra como contenido sustantivo final.`, block, [sectionId]),
+    };
   }
 
+  // 8. Bloques sustantivos finales requieren tarea/placement canónico
   const task = taskForBlock(block, taskById);
   if (!task) {
     return {
@@ -173,35 +196,12 @@ function admitBlock(
     };
   }
 
+  // 9. Bloques sustantivos finales deben tener aceptación VALID_ACCEPTED
   if (block.issueDraftValidationStatus !== 'VALID_ACCEPTED') {
     return {
       admitted: false,
       classRank: 9,
       finding: finding('BLOCK_NOT_ACCEPTED', 'REVIEW', `El bloque ${block.id} no tiene aceptación final de FASE 5B.`, block, [sectionId]),
-    };
-  }
-
-  if (!normalizedText(block.text)) {
-    return {
-      admitted: false,
-      classRank: 9,
-      finding: finding('EMPTY_BLOCK_EXCLUDED', 'REVIEW', `El bloque ${block.id} está vacío.`, block, [sectionId]),
-    };
-  }
-
-  if (block.generationStatus === 'truncated' || hasSeedMarkers(block.text) || hasUnresolvedFactualDependencies(block.text)) {
-    return {
-      admitted: false,
-      classRank: 9,
-      finding: finding('UNRESOLVED_BLOCK_EXCLUDED', 'REVIEW', `El bloque ${block.id} tiene truncamiento o dependencia pendiente.`, block, [sectionId]),
-    };
-  }
-
-  if (block.semanticEvaluation?.verdict !== 'PASS' || (block.semanticEvaluation.hardFailReasons || []).length > 0) {
-    return {
-      admitted: false,
-      classRank: 9,
-      finding: finding('SEMANTIC_BLOCK_NOT_ACCEPTED', 'REVIEW', `El bloque ${block.id} no alcanza el contrato semántico PASS.`, block, [sectionId]),
     };
   }
 

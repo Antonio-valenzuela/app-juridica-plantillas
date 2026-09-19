@@ -29,6 +29,7 @@ export interface CaseDocumentsReaderProps {
     referenceDocumentId?: string;
     referenceDocumentText?: string;
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
+    generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
   }) => void;
   onOpenEditor?: () => void;
   isGenerating?: boolean;
@@ -187,6 +188,7 @@ export function CaseDocumentsReader({
   const [selectedResponseType, setSelectedResponseType] = useState<string>('contestacion_demanda_civil');
   const userHasManuallyChangedDocTypeRef = useRef(false);
   const [generationMode, setGenerationMode] = useState<'automatic' | 'personal_template' | 'reference_document'>('automatic');
+  const [extensionMode, setExtensionMode] = useState<'standard' | 'extended-legal'>('standard');
   const [selectedMachoteId, setSelectedMachoteId] = useState<string>('');
 
   // Reconstrucción del análisis del caso
@@ -405,6 +407,9 @@ export function CaseDocumentsReader({
       selectedDocumentType: selectedDocOption.value,
       documentTypeLabel: selectedDocOption.label,
       generationMode,
+      generationExtension: extensionMode === 'extended-legal'
+        ? { generationMode: 'extended-legal', targetPages: 40, minPages: 36, maxPages: 44 }
+        : { generationMode: 'standard' },
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
     });
@@ -489,37 +494,6 @@ export function CaseDocumentsReader({
         <main className="contestaciones-main-column min-w-0 space-y-4">
           {/* Documento fuente */}
           <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-xs transition hover:border-slate-300/80">
-            <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3.5 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">
-                    Documento fuente
-                  </h2>
-                    <p className="text-sm text-slate-500">
-                    Carga, consulta y navega el expediente base página por página.
-                  </p>
-                </div>
-              </div>
-
-              {selectedDoc && onUploadNewDocument && (
-                <button
-                  type="button"
-                  onClick={onUploadNewDocument}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shadow-2xs"
-                >
-                  <svg className="h-3.5 w-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  <span>Reemplazar documento</span>
-                </button>
-              )}
-            </div>
-
             {!selectedDoc ? (
                 <div className="p-4">
                   <div className="flex min-h-[560px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-[#F8FAFC] p-8 text-center transition hover:bg-slate-50 lg:min-h-[620px]">
@@ -576,7 +550,7 @@ export function CaseDocumentsReader({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
                     <button
                       type="button"
                       onClick={() => setViewMode('original')}
@@ -600,6 +574,19 @@ export function CaseDocumentsReader({
                     >
                       Texto extraído
                     </button>
+
+                    {onUploadNewDocument && (
+                      <button
+                        type="button"
+                        onClick={onUploadNewDocument}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shadow-2xs"
+                      >
+                        <svg className="h-3.5 w-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        <span>Reemplazar documento</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -821,6 +808,8 @@ export function CaseDocumentsReader({
             documentTypeOptions={documentTypeOptions}
             generationMode={generationMode}
             onGenerationModeChange={setGenerationMode}
+            extensionMode={extensionMode}
+            onExtensionModeChange={setExtensionMode}
             customTemplates={customTemplates}
             selectedTemplateId={selectedMachoteId}
             onSelectTemplateId={setSelectedMachoteId}

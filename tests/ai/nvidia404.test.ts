@@ -6,7 +6,10 @@ import { NVIDIAProvider } from '@/lib/ai/providers/nvidia';
 describe('P0 — NVIDIA 404/410 diagnóstico', () => {
   const ORIGINAL_ENV = { ...process.env };
 
-  beforeEach(() => { vi.restoreAllMocks(); });
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    process.env.AI_PROVIDER_CHAIN = 'nvidia,local';
+  });
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
     vi.restoreAllMocks();

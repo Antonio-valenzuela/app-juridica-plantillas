@@ -472,6 +472,7 @@ export interface GenerationMetadata {
   aiModel?: string | null;
   aiError?: string | null;
   generationMode?: GenerationMode;
+  generationExtension?: import('./generationExtension').GenerationExtensionContract;
   selectedTemplateId?: string | null;
   referenceDocumentId?: string | null;
   referenceDocumentLifecycle?: DocumentLifecycleMetadata;

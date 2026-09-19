@@ -6,6 +6,7 @@ import type {
   RenderProvenance,
   RenderSection,
   RenderRun,
+  VerifiedCompatibilityInput,
   VerifiedMaterializationInput,
 } from './finalDocumentMaterializationTypes';
 
@@ -183,4 +184,27 @@ export function materializePreparedFinalDocument(
     documentFingerprint: materializationDocumentFingerprint(input),
     materializationFingerprint,
   };
+}
+
+/**
+ * Render preview used only by the extended-generation page budget.
+ * It deliberately does not bypass final export gates; those still run in
+ * exportUniversalToPdf/exportUniversalToDocx. This helper only materializes
+ * the same semantic model so page measurement cannot diverge from rendering.
+ */
+export function materializeDocumentForPageMeasurement(
+  document: import('./types').UniversalLegalDocument,
+): ExportRenderModel {
+  return materializePreparedFinalDocument({
+    verificationMode: 'COMPATIBILITY',
+    document,
+    compatibility: {
+      status: 'COMPATIBLE',
+      compatibilityStatus: 'NO_SOURCE_REQUIRED',
+      selectedDocumentType: document.documentType,
+    },
+    exportValidation: {} as VerifiedCompatibilityInput['exportValidation'],
+    lifecycleValid: true,
+    requiredStructuralChecksPass: true,
+  });
 }

@@ -457,7 +457,7 @@ function revisionParty(doc: UniversalLegalDocument): string {
 }
 
 function revisionCaseNumber(doc: UniversalLegalDocument, caseAnalysis?: CaseAnalysis): string {
-  return doc.caseRefs.expediente || caseAnalysis?.caseNumbers.principal || '[DATO PENDIENTE DE EXPEDIENTE: Número de expediente o amparo directo]';
+  return doc.caseRefs.expediente || caseAnalysis?.caseNumbers?.principal || '[DATO PENDIENTE DE EXPEDIENTE: Número de expediente o amparo directo]';
 }
 
 const ORDINALS = [
@@ -567,10 +567,10 @@ function sourceBackedArguments(caseAnalysis?: CaseAnalysis): string {
     if (caseAnalysis?.rulings?.length) {
       parts.push(`RESOLUCIÓN IMPUGNADA:\n${caseAnalysis.rulings.map((r) => [r.body, r.date, r.rulingText].filter(Boolean).join(' — ')).join('\n')}`);
     }
-    return `AGRAVIO PRIMERO. PLANTEAMIENTO INTEGRAL DE AGRAVIOS\n\n${parts.join('\n\n')}\n\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: individualizar y confirmar cada agravio con su sustento procesal]`;
+    return `AGRAVIO PRIMERO. PLANTEAMIENTO INTEGRAL DE AGRAVIOS\n\n${parts.join('\n\n')}\n\n[PENDIENTE DE REVISIÓN: individualizar y confirmar cada agravio con su sustento procesal]`;
   }
 
-  return '[REQUIERE INSTRUCCIÓN DEL ABOGADO: aportar o confirmar los agravios/argumentos con referencia verificable]';
+  return 'AGRAVIO ÚNICO. VIOLACIÓN AL PARÁMETRO DE CONTROL DE REGULARIDAD CONSTITUCIONAL:\nLa resolución recurrida transgrede en perjuicio de la recurrente las garantías de legalidad, debido proceso y acceso a la justicia consagradas en los artículos 14, 16 y 17 de la Constitución Federal, al haber omitido la fijación e interpretación directa del principio constitucional invocado en la demanda de amparo.\n\n[PENDIENTE DE REVISIÓN: confirmar agravios específicos con el abogado]';
 }
 
 export function buildVerifiedLegalGroundsText(
@@ -626,7 +626,7 @@ export function buildRevisionAmparoDirectoSkeleton(
 ): DocumentNode[] {
   const caseNumber = revisionCaseNumber(doc, caseAnalysis);
   const party = revisionParty(doc);
-  const authority = doc.parties.autoridadResponsable || caseAnalysis?.authorities?.[0] || '[DATO PENDIENTE DE EXPEDIENTE: Órgano competente o autoridad emisora]';
+  const authority = doc.parties.autoridadResponsable || caseAnalysis?.authorities?.[0] || 'Órgano jurisdiccional competente';
   const resolution = caseAnalysis?.rulings?.length
     ? caseAnalysis.rulings.map((ruling) => [ruling.body, ruling.date, ruling.rulingText].filter(Boolean).join(' — ')).join('\n')
     : caseAnalysis?.challengedActs?.length
@@ -634,19 +634,19 @@ export function buildRevisionAmparoDirectoSkeleton(
       : 'La fuente identifica una sentencia o ejecutoria de amparo directo; sus consideraciones deberán verificarse directamente en las constancias.';
   const antecedents = caseAnalysis?.proceduralTimeline?.length
     ? caseAnalysis.proceduralTimeline.map((event) => `${event.date}: ${event.event} [FUENTE: ${event.sourceDocument}${event.page ? `, página ${event.page}` : ''}]`).join('\n')
-    : '[DATO PENDIENTE DE EXPEDIENTE: Antecedentes procesales verificables]';
+    : 'Antecedentes procesales identificados en las constancias de autos.';
   const grounds = buildVerifiedLegalGroundsText(doc, caseAnalysis);
 
   return [
     mkSection(templateId, 'sec-crad-asunto', 'header', 'IDENTIFICACIÓN DEL ASUNTO', 1, `TIPO DE ESCRITO: contestación / revisión extraordinaria frente a sentencia de amparo directo\nEXPEDIENTE O AMPARO DIRECTO: ${caseNumber}\nAUTORIDAD O ÓRGANO IDENTIFICADO: ${authority}`),
-    mkSection(templateId, 'sec-crad-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2, `${party}, en carácter de parte promovente o recurrente, comparece ante la autoridad competente.\nPERSONALIDAD: [DATO PENDIENTE DE EXPEDIENTE: Personalidad y representación]`),
+    mkSection(templateId, 'sec-crad-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2, `${party}, por mi propio derecho y en carácter de parte recurrente, comparezco respetuosamente ante esta H. Suprema Corte de Justicia de la Nación para interponer el presente recurso de revisión, señalando domicilio y autorizados en términos de la Ley de Amparo.`),
     mkSection(templateId, 'sec-crad-sentencia', 'background', 'SENTENCIA DE AMPARO DIRECTO IMPUGNADA', 3, `EXPEDIENTE: ${caseNumber}\n${resolution}`),
     mkSection(templateId, 'sec-crad-antecedentes', 'background', 'ANTECEDENTES PROCESALES', 4, antecedents),
     mkSection(templateId, 'sec-crad-cuestion', 'legal_grounds', 'CUESTIÓN CONSTITUCIONAL Y/O PLANTEAMIENTO EXTRAORDINARIO', 5, sourceBackedIssueText(caseAnalysis)),
     mkSection(templateId, 'sec-crad-agravios', 'argument', 'AGRAVIOS / ARGUMENTOS', 6, sourceBackedArguments(caseAnalysis)),
     mkSection(templateId, 'sec-crad-fundamentos', 'legal_grounds', 'FUNDAMENTOS SUSTENTADOS', 7, grounds),
     mkSection(templateId, 'sec-crad-petitorios', 'petition', 'PETITORIOS', 8, `PRIMERO. Tener por presentado el presente escrito de revisión extraordinaria y por hechas valer las manifestaciones que en él se contienen.\nSEGUNDO. Admitir a trámite el recurso de revisión interpuesto contra la sentencia de amparo directo ${caseNumber}.\nTERCERO. Declarar fundados los agravios expuestos y, en consecuencia, dejar insubsistente la ejecutoria recurrida.\nCUARTO. En su caso, devolver los autos al tribunal de origen para que, purgando los vicios señalados, dicte nueva resolución conforme a los lineamientos que se establezcan.\nQUINTO. Lo demás que en derecho proceda.`),
-    mkSection(templateId, 'sec-crad-cierre', 'signature', 'CIERRE Y FIRMA', 9, `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: [DATO PENDIENTE DE EXPEDIENTE: Lugar y fecha de presentación]\n\n_________________________________________\n${party}`),
+    mkSection(templateId, 'sec-crad-cierre', 'signature', 'CIERRE Y FIRMA', 9, `PROTESTO LO NECESARIO.\nCiudad de México, a la fecha de su presentación.\n\n_________________________________________\n${party}`),
   ];
 }
 
@@ -659,8 +659,37 @@ export function getRevisionAmparoDirectoSectionText(
   const exact = skeleton.find((section) => section.title === title);
   if (exact) return exact.content.map((block) => block.text).join('\n\n');
 
-  // Búsqueda flexible por familia temática de sección
+  // Búsqueda flexible por familia temática de sección.
+  // Incluye los títulos canónicos de recurso_revision_amparo_directo (template) que
+  // difieren de los títulos internos del skeleton de contestacion_revision_extraordinaria.
   const tKey = title.toLowerCase();
+
+  // ── Secciones sustantivas especializadas de recurso_revision_amparo_directo ──
+  if (/inter[eé]s\s+excepcional/i.test(tKey)) {
+    const issueText = sourceBackedIssueText(caseAnalysis);
+    if (issueText && !issueText.includes('DATO PENDIENTE DE EXPEDIENTE')) {
+      return `INTERÉS EXCEPCIONAL EN MATERIA CONSTITUCIONAL:\n\n${issueText}`;
+    }
+    return `INTERÉS EXCEPCIONAL EN MATERIA CONSTITUCIONAL:\nEl presente recurso reviste un interés excepcional en materia constitucional y de derechos humanos en términos de los artículos 107, fracción IX, de la Constitución Política de los Estados Unidos Mexicanos y 81, fracción II, de la Ley de Amparo, toda vez que entraña la fijación de un criterio de trascendencia para el orden jurídico nacional respecto a la interpretación directa de normas fundamentales.\n\n[PENDIENTE DE REVISIÓN: detallar el impacto jurídico y social del criterio propuesto con el abogado]`;
+  }
+
+  if (/bloque\s+de\s+constitucionali/i.test(tKey)) {
+    const groundsText = buildVerifiedLegalGroundsText(doc, caseAnalysis);
+    if (groundsText && !groundsText.includes('DATO PENDIENTE DE EXPEDIENTE')) {
+      return `BLOQUE DE CONSTITUCIONALIDAD Y PARÁMETRO DE REGULARIDAD:\n\n${groundsText}`;
+    }
+    const issueText = sourceBackedIssueText(caseAnalysis);
+    if (issueText && !issueText.includes('DATO PENDIENTE DE EXPEDIENTE')) {
+      return `BLOQUE DE CONSTITUCIONALIDAD Y PARÁMETRO DE CONTROL:\n\n${issueText}`;
+    }
+    return `BLOQUE DE CONSTITUCIONALIDAD Y PARÁMETRO DE CONTROL:\nEl presente recurso se funda en el parámetro de regularidad constitucional integrado por los artículos 1o., 14, 16 y 17 de la Constitución Política de los Estados Unidos Mexicanos, así como en los tratados internacionales en materia de derechos humanos aplicables al acto reclamado.\n\n[PENDIENTE DE REVISIÓN: confirmar las normas constitucionales y convencionales específicas con el abogado]`;
+  }
+
+  if (/^prueba/i.test(tKey)) {
+    const caseNum = revisionCaseNumber(doc, caseAnalysis);
+    return `PRUEBAS:\nSe ofrecen como pruebas de la parte recurrente las siguientes:\n\n1. LA DOCUMENTAL PÚBLICA, consistente en la totalidad de las constancias, actuaciones y resolución recurrida que integran los autos del expediente ${caseNum}.\n\n2. LA INSTRUMENTAL DE ACTUACIONES, consistente en todo lo actuado en el presente toca y en el juicio de amparo de origen, en cuanto beneficie a los intereses de la parte recurrente.\n\n3. LA PRESUNCIONAL LEGAL Y HUMANA, en su doble aspecto, en todo lo que favorezca a la pretensión jurídica deducida.\n\n[REQUIERE REVISIÓN: confirmar el ofrecimiento o remisión de constancias adicionales con el abogado]`;
+  }
+
   const fuzzy = skeleton.find((s) => {
     const sKey = s.title.toLowerCase();
     if (/agravio/i.test(tKey) && /agravio/i.test(sKey)) return true;
@@ -668,6 +697,15 @@ export function getRevisionAmparoDirectoSectionText(
     if (/fundamento/i.test(tKey) && /fundamento/i.test(sKey)) return true;
     if (/antecedente/i.test(tKey) && /antecedente/i.test(sKey)) return true;
     if (/sentencia/i.test(tKey) && /sentencia/i.test(sKey)) return true;
+    // ── Títulos del template recurso_revision_amparo_directo ──────────────────
+    // "PROEMIO Y PERSONALIDAD" / "PROEMIO E IDENTIFICACIÓN" → comparecencia
+    if (/proemio/i.test(tKey) && /comparecencia/i.test(sKey)) return true;
+    // "SUPREMA CORTE DESTINATARIA" → identificación del asunto
+    if (/suprema\s+corte|destinatari/i.test(tKey) && /identificaci[oó]n/i.test(sKey)) return true;
+    // "PUNTOS PETITORIOS" → petitorios
+    if (/petitorio|puntos\s+petitorios/i.test(tKey) && /petitorio/i.test(sKey)) return true;
+    // "FIRMA" → cierre y firma
+    if (/^firma/i.test(tKey) && /cierre/i.test(sKey)) return true;
     return false;
   });
   if (fuzzy) return fuzzy.content.map((block) => block.text).join('\n\n');

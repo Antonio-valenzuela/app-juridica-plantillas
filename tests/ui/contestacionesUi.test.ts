@@ -117,7 +117,7 @@ describe('Contestaciones UI state derivation', () => {
     expect(content).toContain('Página {safeActivePage} de {totalPages}');
     expect(content).toContain('Texto extraído - Página {safeActivePage}');
     expect(content).toContain('{totalPages} página{totalPages === 1');
-    expect(content).toContain('página por página');
+    expect(content).not.toContain('página por página');
     expect(content).toContain('Sin texto disponible en esta página.');
 
     // No debe quedar etiqueta UI vieja Foja para navegación (solo data regex)

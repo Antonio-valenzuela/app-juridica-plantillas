@@ -1,76 +1,32 @@
-import { LocalProvider } from "./providers/local";
+import { defaultProviderRouter } from "./providerRouter";
+import { getProviderChain } from "./providerChain";
 import { NVIDIAProvider } from "./providers/nvidia";
-import type { AIHealthResult, AIProviderResult, AIRequest } from "./providers/types";
+import type { AIHealthResult, AIProviderId, AIProviderResult, AIRequest, LegalAIProvider } from "./providers/types";
 import { deepReviewSchema, type DeepReviewOutput } from "./schemas/deepReviewSchema";
 
-const nvidia = new NVIDIAProvider();
-const local = new LocalProvider();
+export { NVIDIAProvider };
 
 /**
- * Interfaz central única para toda operación de IA jurídica — NVIDIA ONLY.
- * UI → API → runLegalAI → NVIDIA → local fallback
- * Nunca expone API keys; registra provider/model para generationMetadata.
+ * Interfaz central única para toda operación de IA jurídica.
+ * Orden de resolución: Gemini (principal) → Groq (secundario) → NVIDIA (tercero) → fallback determinístico (local).
+ * Nunca expone API keys; registra provider/model/duración de forma segura.
  */
 export async function runLegalAI(request: AIRequest, _options?: { mode?: string }): Promise<AIProviderResult> {
   return runFastMode(request);
 }
 
 export async function runFastMode(request: AIRequest): Promise<AIProviderResult> {
-  const start = Date.now();
-  let fallbackReason: string | null = null;
-  if (await nvidia.isAvailable()) {
-    try {
-      const res = await nvidia.generate(request);
-      if (res.success && res.content) {
-        return {
-          ...res,
-          providerRequested: 'nvidia',
-          providerActuallyUsed: 'nvidia',
-          fallbackReason: null,
-          origin: 'AI_GENERATED_LEGAL_CONTENT',
-          isLegalAiContent: true,
-          warnings: [...(res.warnings || [])],
-          latencyMs: res.latencyMs || (Date.now() - start),
-        };
-      }
-      // PASO 14: conservar fallbackReason explícito con sanitización
-      const rawWarn = (res.warnings?.[0] || res.errorCode || 'unknown').toString().slice(0, 300).replace(/nvapi-[^\s"']+/gi, '[REDACTED]');
-      fallbackReason = rawWarn.includes('HTTP 404') ? 'NVIDIA_HTTP_404' : rawWarn.includes('HTTP 410') ? 'NVIDIA_HTTP_410' : rawWarn.includes('HTTP') ? `NVIDIA_HTTP_${(rawWarn.match(/HTTP\s+(\d+)/)?.[1] || 'ERROR')}` : 'NVIDIA_ERROR';
-      console.warn(`[orchestrator] NVIDIA falló (success=false), fallback a local. provider=${res.provider} error=${res.errorCode} fallbackReason=${fallbackReason} detail=${rawWarn.slice(0,150)}`);
-    } catch (e: any) {
-      const msg = String(e?.message || e).slice(0,300).replace(/nvapi-[^\s"']+/gi, '[REDACTED]');
-      fallbackReason = msg.includes('404') ? 'NVIDIA_HTTP_404' : msg.includes('410') ? 'NVIDIA_HTTP_410' : 'NVIDIA_EXCEPTION';
-      console.warn(`[orchestrator] NVIDIA excepción, fallback a local: ${msg} fallbackReason=${fallbackReason}`);
-    }
-  } else {
-    fallbackReason = 'NVIDIA_NO_API_KEY';
-    console.warn('[orchestrator] NVIDIA no disponible (sin API key), fallback a local fallbackReason=NVIDIA_NO_API_KEY');
-  }
-  const localRes = await local.generate(request);
-  return {
-    ...localRes,
-    providerRequested: 'nvidia',
-    providerActuallyUsed: 'local',
-    fallbackReason,
-    origin: 'LOCAL_PLACEHOLDER',
-    isLegalAiContent: false,
-    warnings: [...(localRes.warnings || []), `Fallback local: NVIDIA no disponible o falló. fallbackReason=${fallbackReason || 'unknown'}`],
-  };
+  const { result } = await defaultProviderRouter.route(request);
+  return result;
 }
 
+
 export async function runDeepReviewMode(request: AIRequest): Promise<DeepReviewOutput> {
-  // NVIDIA ONLY: single provider + judge via NVIDIA, fallback local
-  let nvidiaRes: AIProviderResult | null = null;
-  let nvidiaSuccess = false;
-  if (await nvidia.isAvailable()) {
-    try {
-      nvidiaRes = await nvidia.generate({ ...request, mode: "deep" });
-      nvidiaSuccess = !!(nvidiaRes && nvidiaRes.success && nvidiaRes.content);
-    } catch {}
-  }
+  const { result: modelRes } = await defaultProviderRouter.route({ ...request, mode: "deep" });
+  const modelSuccess = Boolean(modelRes && modelRes.success && modelRes.content);
 
   const judgePrompt = `Eres el Juez Consolidador de Inteligencia Artificial para la plataforma jurídica Radar Jurídico.
-Tu función es analizar el resultado producido por NVIDIA sobre una consulta o borrador jurídico, evaluar su coherencia, detectar contradicciones, verificar sustento en fuentes oficiales y generar una revisión profunda estructurada.
+Tu función es analizar el resultado producido por el modelo sobre una consulta o borrador jurídico, evaluar su coherencia, detectar contradicciones, verificar sustento en fuentes oficiales y generar una revisión profunda estructurada.
 
 [REGLAS]:
 1. No inventes artículos, jurisprudencias ni autoridades.
@@ -87,57 +43,55 @@ Tu función es analizar el resultado producido por NVIDIA sobre una consulta o b
   "unsupportedClaims": [],
   "recommendedActions": [],
   "sourcesUsed": [],
-  "providerSummary": {"nvidiaCompleted": ${nvidiaSuccess}, "judgeCompleted": true}
+  "providerSummary": {"nvidiaCompleted": ${modelRes.provider === "nvidia" && modelSuccess}, "geminiCompleted": ${modelRes.provider === "gemini" && modelSuccess}, "groqCompleted": ${modelRes.provider === "groq" && modelSuccess}, "judgeCompleted": true}
 }`;
 
   const judgeUserMessage = `[SOLICITUD ORIGINAL]: "${request.userMessage}"
 
 [FUENTES OFICIALES]: ${JSON.stringify(request.retrievedSources || [], null, 2)}
 
-[RESPUESTA NVIDIA]: ${nvidiaSuccess ? nvidiaRes?.content : "NVIDIA NO DISPONIBLE / FALLÓ"}
+[RESPUESTA MODELO (${modelRes.provider})]: ${modelSuccess ? modelRes.content : "PROVEEDOR NO DISPONIBLE / FALLÓ"}
  `;
 
-  if (await nvidia.isAvailable()) {
-    try {
-      const judgeRes = await nvidia.generate({
-        systemPrompt: judgePrompt,
-        userMessage: judgeUserMessage,
-        mode: "deep",
-        temperature: 0.1,
+  try {
+    const { result: judgeRes } = await defaultProviderRouter.route({
+      systemPrompt: judgePrompt,
+      userMessage: judgeUserMessage,
+      mode: "deep",
+      temperature: 0.1,
+    });
+    if (judgeRes.success && judgeRes.content) {
+      const cleaned = cleanJsonWrapper(judgeRes.content);
+      const parsed = JSON.parse(cleaned);
+      const validated = deepReviewSchema.parse({
+        ...parsed,
+        providerSummary: {
+          nvidiaCompleted: modelRes.provider === "nvidia" && modelSuccess,
+          geminiCompleted: modelRes.provider === "gemini" && modelSuccess,
+          groqCompleted: modelRes.provider === "groq" && modelSuccess,
+          judgeCompleted: true,
+          fallbackUsed: judgeRes.provider === "local",
+        },
       });
-      if (judgeRes.success && judgeRes.content) {
-        const cleaned = cleanJsonWrapper(judgeRes.content);
-        const parsed = JSON.parse(cleaned);
-        const validated = deepReviewSchema.parse({
-          ...parsed,
-          providerSummary: {
-            nvidiaCompleted: nvidiaSuccess,
-            geminiCompleted: false,
-            groqCompleted: false,
-            judgeCompleted: true,
-            fallbackUsed: false,
-          },
-        });
-        return validated;
-      }
-    } catch (err) {
-      console.error("[orchestrator] NVIDIA Judge falló, fallback a local:", err);
+      return validated;
     }
+  } catch (err) {
+    console.error("[orchestrator] Judge falló, fallback a local:", err);
   }
 
-  return runLocalDeepConsolidator(request, null, null, nvidiaRes);
+  return runLocalDeepConsolidator(request, null, null, modelRes);
 }
 
 export function runLocalDeepConsolidator(
   request: AIRequest,
   _geminiRes: AIProviderResult | null,
   _groqRes: AIProviderResult | null,
-  nvidiaRes: AIProviderResult | null = null
+  modelRes: AIProviderResult | null = null
 ): DeepReviewOutput {
-  const nvidiaSuccess = !!(nvidiaRes && nvidiaRes.success && nvidiaRes.content);
+  const modelSuccess = !!(modelRes && modelRes.success && modelRes.content);
   const issues: any[] = [];
   const contradictions: string[] = [];
-  let availableContent = nvidiaRes?.content || "";
+  let availableContent = modelRes?.content || "";
   if (!availableContent || availableContent.trim().length < 50) {
     availableContent = generateLocalLegalDraft(request);
   }
@@ -148,12 +102,12 @@ export function runLocalDeepConsolidator(
       section: "respuesta_generada",
       fieldId: "contenido",
       title: "Análisis y Escrito Proyectado por IA",
-      explanation: "Respuesta elaborada por el motor procesal (NVIDIA/local).",
+      explanation: `Respuesta elaborada por el motor procesal (${modelRes?.provider || "local"}).`,
       currentText: "",
       suggestedText: availableContent,
       supportedBySources: true,
       sourceIds: [],
-      modelAgreement: nvidiaSuccess ? "nvidia_only" : "judge_added",
+      modelAgreement: modelSuccess ? "nvidia_only" : "judge_added",
       confidence: 0.9,
     });
   }
@@ -174,13 +128,13 @@ export function runLocalDeepConsolidator(
         suggestedText: "SEGUNDO.- Conceder la suspensión provisional respecto de los actos reclamados descritos...",
         supportedBySources: true,
         sourceIds: [],
-        modelAgreement: nvidiaSuccess ? "nvidia_only" : "judge_added",
+        modelAgreement: modelSuccess ? "nvidia_only" : "judge_added",
         confidence: 0.85,
       });
     }
   }
   let summary = `Revisión y contestación procesada por el consolidador local. ${
-    nvidiaSuccess ? "Se utilizó NVIDIA." : "No fue posible conectar con NVIDIA; se aplicó validación determinística."
+    modelSuccess ? `Se utilizó ${modelRes?.provider}.` : "No fue posible conectar con proveedores externos; se aplicó validación determinística."
   }`;
   if (availableContent && availableContent.length > 50) summary += "\n\n" + availableContent;
   return {
@@ -199,9 +153,9 @@ export function runLocalDeepConsolidator(
       verified: true,
     })),
     providerSummary: {
-      nvidiaCompleted: nvidiaSuccess,
-      geminiCompleted: false,
-      groqCompleted: false,
+      nvidiaCompleted: modelRes?.provider === "nvidia" && modelSuccess,
+      geminiCompleted: modelRes?.provider === "gemini" && modelSuccess,
+      groqCompleted: modelRes?.provider === "groq" && modelSuccess,
       judgeCompleted: false,
       fallbackUsed: true,
     },
@@ -209,7 +163,31 @@ export function runLocalDeepConsolidator(
 }
 
 export async function getProvidersStatus(): Promise<AIHealthResult[]> {
-  const results = await Promise.all([nvidia.healthCheck(), local.healthCheck()]);
+  const chain = getProviderChain();
+  const providerIds = (chain.length > 0 ? chain : ["gemini", "groq", "nvidia", "local"]) as AIProviderId[];
+  const results = await Promise.all(
+    providerIds.map(async (id) => {
+      const p = defaultProviderRouter.getProvider(id);
+      if (!p) {
+        return {
+          provider: id,
+          configured: false,
+          available: false,
+          model: "none",
+          lastCheckAt: new Date().toISOString(),
+        };
+      }
+      return p.healthCheck
+        ? p.healthCheck()
+        : {
+            provider: id,
+            configured: await p.isAvailable(),
+            available: await p.isAvailable(),
+            model: "default",
+            lastCheckAt: new Date().toISOString(),
+          };
+    })
+  );
   return results;
 }
 

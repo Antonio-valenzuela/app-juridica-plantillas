@@ -10,6 +10,8 @@ interface ContestacionesConfigPanelProps {
   documentTypeOptions: Array<{ value: string; label: string }>;
   generationMode: 'automatic' | 'personal_template' | 'reference_document';
   onGenerationModeChange: (mode: 'automatic' | 'personal_template' | 'reference_document') => void;
+  extensionMode: 'standard' | 'extended-legal';
+  onExtensionModeChange: (mode: 'standard' | 'extended-legal') => void;
   customTemplates?: TemplateItem[];
   selectedTemplateId?: string;
   onSelectTemplateId?: (id: string) => void;
@@ -30,6 +32,8 @@ export function ContestacionesConfigPanel({
   documentTypeOptions,
   generationMode,
   onGenerationModeChange,
+  extensionMode,
+  onExtensionModeChange,
   customTemplates = [],
   selectedTemplateId,
   onSelectTemplateId,
@@ -95,6 +99,36 @@ export function ContestacionesConfigPanel({
                 </label>
               );
             })}
+          </div>
+        </div>
+
+        {/* Row 1, Col 3: Extensión jurídica opt-in */}
+        <div>
+          <label className="mb-2 flex items-center gap-1 text-sm font-medium text-slate-600">
+            <span>Extensión del escrito</span>
+            <span className="text-slate-400 cursor-help" title="La opción extensa busca aproximadamente 40 páginas reales en el PDF final">ⓘ</span>
+          </label>
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            {([
+              { value: 'standard', label: 'Normal' },
+              { value: 'extended-legal', label: 'Extensa (~40 páginas)' },
+            ] as const).map((option) => (
+              <label
+                key={option.value}
+                className={`inline-flex cursor-pointer select-none items-center gap-2 text-sm font-semibold ${extensionMode === option.value ? 'text-[#0B2545]' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                <input
+                  type="radio"
+                  name="generationExtension"
+                  value={option.value}
+                  checked={extensionMode === option.value}
+                  disabled={disabled}
+                  onChange={() => onExtensionModeChange(option.value)}
+                  className="h-4 w-4 border-slate-300 text-[#0B2545] focus:ring-[#0B2545]"
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
           </div>
         </div>
 

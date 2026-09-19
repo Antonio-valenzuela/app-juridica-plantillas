@@ -344,7 +344,7 @@ import {
   logTaskExecution,
 } from './generationTasks';
 import type { GenerationTask } from './generationTasks';
-import { evaluateDocumentSemantics } from './semanticEvaluator';
+import { evaluateBlockQuality, evaluateDocumentSemantics } from './semanticEvaluator';
 import { createGenerationTraceContext, hashTraceText, type GenerationTraceContext, type GenerationTraceOptions } from './generationTrace';
 import { writeGenerationTraceArtifacts } from './generationTraceReports';
 import { getCoverageResolutionBlockReason, isCoverageSatisfied } from './coveragePolicy';
@@ -366,6 +366,14 @@ import { reconcileDocumentCoverage } from './documentCoverage';
 import { decideDocumentAssemblyReadiness, evaluateDocumentAssemblyChecks, type DocumentReadinessInput } from './documentReadiness';
 import { runDocumentAssemblyQualityGate } from './documentAssemblyQualityGate';
 import type { DocumentAssemblyFinding, DocumentAssemblyResult, DocumentAssemblyQualityGateResult, CoverageReconciliation } from './documentAssemblyTypes';
+import {
+  allocateSectionWordTargets,
+  resolveGenerationExtensionContract,
+  type GenerationExtensionContract,
+  type GenerationExtensionInput,
+} from './generationExtension';
+import { expandDocumentToPageTarget } from './generationExpansion';
+import { measureRenderedDocumentPages } from './documentPageMetrics';
 
 function jobUpdate(jobId: string | undefined, patch: Record<string, any>): void {
   if (!jobId) return;
@@ -789,6 +797,8 @@ export interface PipelineInput {
   derivedReadinessByIssueId?: ReadonlyMap<string, DerivedIssueReadiness>;
   /** Opt-in seam for the section-level architecture; legacy remains default. */
   sectionGenerationMode?: 'legacy' | 'section';
+  /** Contrato opt-in para contestaciones jurídicas extensas medidas por páginas. */
+  generationExtension?: GenerationExtensionInput;
 }
 
 export function buildLawyerStyleDirective(profile: LawyerProfile): string {
@@ -1368,11 +1378,11 @@ REGLAS OBLIGATORIAS:
 Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
 
       const SECTION_TIMEOUT_MS = Number(process.env.SECTION_AI_TIMEOUT_MS) || 30000;
-
       const aiPromise = runFastMode({
         systemPrompt: 'Eres el Motor Forense de Análisis y Redacción Jurídica de Jurídico Radar. Trabajas por bloques jurídicos, no por fragmentos aislados.',
         userMessage: prompt,
         mode: 'fast',
+        taskType: 'SECTION_SUPPORT',
       });
 
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -2676,6 +2686,7 @@ export async function generateSection(
   researchBundlesByIssueId?: ReadonlyMap<string, LegalResearchBundle>,
   derivedReadinessByIssueId?: ReadonlyMap<string, DerivedIssueReadiness>,
   sectionGenerationMode: 'legacy' | 'section' = 'legacy',
+  generationExtension?: GenerationExtensionContract,
 ): Promise<{
   text: string;
   blocks?: ContentBlock[];
@@ -2770,9 +2781,11 @@ export async function generateSection(
     && item.sourceEntityType === 'PROCEDURAL_REQUIREMENT'
     && item.satisfactionPolicy === 'REFERENCE_ONLY'
   ));
-  const sourceBackedProceduralReferenceSection = sec.type === 'background'
+  const sourceBackedProceduralReferenceSection = (sec.type === 'background' || /antecedente/i.test(sec.title))
     && hasSourceBackedProceduralEvent
     && hasReferenceOnlyProceduralCoverage;
+
+
   const hasFacts = Boolean(caseAnalysis?.facts?.length || caseAnalysis?.richCaseAnalysis?.facts?.length);
   const hasClaims = Boolean(caseAnalysis?.claims?.length || caseAnalysis?.claimResponses?.length || caseAnalysis?.richCaseAnalysis?.claims?.length);
   const isContestacion = isContestacionType(doc.documentType, doc.documentTypeLabel);
@@ -2816,7 +2829,10 @@ export async function generateSection(
   } as DocumentIndex;
 
   // ── FASE 4: GENERACIÓN JERÁRQUICA POR GenerationTask (Issues, Claims, FactResponses) ──
-  const hasHierarchicalPlans = Boolean(
+  // REFERENCE_ONLY guard: si la sección es de tipo background con cobertura REFERENCE_ONLY
+  // y eventos procesales respaldados por fuente, el contenido se materializa determinísticamente
+  // y NO debe pasar por el flujo jerárquico de invocación al provider.
+  const hasHierarchicalPlans = !sourceBackedProceduralReferenceSection && Boolean(
     sectionPlan && (
       (sectionPlan.issuePlans && sectionPlan.issuePlans.length > 0) ||
       (sectionPlan.claimPlans && sectionPlan.claimPlans.length > 0) ||
@@ -2827,7 +2843,7 @@ export async function generateSection(
   );
 
   if (hasHierarchicalPlans && sectionPlan) {
-    const tasks = buildGenerationTasksForSection(sectionPlan, doc, caseAnalysis, doc.coverageMatrix);
+    const tasks = buildGenerationTasksForSection(sectionPlan, doc, caseAnalysis, doc.coverageMatrix, generationExtension);
     if (tasks.length > 0) {
       const effectiveSectionPlan = projectSectionPlanFromTasks({ section: sec, sectionPlan, tasks });
       logGenerationPlan(sec.title, tasks);
@@ -2838,6 +2854,17 @@ export async function generateSection(
         const eligibleTasks = tasks.filter((task) => {
           const issueId = task.legalIssueIds?.[0] || task.issueId || task.targetIssueId;
           const issue = issueId ? doc.legalIssueMatrix!.issues.find((candidate) => candidate.id === issueId) : undefined;
+          // REFERENCE_ONLY contract: if ALL coverage items for this task have satisfactionPolicy === 'REFERENCE_ONLY',
+          // the task must NOT invoke the provider. The section is materialized from source provenance only.
+          const taskCoverageItemIds = task.coverageItemIds || [];
+          if (taskCoverageItemIds.length > 0 && doc.coverageMatrix) {
+            const taskCoverageItems = doc.coverageMatrix.items.filter((item) =>
+              taskCoverageItemIds.includes(item.id)
+            );
+            const allReferenceOnly = taskCoverageItems.length > 0
+              && taskCoverageItems.every((item) => item.satisfactionPolicy === 'REFERENCE_ONLY');
+            if (allReferenceOnly) return false;
+          }
           return resolveEffectiveIssueGenerationEligibility({
             issue,
             derivedReadiness: issue ? derivedReadinessByIssueId?.get(issue.id) : undefined,
@@ -2923,11 +2950,26 @@ export async function generateSection(
             applySectionCoverageTransition(doc, sec, sectionBlock, trace);
             sec.content = [sectionBlock];
           } else {
-            sec.content = [];
+            const fallbackText = isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
+              ? getRevisionAmparoDirectoSectionText(doc, sec.title, caseAnalysis)
+              : buildDeterministicBlockText({ id: sec.id, title: sec.title, sectionType: sec.type, level: 1, order: sec.order, text: '', sourceElementIndices: [], pages: { start: 1, end: 1 }, aiNeed: 'REQUIRES_AI', requiresAi: true, classificationReason: 'fallback' } as any, doc, caseAnalysis);
+            if (fallbackText && fallbackText.trim().length > 0) {
+              const fallbackBlock = createContentBlock(fallbackText, 'GENERATED_ARGUMENT', {
+                provenance: 'TEMPLATE_STRUCTURE',
+              });
+              fallbackBlock.id = `block-${sec.id}-fallback`;
+              fallbackBlock.generationStatus = 'partial';
+              fallbackBlock.generationRequirement = 'AI_REQUIRED';
+              fallbackBlock.fallbackStatus = 'DETERMINISTIC_FALLBACK';
+              fallbackBlock.issueDraftValidationStatus = 'VALID_NON_FINAL';
+              sec.content = [fallbackBlock];
+            } else {
+              sec.content = [];
+            }
           }
           return {
-            text: sectionBlock?.text || '',
-            blocks: sectionBlock ? [sectionBlock] : [],
+            text: sec.content.map((b) => b.text).join('\n\n'),
+            blocks: sec.content,
             generationTasks: tasks,
             sectionDraft,
             taskAccounting: {
@@ -2952,7 +2994,26 @@ export async function generateSection(
         }
 
         const assembled = assembleIssueDraftBlocks(sec, allOutcomes);
-        sec.content = assembled.blocks;
+        if (assembled.blocks.length > 0) {
+          sec.content = assembled.blocks;
+        } else {
+          const fallbackText = isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
+            ? getRevisionAmparoDirectoSectionText(doc, sec.title, caseAnalysis)
+            : buildDeterministicBlockText({ id: sec.id, title: sec.title, sectionType: sec.type, level: 1, order: sec.order, text: '', sourceElementIndices: [], pages: { start: 1, end: 1 }, aiNeed: 'REQUIRES_AI', requiresAi: true, classificationReason: 'fallback' } as any, doc, caseAnalysis);
+          if (fallbackText && fallbackText.trim().length > 0) {
+            const fallbackBlock = createContentBlock(fallbackText, 'GENERATED_ARGUMENT', {
+              provenance: 'TEMPLATE_STRUCTURE',
+            });
+            fallbackBlock.id = `block-${sec.id}-fallback`;
+            fallbackBlock.generationStatus = 'partial';
+            fallbackBlock.generationRequirement = 'AI_REQUIRED';
+            fallbackBlock.fallbackStatus = 'DETERMINISTIC_FALLBACK';
+            fallbackBlock.issueDraftValidationStatus = 'VALID_NON_FINAL';
+            sec.content = [fallbackBlock];
+          } else {
+            sec.content = [];
+          }
+        }
         const allWarnings = [...assembled.warnings];
         if (unresolvedTasks > 0) {
           allWarnings.push(`TASK_ACCOUNTING_FAILED:${sec.id}:${unresolvedTasks}`);
@@ -3003,6 +3064,7 @@ export async function generateSection(
         lawyerProfile,
           generatedBlocks,
           trace,
+          generationExtension,
         );
         generatedBlocks.push(block);
         if (result.success && !result.fallbackUsed) {
@@ -3114,6 +3176,8 @@ export async function runGenerationPipeline(
       ? { ...input.existingDocument, updatedAt: new Date().toISOString() }
       : createEmptyDocument(),
   ) as UniversalLegalDocument;
+  const generationExtension = resolveGenerationExtensionContract(input.generationExtension);
+  (doc.generationMetadata as any).generationExtension = generationExtension;
   const generationId = input.generationId || `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   let traceContext: GenerationTraceContext | undefined;
 
@@ -3626,6 +3690,13 @@ export async function runGenerationPipeline(
       /alegato/i.test(section.title) &&
       !shouldIncludeAlegatos(input)
     ));
+    if (generationExtension.generationMode === 'extended-legal') {
+      generationExtension.sectionWordTargets = allocateSectionWordTargets(
+        doc.sections.map((section) => ({ id: section.id, title: section.title, type: section.type })),
+        generationExtension.targetWords,
+      );
+      (doc.generationMetadata as any).generationExtension = generationExtension;
+    }
     // Rich planning owns one canonical matrix for the remainder of the
     // pipeline.  Do not rebuild it from legacy projections after the
     // structure stage.
@@ -3760,6 +3831,7 @@ export async function runGenerationPipeline(
         input.researchBundlesByIssueId,
         input.derivedReadinessByIssueId,
         input.sectionGenerationMode || 'legacy',
+        generationExtension,
       );
       if (generatedRaw.sectionDraft) {
         (section as DocumentNode & { sectionDraft?: SectionDraft }).sectionDraft = generatedRaw.sectionDraft;
@@ -3854,10 +3926,12 @@ export async function runGenerationPipeline(
 
       if (generated.blocks && generated.blocks.length > 0) {
         section.content = generated.blocks;
-      } else if (Array.isArray(generated.blocks)) {
+      } else if (Array.isArray(generated.blocks) && !generated.text?.trim()) {
         section.content = [];
       } else {
         section.content = [newBlock];
+        const secTaskId = `task-section-${section.id}`;
+        newBlock.generationTaskId = secTaskId;
         newBlock.generatedBy = sourceBackedProceduralReference
           ? 'SOURCE_DIRECT'
           : effectiveAiUsed
@@ -3872,19 +3946,57 @@ export async function runGenerationPipeline(
         );
         newBlock.model = generated.aiModel || null;
         newBlock.generationId = traceContext?.generationId;
-        newBlock.generationTaskId = undefined;
         newBlock.fallbackStatus = sourceBackedProceduralReference
           ? undefined
           : generated.fallbackUsed
             ? 'DETERMINISTIC_FALLBACK'
             : undefined;
         newBlock.fallbackReason = sourceBackedProceduralReference ? null : generated.aiError || null;
+
         // La sección aporta el vínculo planeado; la política de Coverage
         // decide después si el bloque realmente puede satisfacerlo.
         if (!section.coverageItemIds && plannedCoverageItemIds.length > 0) {
           section.coverageItemIds = [...plannedCoverageItemIds];
         }
         newBlock.coverageItemIds = [...plannedCoverageItemIds];
+
+        const sectionTask: GenerationTask = {
+          id: secTaskId,
+          sectionId: section.id,
+          sectionTitle: section.title,
+          taskType: isSubstantive ? 'SECTION_SUPPORT' : 'PROCEDURAL_GROUNDS',
+          title: section.title,
+          objective: secPlan?.objective || section.title,
+          complexity: 'MEDIUM',
+          tokenBudget: 4000,
+          status: 'completed',
+          order: section.order,
+          coverageItemIds: [...plannedCoverageItemIds],
+        };
+        accumulatedGenerationTasks.push(sectionTask);
+
+        if (effectiveAiUsed) {
+          // AI-generated block: REQUIRES real semantic evaluation.
+          // Never fabricate a fake PASS; run the full forensic evaluator.
+          const realEvaluation = evaluateBlockQuality(newBlock, sectionTask, doc, caseAnalysis);
+          newBlock.semanticEvaluation = realEvaluation;
+          newBlock.issueDraftValidationStatus = realEvaluation.verdict === 'PASS'
+            ? 'VALID_ACCEPTED'
+            : realEvaluation.verdict === 'WEAK'
+              ? 'VALID_NON_FINAL'
+              : 'INVALID_FATAL';
+          if (traceContext?.enabled) {
+            traceContext.recordSemanticEvaluation(realEvaluation);
+          }
+        } else {
+          // REFERENCE_ONLY or DETERMINISTIC_FALLBACK blocks:
+          // By contract, these are NOT generated by AI.
+          // They must NOT have a fabricated PASS with overallScore: 1.
+          // They are kept as drafts for lawyer review (VALID_NON_FINAL).
+          newBlock.semanticEvaluation = undefined;
+          newBlock.issueDraftValidationStatus = 'VALID_NON_FINAL';
+        }
+
         if (traceContext?.enabled) {
           traceContext.recordDraftBlock(newBlock);
         }
@@ -3972,6 +4084,22 @@ export async function runGenerationPipeline(
       callbacks?.onBlockComplete?.(completedBlocks, doc.sections.length, pseudoBlock as LegalBlock, { aiUsed: effectiveAiUsed, aiProvider: generated.aiProvider || null, fallback: !effectiveAiUsed && !!generated.aiError });
     }
 
+    if (generationExtension.generationMode === 'extended-legal') {
+      const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext });
+      (doc.generationMetadata as any).generationExtension = generationExtension;
+      if (expansion.warnings.length > 0) {
+        doc.validation.warnings.push(...expansion.warnings.map((warning) => ({
+          checkId: 'EXTENDED_GENERATION',
+          message: warning,
+        } as ValidationIssue)));
+      }
+      jobUpdate((input as any).jobId, {
+        stage: `Medición de extensión: ${expansion.metrics.actualPages} páginas`,
+        extensionPages: expansion.metrics.actualPages,
+        extensionTarget: generationExtension.targetPages,
+      });
+    }
+
     // FASE 6/9 — integridad de roles en contestaciones (post-generación):
     // FIRMA determinística con el demandado + limpieza de ecos del listado
     // de roles que el modelo pudiera haber copiado a la COMPARECENCIA.
@@ -3986,20 +4114,33 @@ export async function runGenerationPipeline(
     doc.generationMetadata.aiModel = pipelineAiModel || null;
     doc.generationMetadata.aiError = pipelineAiError || null;
     if (traceContext?.enabled) {
-      traceContext.trace.providerRequested = 'NVIDIA';
+      traceContext.trace.providerRequested = generationExtension.generationMode === 'extended-legal' ? 'GEMINI' : 'NVIDIA';
       const actualProviders = traceContext.trace.taskExecutions.map((entry) => entry.providerActuallyUsed);
       traceContext.trace.providerActuallyUsed = actualProviders.includes('NVIDIA')
         ? 'NVIDIA'
+        : actualProviders.includes('GEMINI')
+          ? 'GEMINI'
+          : actualProviders.includes('GROQ')
+            ? 'GROQ'
         : actualProviders.includes('LOCAL')
           ? 'LOCAL'
           : pipelineAiUsed
-            ? (pipelineAiProvider === 'nvidia' ? 'NVIDIA' : pipelineAiProvider === 'local' ? 'LOCAL' : 'NONE')
+            ? (pipelineAiProvider === 'nvidia'
+              ? 'NVIDIA'
+              : pipelineAiProvider === 'gemini'
+                ? 'GEMINI'
+                : pipelineAiProvider === 'groq'
+                  ? 'GROQ'
+                  : pipelineAiProvider === 'local' ? 'LOCAL' : 'NONE')
             : 'NONE';
       traceContext.trace.model = pipelineAiModel || null;
       traceContext.trace.providerFallbackReason = pipelineAiError
         || traceContext.trace.taskExecutions.find((entry) => entry.fallbackReason)?.fallbackReason
-        || (traceContext.trace.providerActuallyUsed !== 'NVIDIA' && !process.env.NVIDIA_API_KEY
-          ? 'NVIDIA_NO_API_KEY'
+        || (!['NVIDIA', 'GEMINI', 'GROQ'].includes(traceContext.trace.providerActuallyUsed || '')
+          && !process.env.NVIDIA_API_KEY
+          && !process.env.GEMINI_API_KEY
+          && !process.env.GROQ_API_KEY
+          ? 'NO_EXTERNAL_PROVIDER_API_KEY'
           : null);
     }
 
@@ -4136,6 +4277,21 @@ export async function runGenerationPipeline(
         coverageItemIds: [],
         sectionIds: [],
       }];
+    }
+
+    if (generationExtension.generationMode === 'extended-legal') {
+      try {
+        const finalPageMetrics = await measureRenderedDocumentPages(doc);
+        generationExtension.actualPages = finalPageMetrics.actualPages;
+        generationExtension.wordCount = finalPageMetrics.wordCount;
+        generationExtension.characterCount = finalPageMetrics.characterCount;
+        generationExtension.extensionTargetUnmet = finalPageMetrics.actualPages < generationExtension.minPages;
+        (doc.generationMetadata as any).generationExtension = generationExtension;
+      } catch (measurementError) {
+        const message = measurementError instanceof Error ? measurementError.message : String(measurementError);
+        generationExtension.extensionTargetUnmet = true;
+        doc.validation.warnings.push({ checkId: 'EXTENDED_GENERATION_MEASUREMENT_FAILED', message });
+      }
     }
 
     // ── Stage 7: Review Coherence ──────────────────────────────────────────

@@ -108,6 +108,7 @@ export async function POST(req: NextRequest) {
     caseParties,
     idempotencyKey: bodyIdempotencyKey,
     workflow,
+    generationExtension,
   } = body;
   const selectedDocumentType = typeof bodySelectedDocumentType === 'string'
     ? bodySelectedDocumentType.trim().slice(0, 80) || undefined
@@ -171,7 +172,7 @@ export async function POST(req: NextRequest) {
     try {
       const doc = await runGenerationPipeline({
         userInstruction, sourceDocuments: sourcesArr, allowUnvalidatedSource,
-        referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint,
+        referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension,
       }, {} as any);
       return NextResponse.json({ ok: true, document: doc });
     } catch (err: any) {
@@ -253,6 +254,7 @@ export async function POST(req: NextRequest) {
           workflow: workflowSnapshot,
           idempotencyKey: idempotencyKey || fingerprint,
           jobId: job.jobId,
+          generationExtension,
         },
         // Bridge: además de callbacks estándar, enganchar progreso real por bloque
         {

@@ -12,6 +12,8 @@ describe('P4 — NVIDIA REAL (no mock)', () => {
   const shouldRunReal = hasKey && process.env.NVIDIA_REAL_TEST !== 'false' && process.env.CI !== 'true';
 
   it.skipIf(!shouldRunReal)('NVIDIA disponible → genera operación jurídica real y registra metadata', async () => {
+    const origChain = process.env.AI_PROVIDER_CHAIN;
+    process.env.AI_PROVIDER_CHAIN = 'nvidia,local';
     // Intentar una generación real mínima con timeout corto
     const start = Date.now();
     let result: any;
@@ -32,6 +34,9 @@ describe('P4 — NVIDIA REAL (no mock)', () => {
         return;
       }
       throw e;
+    } finally {
+      if (origChain !== undefined) process.env.AI_PROVIDER_CHAIN = origChain;
+      else delete process.env.AI_PROVIDER_CHAIN;
     }
 
     // Verificar que no se filtró la key

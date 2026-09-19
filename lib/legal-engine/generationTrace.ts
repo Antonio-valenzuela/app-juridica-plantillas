@@ -26,7 +26,7 @@ export type GenerationOrigin =
   | 'SOURCE_DIRECT';
 
 export type GeneratedBy = 'AI' | 'DETERMINISTIC' | 'USER' | 'FALLBACK' | 'SOURCE_DIRECT';
-export type ProviderActuallyUsed = 'NVIDIA' | 'LOCAL' | 'NONE';
+export type ProviderActuallyUsed = 'NVIDIA' | 'GEMINI' | 'GROQ' | 'LOCAL' | 'NONE';
 export type GenerationRoutingResolutionSource =
   | 'EXPLICIT_UI'
   | 'EXPLICIT_TAXONOMY'

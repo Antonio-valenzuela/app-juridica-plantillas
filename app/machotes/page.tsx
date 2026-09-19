@@ -21,8 +21,6 @@ import type {
   ContentBlock,
   GenerationMode,
   WritingIntake,
-  LawyerFactPosition,
-  LawyerClaimPosition,
 } from '@/lib/legal-engine/types';
 import { reconstructCaseAnalysis, type CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 import { createEmptyDocument } from '@/lib/legal-engine/types';
@@ -543,47 +541,6 @@ export default function MachotesPage() {
     return () => {
       if (draftAutosaveTimerRef.current) window.clearTimeout(draftAutosaveTimerRef.current);
     };
-  }, []);
-
-  const updateFactPosition = useCallback((factId: string, position: LawyerFactPosition, response?: string) => {
-    setCaseAnalysis((previous) => {
-      if (!previous) return previous;
-      return {
-        ...previous,
-        facts: previous.facts.map((fact) => fact.id === factId
-          ? {
-              ...fact,
-              lawyerPosition: position,
-              position: position === 'NOT_KNOWN' ? 'IGNORE_PERSONAL_KNOWLEDGE' : position === 'UNDEFINED' ? 'REQUIRE_LAWYER_INPUT' : position,
-              lawyerObservation: response?.trim() || fact.lawyerObservation,
-              generatedResponse: undefined,
-              response: response?.trim() || fact.response || '[REQUIERE DEFINIR POSTURA DEL ABOGADO]',
-              manualResponse: response?.trim() || fact.manualResponse,
-              provenance: 'LAWYER_CONFIRMED' as const,
-            }
-          : fact),
-      };
-    });
-  }, []);
-
-  const updateClaimPosition = useCallback((claimId: string, position: LawyerClaimPosition, response?: string) => {
-    setCaseAnalysis((previous) => {
-      if (!previous) return previous;
-      return {
-        ...previous,
-        claimResponses: (previous.claimResponses || []).map((claim) => claim.id === claimId
-          ? {
-              ...claim,
-              lawyerPosition: position,
-              position,
-              lawyerObservation: response?.trim() || claim.lawyerObservation,
-              generatedResponse: undefined,
-              response: response?.trim() || claim.response || '[REQUIERE DEFINIR POSTURA DEL ABOGADO]',
-              provenance: 'LAWYER_CONFIRMED' as const,
-            }
-          : claim),
-      };
-    });
   }, []);
 
   useEffect(() => {
@@ -1579,11 +1536,13 @@ export default function MachotesPage() {
     referenceDocumentId?: string;
     referenceDocumentText?: string;
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
+    generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
   }) => {
     const userInstructions = typeof request === 'string' ? request : request.userInstructions;
     const selectedDocumentTypeFromUi = typeof request === 'string' ? undefined : request.selectedDocumentType;
     const documentTypeLabelFromUi = typeof request === 'string' ? undefined : request.documentTypeLabel;
     const generationModeFromUi = typeof request === 'string' ? undefined : request.generationMode;
+    const generationExtensionFromUi = typeof request === 'string' ? undefined : request.generationExtension;
     const referenceDocumentIdFromUi = typeof request === 'string' ? undefined : request.referenceDocumentId;
     const referenceDocumentTextFromUi = typeof request === 'string' ? undefined : request.referenceDocumentText;
     if (isUniversalGenerating || genIsGeneratingRef.current) {
@@ -1652,6 +1611,7 @@ export default function MachotesPage() {
           selectedDocumentType: requestedDocumentType,
           matter: requestedMatter,
           caseParties: contestacionCaseParties.length > 0 ? contestacionCaseParties : undefined,
+          generationExtension: generationExtensionFromUi || { generationMode: 'standard' },
           idempotencyKey: genId2,
         }),
       });
@@ -2876,7 +2836,7 @@ export default function MachotesPage() {
             </div>
           </div>
         ) : activeNavTab === 'universal' && universalViewMode === 'analysis' ? (
-          /* TAB 1: MOTOR UNIVERSAL — 3 COLUMNAS (Contexto | Análisis jurídico | Fuentes y trazabilidad) */
+          /* TAB 1: MOTOR UNIVERSAL — 2 COLUMNAS (Contexto | Análisis jurídico) */
           <div className="w-full min-h-0 overflow-y-auto font-sans">
             <div className="w-full max-w-[1800px] mx-auto px-5 md:px-6 py-5 md:py-6 space-y-4">
               {/* Encabezado Superior */}
@@ -2907,10 +2867,10 @@ export default function MachotesPage() {
                 ) : null}
               </div>
 
-              {/* Grid de 3 Columnas Exacto a la Referencia */}
+              {/* Motor Jurídico: contexto y ejecución en una sola superficie */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4.5 items-start">
-                {/* ── COLUMNA 1: CONTEXTO (lg:col-span-3) ── */}
-                <div className="lg:col-span-3 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+                {/* ── CONTEXTO PRINCIPAL (ancho completo) ── */}
+                <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
                   <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2">
                     Contexto
                   </h2>
@@ -3131,307 +3091,6 @@ export default function MachotesPage() {
                   </div>
                 </div>
 
-                {/* COLUMNA 2: ANÁLISIS JURÍDICO (lg:col-span-6) */}
-                <div className="lg:col-span-6 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-                  {/* Status Bar Superior — estados REALES derivados del workspace */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                    <div className="flex items-center gap-2 text-[10.5px] text-slate-600 font-medium overflow-x-auto no-scrollbar">
-                      <span className="font-bold text-slate-700">Estado del asunto:</span>
-                      <span className={`font-bold flex items-center gap-0.5 ${uploadedSourceDocs.length > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>
-                        {uploadedSourceDocs.length > 0 ? '✓' : '○'} Fuentes del asunto ({uploadedSourceDocs.length})
-                      </span>
-                      <span className={`font-bold flex items-center gap-0.5 ${universalForm.fuentes.legislacion ? 'text-emerald-700' : 'text-slate-400'}`}>
-                        {universalForm.fuentes.legislacion ? '✓' : '○'} Legislación
-                      </span>
-                      <span className={`font-bold flex items-center gap-0.5 ${universalForm.fuentes.jurisprudencia ? 'text-emerald-700' : 'text-slate-400'}`}>
-                        {universalForm.fuentes.jurisprudencia ? '✓' : '○'} Jurisprudencia
-                      </span>
-                      <span className={`font-bold flex items-center gap-0.5 ${universalForm.fuentes.expediente && uploadedSourceDocs.length > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>
-                        {universalForm.fuentes.expediente && uploadedSourceDocs.length > 0 ? '✓' : '○'} Fuentes verificadas
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 shrink-0">
-                      Fuentes revisadas: {uploadedSourceDocs.length}
-                    </span>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-extrabold text-slate-700">Modo de generación</span>
-                      <span className="text-[10px] text-slate-500">Conserva el orden de la plantilla seleccionada</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {([
-                        ['automatic', 'Automático'],
-                        ['personal_template', 'Mi plantilla'],
-                        ['reference_document', 'Documento referencia'],
-                      ] as const).map(([mode, label]) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          onClick={() => setGenerationMode(mode)}
-                          disabled={(mode !== 'automatic') && !selectedTemplate}
-                          className={`rounded-lg border px-2 py-2 text-[10px] font-bold transition ${generationMode === mode ? 'border-[#0B2545] bg-[#0B2545] text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'} disabled:cursor-not-allowed disabled:opacity-45`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-slate-500">
-                      {generationMode === 'automatic' ? 'El motor decide la estructura canónica.' : selectedTemplate ? `Usará: ${selectedTemplate.name}` : 'Carga o selecciona una plantilla para activar este modo.'}
-                    </p>
-                  </div>
-
-                  {/* Contenido del Análisis — BARRA DE PROGRESO REAL X/Y */}
-                  {isUniversalGenerating ? (
-                    <div className="py-6 space-y-4">
-                      <div className="bg-[#fbf9f5] border border-slate-200 rounded-2xl p-5 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-extrabold text-[#0B2545] flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-full bg-[#0B2545] text-white text-[11px] flex items-center justify-center">⚙</span>
-                            Generando documento jurídico
-                          </h3>
-                          <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-white border border-slate-200 text-slate-700">
-                            {activeGenJob?.total ? `${activeGenJob.completed} / ${activeGenJob.total}` : 'Preparando…'}
-                          </span>
-                        </div>
-                        {/* Barra determinada */}
-                        {activeGenJob?.total ? (
-                          <>
-                            <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                              <div
-                                className="h-full bg-gradient-to-r from-[#0B2545] to-[#234e4b] rounded-full transition-all duration-700 ease-out"
-                                style={{ width: `${Math.min(100, activeGenJob.percentage || 0)}%` }}
-                              />
-                            </div>
-                            <div className="flex items-center justify-between text-[11px]">
-                              <span className="font-extrabold text-[#0B2545]">{activeGenJob.percentage}%</span>
-                              <span className="text-slate-500 font-semibold truncate ml-2">{activeGenJob.currentBlock || activeGenJob.stage || 'Procesando…'}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                              <div className="h-full w-1/2 bg-[#0B2545] rounded-full animate-pulse" style={{ animation: 'mach-progress-indeterminate 1.2s ease-in-out infinite' }} />
-                            </div>
-                            <p className="text-[11px] text-slate-600 font-semibold flex items-center gap-2">
-                              <span className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-[#0B2545] animate-spin" /> {activeGenJob?.stage || 'Preparando documento…'}
-                            </p>
-                          </>
-                        )}
-                        <div className="pt-2 border-t border-slate-100 space-y-1 text-[11px] text-slate-700">
-                          {activeGenJob?.currentBlock && activeGenJob.total ? (
-                            <>
-                              <p className="font-bold text-slate-800">Procesando:</p>
-                              <p className="font-semibold text-[#0B2545] bg-white border border-slate-200 rounded-lg px-2 py-1 truncate">{activeGenJob.currentBlock}</p>
-                            </>
-                          ) : null}
-                          <p className="flex items-center gap-1.5 text-slate-600">
-                            <span>Asistente:</span>
-                            <span className="font-bold text-slate-800">Redacción jurídica</span>
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-1" />
-                            <span className="font-semibold">{activeGenJob?.total ? 'Procesando sección…' : 'Preparando documento…'}</span>
-                          </p>
-                        </div>
-                        {activeGenJob?.percentage === 100 && (
-                          <p className="text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-center">✓ Documento generado correctamente</p>
-                        )}
-                      </div>
-                      <style>{`@keyframes mach-progress-indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }`}</style>
-                    </div>
-                  ) : uploadedSourceDocs.length === 0 && !universalDoc ? (
-                    <div className="machotes-empty">
-                      No hay información analizada todavía. Adjunta un documento y ejecuta el análisis.
-                    </div>
-                  ) : (
-                    <div className="space-y-4 text-xs text-slate-800">
-                      <div className="space-y-1">
-                        <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Problema jurídico</span>
-                        <p className="font-semibold text-slate-900 leading-snug">
-                          {universalForm.pregunta || universalDoc?.title || 'Sin problema jurídico capturado.'}
-                        </p>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
-                        <div className="space-y-1.5">
-                          <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Datos detectados</span>
-                          {liveCaseFicha && (liveCaseFicha.actor || liveCaseFicha.demandado || liveCaseFicha.autoridad || liveCaseFicha.expediente) ? (
-                            <ul className="text-[11px] text-slate-700 leading-relaxed">
-                              {liveCaseFicha.expediente && <li><strong>Expediente:</strong> {liveCaseFicha.expediente}</li>}
-                              {liveCaseFicha.actor && <li><strong>Actor:</strong> {liveCaseFicha.actor}</li>}
-                              {liveCaseFicha.demandado && <li><strong>Demandado:</strong> {liveCaseFicha.demandado}</li>}
-                              {liveCaseFicha.autoridad && <li><strong>Autoridad:</strong> {liveCaseFicha.autoridad}</li>}
-                            </ul>
-                          ) : (
-                            <div className="machotes-empty">Sin datos estructurados detectados.</div>
-                          )}
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Documentos fuente</span>
-                          <ul className="text-[11px] text-slate-700 leading-relaxed">
-                            {uploadedSourceDocs.map((doc) => <li key={doc.id}>{doc.name}</li>)}
-                          </ul>
-                        </div>
-                      </div>
-
-                      {caseAnalysis?.facts?.length ? (
-                        <div className="space-y-1.5 pt-1">
-                          <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Hechos detectados y trazabilidad</span>
-                          <ol className="space-y-1.5 max-h-52 overflow-y-auto">
-                            {caseAnalysis.facts.map((fact) => (
-                              <li key={fact.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-700">
-                                <span className="font-extrabold text-[#0B2545]">HECHO {fact.number}:</span>{' '}
-                                <span>{fact.text}</span>
-                                <span className="block text-[10px] text-slate-400">{fact.documentId || 'documento'} · página {fact.page || '—'} · confianza {Math.round(fact.confidence * 100)}%</span>
-                                <div className="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,180px)_1fr] gap-1.5 items-start">
-                                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                    Postura del abogado
-                                    <select
-                                      aria-label={`Postura del hecho ${fact.number}`}
-                                      value={fact.lawyerPosition || (fact.position === 'IGNORE_PERSONAL_KNOWLEDGE' ? 'NOT_KNOWN' : fact.position === 'ADMIT' || fact.position === 'DENY' || fact.position === 'PARTIAL' ? fact.position : 'UNDEFINED')}
-                                      onChange={(event) => updateFactPosition(fact.id, event.currentTarget.value as LawyerFactPosition)}
-                                      className="mt-1 w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-normal normal-case tracking-normal text-slate-700"
-                                    >
-                                      <option value="ADMIT">Cierto / admitir</option>
-                                      <option value="DENY">Falso / negar</option>
-                                      <option value="PARTIAL">Parcialmente cierto</option>
-                                      <option value="NOT_KNOWN">No me consta / no conocido</option>
-                                      <option value="UNDEFINED">Definir después</option>
-                                    </select>
-                                  </label>
-                                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                    Observación / respuesta
-                                    <textarea
-                                      aria-label={`Observación del hecho ${fact.number}`}
-                                      defaultValue={fact.manualResponse || (fact.response && !/^\[REQUIERE DEFINIR/i.test(fact.response) ? fact.response : '')}
-                                      onBlur={(event) => updateFactPosition(fact.id, fact.lawyerPosition || 'UNDEFINED', event.currentTarget.value)}
-                                      rows={2}
-                                      placeholder="Opcional; no se inventa una postura si queda vacío."
-                                      className="mt-1 w-full resize-y rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-normal normal-case tracking-normal text-slate-700"
-                                    />
-                                  </label>
-                                </div>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      ) : null}
-
-                      {caseAnalysis?.claimResponses?.length ? (
-                        <div className="space-y-1.5 pt-1">
-                          <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Prestaciones y postura del abogado</span>
-                          <ol className="space-y-1.5 max-h-52 overflow-y-auto">
-                            {caseAnalysis.claimResponses.map((claim) => (
-                              <li key={claim.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-700">
-                                <span className="font-extrabold text-[#0B2545]">PRESTACIÓN {claim.number}:</span>{' '}{claim.text}
-                                <div className="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,180px)_1fr] gap-1.5 items-start">
-                                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                    Postura del abogado
-                                    <select
-                                      aria-label={`Postura de la prestación ${claim.number}`}
-                                      value={claim.lawyerPosition || (claim.position === 'ACCEPT' || claim.position === 'OPPOSE' || claim.position === 'PARTIAL' ? claim.position : 'UNDEFINED')}
-                                      onChange={(event) => updateClaimPosition(claim.id, event.currentTarget.value as LawyerClaimPosition)}
-                                      className="mt-1 w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-normal normal-case tracking-normal text-slate-700"
-                                    >
-                                      <option value="ACCEPT">Aceptar</option>
-                                      <option value="OPPOSE">Oponerse</option>
-                                      <option value="PARTIAL">Parcialmente</option>
-                                      <option value="UNDEFINED">Definir después</option>
-                                    </select>
-                                  </label>
-                                  <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                                    Observación / respuesta
-                                    <textarea
-                                      aria-label={`Observación de la prestación ${claim.number}`}
-                                      defaultValue={claim.lawyerObservation || (claim.response && !/^\[REQUIERE DEFINIR/i.test(claim.response) ? claim.response : '')}
-                                      onBlur={(event) => updateClaimPosition(claim.id, claim.lawyerPosition || 'UNDEFINED', event.currentTarget.value)}
-                                      rows={2}
-                                      placeholder="Opcional; la prestación queda pendiente si no defines postura."
-                                      className="mt-1 w-full resize-y rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-normal normal-case tracking-normal text-slate-700"
-                                    />
-                                  </label>
-                                </div>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      ) : null}
-
-                      <div className="space-y-1 pt-1">
-                        <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Estructura disponible</span>
-                        {universalDoc?.sections?.length ? (
-                          <div className="grid gap-2">
-                            {universalDoc.sections.slice(0, 8).map((section) => (
-                              <div key={section.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                                <strong className="text-slate-900">{section.title}</strong>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="machotes-empty">El análisis todavía no ha producido apartados estructurados.</div>
-                        )}
-                      </div>
-
-                      <div className="space-y-1 pt-1">
-                        <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider block">Conclusión</span>
-                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[11.5px] text-slate-800 leading-relaxed">
-                          La conclusión se mostrará aquí únicamente cuando exista una salida del motor para este expediente.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Barra de Acciones Inferior */}
-                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
-                    <button
-                      onClick={() => handleSaveDraft()}
-                      className="flex-1 min-w-[120px] py-2 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl shadow-2xs transition text-center"
-                    >
-                      Guardar análisis
-                    </button>
-                    <button
-                      onClick={() => setUniversalViewMode('editor')}
-                      className="flex-1 min-w-[140px] py-2 px-3 bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-bold rounded-xl shadow-xs transition text-center"
-                    >
-                      Convertir en escrito
-                    </button>
-                    <button
-                      onClick={() => handleExportDocx()}
-                      className="py-2 px-3.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl shadow-2xs transition text-center"
-                    >
-                      Exportar
-                    </button>
-                  </div>
-                </div>
-
-                {/* ── COLUMNA 3: FUENTES Y TRAZABILIDAD (lg:col-span-3) ── */}
-                <div className="lg:col-span-3 space-y-3.5">
-                  <h2 className="text-sm font-bold text-slate-900 px-1">
-                    Fuentes y trazabilidad
-                  </h2>
-
-                  {uploadedSourceDocs.length === 0 ? (
-                    <div className="machotes-empty">No hay fuentes del expediente cargadas.</div>
-                  ) : (
-                    uploadedSourceDocs.slice(0, 8).map((doc) => (
-                      <div key={doc.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3">
-                        <div className="flex items-center gap-2 text-slate-500 text-xs">
-                          <span>📄</span>
-                          <span className="font-semibold text-slate-600 truncate">Documento fuente</span>
-                        </div>
-                        <div className="space-y-1">
-                          <h3 className="text-xs font-bold text-slate-900 truncate">{doc.name}</h3>
-                          <div className="flex items-center justify-between text-[11px] text-slate-500">
-                            <span>Páginas: <strong className="text-slate-700">{doc.pages?.length || 1}</strong></span>
-                            <span>Estado: <strong className="text-slate-700">{doc.sourceValidated === false ? 'Revisión' : 'Verificada'}</strong></span>
-                          </div>
-                        </div>
-                        <button type="button" onClick={() => setSelectedCaseDoc(caseDocuments.find((c) => c.id === doc.id) || null)} className="w-full py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-xl shadow-2xs transition">Ver fuente</button>
-                      </div>
-                    ))
-                  )}
-                </div>
               </div>
             </div>
           </div>
