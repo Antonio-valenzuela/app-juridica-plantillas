@@ -20,6 +20,13 @@ function normalizeHeading(text: string): string | undefined {
     if (/PRUEBA|EVIDENC/i.test(normalized)) return 'PRUEBAS';
     return normalized;
   }
+  const unspaced = normalized.replace(/\s+/g, '');
+  if (LIST_SECTION_RE.test(unspaced)) {
+    if (/HECHO/i.test(unspaced)) return 'HECHOS';
+    if (/PRESTACI|PRETENS|PETICI/i.test(unspaced)) return 'PRESTACIONES';
+    if (/PRUEBA|EVIDENC/i.test(unspaced)) return 'PRUEBAS';
+    return unspaced;
+  }
   return undefined;
 }
 

@@ -36,7 +36,7 @@ export interface ProviderRetrieveResult {
 }
 
 export interface LegalResearchProvider {
-  id: 'SCJN' | 'FEDERAL_LEGISLATION' | 'DOF' | 'STATE_OFFICIAL' | 'FIXTURE_OFFICIAL';
+  id: 'SCJN' | 'FEDERAL_LEGISLATION' | 'DOF' | 'STATE_OFFICIAL' | 'FIXTURE_OFFICIAL' | 'CORPUS_IURIS' | 'LEX_MX' | 'RESEARCH_ROUTER';
   version: string;
   supportedAuthorityTypes: AuthorityType[];
   search(input: LegalResearchSearchInput): Promise<ProviderSearchResult>;

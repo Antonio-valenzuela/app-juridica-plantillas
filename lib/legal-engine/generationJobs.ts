@@ -38,6 +38,9 @@ export interface GenerationJob {
   updatedAt: string;
   startedAt: number;
   log: string[];
+  expansionTotal?: number;
+  expansionCompleted?: number;
+  phase?: string;
 }
 
 const JOB_TTL_MS = 30 * 60 * 1000; // 30 min retención
@@ -117,12 +120,18 @@ export function findActiveJobByFingerprint(fingerprint: string | null, idempoten
   return undefined;
 }
 
-export function updateJobProgress(jobId: string, patch: Partial<Pick<GenerationJob,'total'|'completed'|'currentBlock'|'currentBlockIndex'|'aiProvider'|'stage'|'percentage'>> & { logLine?: string }): GenerationJob | undefined {
+export function updateJobProgress(
+  jobId: string,
+  patch: Partial<Pick<GenerationJob, 'total' | 'completed' | 'currentBlock' | 'currentBlockIndex' | 'aiProvider' | 'stage' | 'percentage' | 'expansionTotal' | 'expansionCompleted' | 'phase'>> & { logLine?: string },
+): GenerationJob | undefined {
   const job = JOBS.get(jobId);
   if (!job) return undefined;
   // Un job terminal no puede volver a processing ni recibir callbacks tardíos.
   // Esto evita que una carrera entre cancelación/fallo y el pipeline reabra la UI.
   if (job.status !== 'processing') return job;
+  if (patch.expansionTotal !== undefined) job.expansionTotal = patch.expansionTotal;
+  if (patch.expansionCompleted !== undefined) job.expansionCompleted = patch.expansionCompleted;
+  if (patch.phase !== undefined) job.phase = patch.phase;
   if (patch.total !== undefined) job.total = Math.max(0, Math.floor(patch.total));
   if (job.total > 0) job.completed = Math.min(job.completed, job.total);
   if (patch.completed !== undefined) {
@@ -140,9 +149,24 @@ export function updateJobProgress(jobId: string, patch: Partial<Pick<GenerationJ
   }
   if (patch.aiProvider !== undefined) job.aiProvider = patch.aiProvider;
   if (patch.stage !== undefined) job.stage = patch.stage;
+
+  if (job.expansionTotal && job.expansionTotal > 0) {
+    if (job.expansionCompleted === undefined || job.expansionCompleted < job.expansionTotal) {
+      if (!job.phase) job.phase = 'expanding';
+    }
+  }
+
   // recalcular porcentaje por trabajo REAL (completed/total)
-  if (job.total > 0) job.percentage = Math.min(100, Math.round((job.completed / job.total) * 100));
-  else job.percentage = 0;
+  if (job.total > 0) {
+    let rawPct = Math.round((job.completed / job.total) * 100);
+    if (job.expansionTotal && job.expansionTotal > 0 && (job.expansionCompleted === undefined || job.expansionCompleted < job.expansionTotal)) {
+      rawPct = Math.min(95, rawPct);
+    }
+    job.percentage = Math.min(100, rawPct);
+  } else {
+    job.percentage = 0;
+  }
+  if (patch.percentage !== undefined) job.percentage = patch.percentage;
   if (patch.logLine) job.log.push(patch.logLine);
   job.updatedAt = new Date().toISOString();
   return job;

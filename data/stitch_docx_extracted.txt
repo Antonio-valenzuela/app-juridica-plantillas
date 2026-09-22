@@ -1,0 +1,178 @@
+
+
+LexPlantillas
+
+Referencia oficial de diseño · Stitch
+
+Documento Word para implementación visual
+
+FUENTE DE VERDAD VISUAL
+
+stitch_portal_web_para_abogados.zip
+
+Los diseños anteriores quedan descartados. Este documento define la apariencia que debe conservar la app.
+
+Prioridad: escritorio PC/Mac · Responsive en tablet y móvil
+
+1. Regla principal de implementación
+
+Usar Stitch únicamente como referencia de UI/UX y sistema visual. No sustituir la lógica funcional de LexPlantillas ni copiar ciegamente el HTML de las maquetas.
+
+Conservar rutas, estados, handlers, visor de documentos, editor, exportación, extracción, clasificación jurídica, generación de texto, proveedores de IA y pruebas existentes.
+
+Migrar la interfaz de forma progresiva, pantalla por pantalla, verificando que cada acción visual siga conectada a su función real.
+
+Priorizar escritorio (1200 px o más), pero mantener comportamiento responsive en tablet y móvil.
+
+Eliminar estilos, componentes visuales y layouts antiguos que entren en conflicto con esta referencia.
+
+2. Identidad visual
+
+El sistema Iuris Dictum mezcla autoridad editorial jurídica con una interfaz de alta densidad para trabajo profesional. Debe sentirse sobrio, rápido, técnico y confiable; no decorativo ni juvenil.
+
+Paleta principal
+
+Elemento
+
+Color
+
+Uso principal
+
+Borgoña imperial
+
+#78001E
+
+Navegación, acciones principales y autoridad visual
+
+Claret
+
+#9B1C31
+
+Estados activos, énfasis secundario
+
+Oro SCJN
+
+#D4AF37
+
+Sellos, FIREL, verificación y prestigio institucional
+
+Éxito
+
+#24724D
+
+Admitido, en término, validaciones positivas
+
+Advertencia
+
+#9E6A03
+
+Términos próximos, revisión pendiente
+
+Error
+
+#BA1A1A
+
+Fallas, preclusión, rechazo o validación negativa
+
+Tipografía
+
+Source Serif 4: títulos, rubros jurídicos, documento y contenido editorial.
+
+Inter: navegación, formularios, tablas, filtros y controles.
+
+JetBrains Mono: expedientes, identificadores, hashes, metadatos y fechas técnicas.
+
+3. Layout responsive
+
+Viewport
+
+Estructura
+
+Regla
+
+Desktop ≥ 1280 px
+
+3 paneles
+
+Sidebar 240 px + panel maestro 360 px + área flexible de trabajo.
+
+Tablet 768–1279 px
+
+2 paneles
+
+Sidebar reducido a rail de 56 px; contenido aprox. 40/60.
+
+Móvil < 768 px
+
+Vista apilada
+
+Editor y paneles en flujo vertical con acciones flotantes.
+
+4. Componentes y geometría
+
+Controles estándar: radio de 4 px. Tarjetas y paneles: hasta 8 px. Evitar esquinas excesivamente redondeadas.
+
+Botón primario: fondo #78001E, texto blanco, altura 36 px; en barras compactas 28 px.
+
+Campos: 36 px de alto, fondo blanco, borde #E0BFBF y foco borgoña.
+
+Tablas densas: filas de 32–36 px. El documento debe conservar márgenes visuales amplios dentro de la hoja simulada.
+
+Profundidad basada en capas tonales y bordes discretos; usar sombras muy suaves, no tarjetas flotantes exageradas.
+
+
+
+5. Motor Universal
+
+Referencia principal para carga, análisis y flujo universal de documentos.
+
+
+
+
+
+6. Escritos iniciales
+
+Referencia para el flujo de creación y preparación de escritos iniciales.
+
+
+
+
+
+7. Contestaciones
+
+Referencia para contestaciones y recursos, conservando un visor documental dominante y controles jurídicos claros.
+
+
+
+
+
+8. Editor y exportación
+
+Referencia para edición final, revisión del escrito y exportación.
+
+
+
+
+
+9. Instrucción lista para Anty / Codex
+
+Usa este texto como orden de implementación:
+
+Usa stitch_portal_web_para_abogados.zip y este documento Word como la única fuente de verdad visual para APP-plantillas. Los diseños anteriores fueron descartados. Migra la interfaz existente para reproducir fielmente el sistema Iuris Dictum, los screen.png y los code.html de Stitch, priorizando escritorio PC/Mac y manteniendo responsive en tablet y móvil. NO reemplaces ni reescribas la lógica funcional existente: conserva rutas, APIs, extracción documental, clasificación jurídica, generación IA, proveedores actuales, estados, handlers, visor, editor, exportación y pruebas. Los HTML de Stitch son referencia de UI, no código de producción para copiar ciegamente. Antes de modificar, mapea cada componente visual de Stitch contra la funcionalidad real existente; después implementa la migración por módulos y verifica regresiones tras cada cambio. Elimina únicamente estilos y componentes visuales antiguos que entren en conflicto con este nuevo sistema.
+
+10. Criterio de aceptación
+
+La navegación, paleta, tipografía, paneles, densidad, controles y jerarquía visual coinciden con Stitch.
+
+La app sigue funcionando con la lógica actual; ningún botón queda decorativo o desconectado.
+
+No se reintroducen componentes del diseño antiguo.
+
+En escritorio se aprovecha el ancho disponible sin cortar visor, editor o paneles.
+
+Tablet y móvil degradan correctamente a dos paneles o flujo apilado.
+
+Las pruebas existentes continúan pasando y se agregan verificaciones donde la migración cambie interacción o layout.
+
+Documento generado a partir del paquete Stitch entregado para LexPlantillas.
+

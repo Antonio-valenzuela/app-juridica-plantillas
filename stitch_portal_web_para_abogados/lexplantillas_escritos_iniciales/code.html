@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+
+<html lang="es"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"surface-container-highest":"#e4e2e4","on-tertiary-fixed-variant":"#574500","on-tertiary-fixed":"#241a00","on-primary":"#ffffff","tertiary-container":"#cca72f","on-secondary-fixed":"#40000b","on-primary-fixed":"#40000c","error-container":"#ffdad6","secondary-fixed":"#ffdada","on-error-container":"#93000a","primary-fixed-dim":"#ffb3b5","tertiary-fixed":"#ffe088","secondary-fixed-dim":"#ffb3b5","on-background":"#1b1b1d","on-primary-container":"#ff7883","on-primary-fixed-variant":"#8c142a","inverse-primary":"#ffb3b5","surface-bright":"#fcf8fb","tertiary":"#735c00","primary-container":"#78001e","error":"#ba1a1a","surface":"#fcf8fb","surface-container-high":"#eae7ea","background":"#fcf8fb","on-error":"#ffffff","on-secondary-container":"#680018","secondary":"#af2c3e","outline":"#8b7171","tertiary-fixed-dim":"#e9c349","inverse-surface":"#303032","surface-tint":"#ad2f40","primary-fixed":"#ffdada","inverse-on-surface":"#f3f0f2","surface-container-low":"#f6f3f5","surface-variant":"#e4e2e4","secondary-container":"#fd6673","on-secondary":"#ffffff","surface-dim":"#dcd9dc","surface-container":"#f0edef","primary":"#4f0011","outline-variant":"#dfbfbf","on-surface-variant":"#584142","on-tertiary-container":"#4e3d00","on-tertiary":"#ffffff","surface-container-lowest":"#ffffff","on-surface":"#1b1b1d","on-secondary-fixed-variant":"#8e1029"},borderRadius:{DEFAULT:"0.125rem",lg:"0.25rem",xl:"0.5rem",full:"0.75rem"},spacing:{"margin-mobile":"0.75rem","space-xl":"2rem",gutter:"1rem","space-sm":"0.5rem","gutter-compact":"0.5rem","space-xxs":"0.125rem",margin:"1.5rem","space-md":"0.75rem","space-xs":"0.25rem","space-lg":"1.25rem"},fontFamily:{"headline-lg":["\"Source Serif 4\""],"code-md":["JetBrains Mono"],"label-md":["Inter"],"display-lg":["\"Source Serif 4\""],"label-sm":["Inter"],"headline-sm":["\"Source Serif 4\""],"headline-md":["\"Source Serif 4\""],"body-sm":["Inter"],"display-lg-mobile":["\"Source Serif 4\""],"label-lg":["Inter"],"body-md":["Inter"],"headline-lg-mobile":["\"Source Serif 4\""],"code-sm":["JetBrains Mono"],"body-lg":["\"Source Serif 4\""]},fontSize:{"headline-lg":["28px",{lineHeight:"36px",letterSpacing:"-0.01em",fontWeight:"600"}],"code-md":["12px",{lineHeight:"16px",letterSpacing:"-0.01em",fontWeight:"500"}],"label-md":["12px",{lineHeight:"16px",fontWeight:"500"}],"display-lg":["40px",{lineHeight:"48px",letterSpacing:"-0.02em",fontWeight:"600"}],"label-sm":["11px",{lineHeight:"14px",letterSpacing:"0.02em",fontWeight:"600"}],"headline-sm":["16px",{lineHeight:"24px",fontWeight:"600"}],"headline-md":["20px",{lineHeight:"28px",fontWeight:"600"}],"body-sm":["12px",{lineHeight:"16px",fontWeight:"400"}],"display-lg-mobile":["30px",{lineHeight:"38px",letterSpacing:"-0.015em",fontWeight:"600"}],"label-lg":["14px",{lineHeight:"20px",fontWeight:"500"}],"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-lg-mobile":["22px",{lineHeight:"30px",letterSpacing:"-0.01em",fontWeight:"600"}],"code-sm":["10px",{lineHeight:"14px",letterSpacing:"0.02em",fontWeight:"500"}],"body-lg":["17px",{lineHeight:"28px",fontWeight:"400"}]}}}};</script><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Source+Serif+4:wght@100..900&display=swap" rel="stylesheet"/></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><aside class="fixed left-0 top-0 h-full w-64 bg-surface-container-low z-50 flex flex-col shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-16 px-gutter flex items-center gap-space-sm bg-surface-container-low"><span class="material-symbols-outlined text-primary text-[20px]">balance</span><span class="font-headline-sm text-headline-sm text-primary tracking-tight">Dossier Jurídico</span></div><div class="px-gutter py-space-sm bg-surface-container-lowest mx-space-sm rounded-lg shadow-[0_1px_3px_rgba(120,0,30,0.04)] mb-space-md"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Actuario Virtual</span><span class="h-2 w-2 rounded-full bg-emerald-600 animate-pulse"></span></div><p class="font-code-sm text-code-sm text-on-surface mt-space-xxs truncate">CJF Portal Notificaciones: OK</p></div><div class="px-space-md mb-space-xs"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider px-space-sm">Módulos Procesales</span></div><nav class="flex-1 px-space-sm space-y-space-xxs" data-active-classes="bg-primary-container text-on-primary font-label-lg rounded-lg"><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="motor-universal" href="#"><span class="material-symbols-outlined text-[18px]">psychology</span><span class="font-label-lg text-label-lg">Motor Universal</span></a><a aria-current="page" class="flex items-center gap-space-sm px-space-md py-space-sm transition-colors bg-primary-container text-on-primary font-label-lg rounded-lg" data-path="escritos-iniciales" href="#"><span class="material-symbols-outlined text-[18px]">post_add</span><span class="font-label-lg text-label-lg">Escritos Iniciales</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="contestaciones" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span class="font-label-lg text-label-lg">Contestaciones</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="mis-plantillas" href="#"><span class="material-symbols-outlined text-[18px]">library_books</span><span class="font-label-lg text-label-lg">Mis Plantillas</span></a><div class="pt-space-md pb-space-xs"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider px-space-sm">Herramientas Judiciales</span></div><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="jurisprudencia-scjn" href="#"><span class="material-symbols-outlined text-[18px]">gavel</span><span class="font-label-lg text-label-lg">Jurisprudencia SCJN</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="calculadora-terminos" href="#"><span class="material-symbols-outlined text-[18px]">calendar_clock</span><span class="font-label-lg text-label-lg">Cómputo de Términos</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="dof-notificador" href="#"><span class="material-symbols-outlined text-[18px]">newspaper</span><span class="font-label-lg text-label-lg">Alertas DOF y Boletín</span></a></nav><div class="p-space-md bg-surface-container-high m-space-sm rounded-lg"><div class="flex items-center justify-between mb-space-xs"><span class="font-label-sm text-label-sm text-on-surface">Firma Electrónica</span><span class="font-code-sm text-code-sm text-tertiary font-bold">FIREL</span></div><p class="font-body-sm text-body-sm text-on-surface-variant">Certificado vigente hasta Noviembre 2026</p></div></aside><div class="pl-64"><header class="fixed top-0 left-64 right-0 h-16 bg-surface/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 flex items-center justify-between px-gutter"><div class="flex items-center gap-space-md"><img alt="LexPlantillas Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1XvcXfqLrdiK46Ss3raZQ9QyUOlxCxYic53GJW0iSGY6Y4LKiSDIAvLQipmXbtf0kUI7fCeMY-fGZXm3k-sChs_3IuAKWsnkhjz4SvV4giMlIxAYyir9l6riGXKrcpjGXGy_Hxds99HYAqMFUbk-b08bW3Wo6EOUjg-qM2cu27f2NiuYkBOLbY5MV7sOGJm9E0SW-urkJYOZ6_3VT4R2elw6Zmqpym4ItCiAjA9_BldygW1NMFcvl9Cv8vO"/><span class="font-headline-sm text-headline-sm text-primary tracking-tight hidden lg:inline-block">LexPlantillas</span><span class="bg-emerald-100 text-emerald-800 px-space-xs py-space-xxs rounded font-code-sm text-code-sm font-semibold">v1.0 RC1 Producción</span><span class="bg-tertiary-fixed text-on-tertiary-fixed px-space-xs py-space-xxs rounded font-code-sm text-code-sm flex items-center gap-space-xxs"><span class="material-symbols-outlined text-[14px]">verified</span>FIREL Cotejada</span></div><nav class="hidden xl:flex items-center gap-space-xs" data-active-classes="bg-primary-container text-on-primary font-label-md rounded-lg"><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="motor-universal" href="#">Motor Universal</a><a aria-current="page" class="px-space-md py-space-xs transition-colors bg-primary-container text-on-primary font-label-md rounded-lg" data-path="escritos-iniciales" href="#">Escritos Iniciales</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="contestaciones" href="#">Contestaciones</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="mis-plantillas" href="#">Mis Plantillas</a></nav><div class="flex items-center gap-space-md"><div class="hidden md:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container rounded-lg"><span class="h-2 w-2 rounded-full bg-emerald-600"></span><span class="font-code-sm text-code-sm text-on-surface">NVIDIA Build Activo</span></div><div class="hidden 2xl:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-low rounded-lg"><span class="material-symbols-outlined text-[16px] text-primary">folder_open</span><span class="font-code-sm text-code-sm text-on-surface font-medium truncate max-w-[210px]">EXP-800/2026 - Juzgado 3° Civil CDMX</span></div><button class="flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-highest hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface rounded-lg transition-colors"><span class="material-symbols-outlined text-[16px]">search</span><kbd class="font-code-sm text-code-sm bg-surface-container-lowest px-space-xxs rounded text-on-surface">⌘K</kbd></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><div class="fixed top-16 left-64 right-0 h-10 bg-surface-container-low/95 backdrop-blur-sm z-30 flex items-center justify-between px-gutter shadow-[0_1px_3px_rgba(120,0,30,0.02)]"><div class="flex items-center gap-space-xs font-label-sm text-label-sm text-on-surface-variant"><span class="hover:text-primary cursor-pointer transition-colors">LexPlantillas</span><span class="material-symbols-outlined text-[14px]">chevron_right</span><span class="hover:text-primary cursor-pointer transition-colors">Litigio Federal</span><span class="material-symbols-outlined text-[14px]">chevron_right</span><span class="text-on-surface font-semibold">Redacción Jurídica Activa</span></div><div class="flex items-center gap-space-sm"><span class="bg-surface-container-highest text-on-surface-variant px-space-sm py-space-xxs rounded-full font-code-sm text-code-sm uppercase tracking-wide">Materia Civil Federal / Ordinario Mercantil</span><span class="font-code-sm text-code-sm text-secondary font-semibold">Término: 3 Días Hábiles</span></div></div><main class="relative pt-28 bg-surface w-full min-h-screen px-gutter pb-space-xl"><div class="flex flex-col w-full">
+<div class="grid grid-cols-12 gap-space-lg">
+<div class="col-span-12">
+<div class="bg-surface-container-low p-space-md rounded-xl shadow-sm">
+<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-space-md pb-space-sm">
+<div class="flex items-center gap-space-sm">
+<span class="p-space-xs bg-primary text-on-primary rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">edit_document</span>
+</span>
+<div>
+<div class="flex items-center gap-space-xs">
+<span class="font-code-sm text-code-sm uppercase tracking-widest text-primary font-semibold">Módulo de Postulación Procesal</span>
+<span class="text-outline text-[12px]">•</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Expediente Matriz: EXP-800/2026</span>
+</div>
+<h1 class="font-headline-md text-headline-md text-on-surface">Asistente Estructurado de Escrito Inicial de Demanda</h1>
+</div>
+</div>
+<div class="flex items-center gap-space-sm self-end lg:self-center">
+<div class="flex items-center gap-space-xs bg-surface-container-lowest px-space-sm py-space-xxs rounded-lg shadow-sm">
+<span class="material-symbols-outlined text-[16px] text-tertiary">verified_user</span>
+<span class="font-code-sm text-code-sm text-on-surface font-semibold">Validación CNPP & C.Co Activa</span>
+</div>
+<div class="flex items-center gap-space-xs bg-secondary-fixed text-on-secondary-fixed px-space-sm py-space-xxs rounded-lg">
+<span class="material-symbols-outlined text-[14px]">timer</span>
+<span class="font-code-sm text-code-sm font-semibold">Autoguardado: Hace 12 seg</span>
+</div>
+</div>
+</div>
+<!-- 6 Canonical Steps Stepper Bar -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-space-xs pt-space-xs">
+<!-- Step 1: Completed -->
+<div class="flex flex-col gap-space-xxs p-space-sm bg-surface-container-lowest rounded-lg shadow-sm group">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-emerald-700 font-bold tracking-wider">PASO 01</span>
+<span class="material-symbols-outlined text-[16px] text-emerald-600">check_circle</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface font-semibold truncate">Tipo de Escrito</span>
+<span class="font-code-sm text-code-sm text-on-surface-variant truncate">Ord. Mercantil Federal</span>
+</div>
+<!-- Step 2: Active -->
+<div class="flex flex-col gap-space-xxs p-space-sm bg-primary text-on-primary rounded-lg shadow-md relative overflow-hidden">
+<div class="absolute -right-2 -bottom-2 opacity-10">
+<span class="material-symbols-outlined text-[64px]">groups</span>
+</div>
+<div class="flex items-center justify-between relative z-10">
+<span class="font-code-sm text-code-sm text-primary-fixed-dim font-bold tracking-wider">PASO 02</span>
+<span class="h-2 w-2 rounded-full bg-secondary-container animate-ping"></span>
+</div>
+<span class="font-label-md text-label-md text-on-primary font-semibold relative z-10 truncate">¿Quiénes Intervienen?</span>
+<span class="font-code-sm text-code-sm text-primary-fixed-dim relative z-10 truncate">Partes, Legitimación & Domicilio</span>
+</div>
+<!-- Step 3: Upcoming -->
+<div class="flex flex-col gap-space-xxs p-space-sm bg-surface-container rounded-lg opacity-85">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-outline font-bold tracking-wider">PASO 03</span>
+<span class="material-symbols-outlined text-[16px] text-outline">pending</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant font-medium truncate">¿Qué ocurrió?</span>
+<span class="font-code-sm text-code-sm text-outline truncate">Hechos Circunstanciados</span>
+</div>
+<!-- Step 4: Upcoming -->
+<div class="flex flex-col gap-space-xxs p-space-sm bg-surface-container rounded-lg opacity-85">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-outline font-bold tracking-wider">PASO 04</span>
+<span class="material-symbols-outlined text-[16px] text-outline">pending</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant font-medium truncate">¿Qué solicitas?</span>
+<span class="font-code-sm text-code-sm text-outline truncate">Prestaciones & Pretensión</span>
+</div>
+<!-- Step 5: Upcoming -->
+<div class="flex flex-col gap-space-xxs p-space-sm bg-surface-container rounded-lg opacity-85">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-outline font-bold tracking-wider">PASO 05</span>
+<span class="material-symbols-outlined text-[16px] text-outline">pending</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant font-medium truncate">Pruebas y Anexos</span>
+<span class="font-code-sm text-code-sm text-outline truncate">Documentales & Cotejo</span>
+</div>
+<!-- Step 6: Upcoming -->
+<div class="flex flex-col gap-space-xxs p-space-sm bg-surface-container rounded-lg opacity-85">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-code-sm text-outline font-bold tracking-wider">PASO 06</span>
+<span class="material-symbols-outlined text-[16px] text-outline">pending</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant font-medium truncate">Cierre & Puntos Petitorios</span>
+<span class="font-code-sm text-code-sm text-outline truncate">Fórmula de Estilo & Firma</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Center Column: Partes Registry Panel (7 Cols) -->
+<div class="col-span-12 xl:col-span-7 flex flex-col gap-space-md">
+<!-- Context Notification Card -->
+<div class="bg-surface-container-lowest p-space-md rounded-xl shadow-sm flex items-start gap-space-md">
+<div class="w-16 h-16 rounded-lg bg-surface-container-high overflow-hidden shrink-0">
+<img class="w-full h-full object-cover" data-alt="Close up archival view of signed judicial legal folio with antique fountain pen and official court stamps representing formal Mexican procedural civil law litigation" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDaMxAygMy5syoWsm74clmyIVoEgdEo6EIKY1ysIG-P2LN3XnQTirFA9lPdzVRmEWhTBWv0RnUQIRfpth5pR1B7ohxM418SDdPP-pQbAl7nFgzK9C1jxG5xh6UPglGfzXEPSE-rZPdMu0DDzWwhej0FNxrYTbNyZP2YdMUnAwmQxhTpJIshDAD6kbyWeUtrtCEURZc1UnvWwDHvf4bnw1mHBbQQP9ogNkp3nUpvpshxFGZKojN1gFFHZg"/>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between gap-space-xs">
+<span class="font-label-sm text-label-sm text-tertiary uppercase tracking-wider font-semibold">Integración de Litis</span>
+<span class="bg-emerald-50 text-emerald-800 px-space-xs py-space-xxs rounded font-code-sm text-code-sm font-semibold">Partes aisladas para Exp. LAB-001/2026</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface mt-space-xxs">Defina las personas físicas o jurídico-colectivas, facultades de representación y autorizados procesales. Estos datos nutren automáticamente el proemio de estilo forense.</p>
+</div>
+</div>
+<!-- Main Form Container -->
+<div class="bg-surface-container-lowest p-space-lg rounded-xl shadow-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Configuración de Intervinientes</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Capture la identidad procesal conforme a cédulas oficiales e identificaciones cotejadas.</p>
+</div>
+<span class="bg-surface-container-high text-on-surface-variant px-space-sm py-space-xxs rounded-lg font-code-sm text-code-sm">Art. 1061 Cód. Comercio</span>
+</div>
+<!-- Role Selector Pills -->
+<div class="flex flex-col gap-space-xs">
+<label class="font-label-sm text-label-sm text-outline uppercase tracking-wider">1. Rol Procesal en la Instancia</label>
+<div class="grid grid-cols-3 gap-space-xs p-space-xxs bg-surface-container-low rounded-lg">
+<button class="flex items-center justify-center gap-space-xs py-space-xs px-space-sm bg-primary text-on-primary rounded-lg font-label-md text-label-md font-semibold transition-all shadow-sm" id="role-actor" onclick="setRole('actor')" type="button">
+<span class="material-symbols-outlined text-[16px]">how_to_reg</span>
+<span>Parte Actora / Quejosa</span>
+</button>
+<button class="flex items-center justify-center gap-space-xs py-space-xs px-space-sm text-on-surface-variant hover:text-on-surface rounded-lg font-label-md text-label-md font-semibold transition-all" id="role-demandado" onclick="setRole('demandado')" type="button">
+<span class="material-symbols-outlined text-[16px]">corporate_fare</span>
+<span>Parte Demandada</span>
+</button>
+<button class="flex items-center justify-center gap-space-xs py-space-xs px-space-sm text-on-surface-variant hover:text-on-surface rounded-lg font-label-md text-label-md font-semibold transition-all" id="role-tercero" onclick="setRole('tercero')" type="button">
+<span class="material-symbols-outlined text-[16px]">person_pin</span>
+<span>Tercero Interesado</span>
+</button>
+</div>
+</div>
+<!-- Form Fields Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-md pt-space-xs">
+<!-- Name / Legal Entity -->
+<div class="flex flex-col gap-space-xxs md:col-span-2">
+<div class="flex items-center justify-between">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold" for="input-nombre">Nombre Completo o Razón Social</label>
+<span class="font-code-sm text-code-sm text-outline">Requerido • Mayúsculas judiciales</span>
+</div>
+<div class="flex items-center bg-surface-container-low rounded-lg px-space-sm shadow-inner">
+<span class="font-code-sm text-code-sm text-outline select-none pr-space-xs">Nombre:</span>
+<input class="w-full h-9 bg-transparent text-on-surface font-body-md text-body-md focus:outline-none placeholder:text-outline" id="input-nombre" oninput="updateProemioLive()" placeholder="Ej. Rodrigo Fuentes Alba o Consorcio Minero del Bajío S.A. de C.V." type="text" value="Rodrigo Fuentes Alba"/>
+<span class="material-symbols-outlined text-[18px] text-emerald-600">verified</span>
+</div>
+</div>
+<!-- Legal Personality / Personality Mode -->
+<div class="flex flex-col gap-space-xxs">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold" for="select-personalidad">Personalidad Jurídica</label>
+<div class="relative bg-surface-container-low rounded-lg px-space-sm">
+<select class="w-full h-9 bg-transparent text-on-surface font-body-md text-body-md focus:outline-none appearance-none pr-space-lg" id="select-personalidad" onchange="updateProemioLive()">
+<option selected="" value="propio">Por su propio derecho</option>
+<option value="rep_legal">En representación legal (Apoderado)</option>
+<option value="administrador">En calidad de Administrador Único</option>
+<option value="tutor">En tutela / Patria potestad</option>
+</select>
+<span class="material-symbols-outlined text-[18px] text-outline pointer-events-none absolute right-space-sm top-2.5">expand_more</span>
+</div>
+</div>
+<!-- Document Identification Type -->
+<div class="flex flex-col gap-space-xxs">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold" for="input-rfc">Clave de Registro (RFC / CURP)</label>
+<div class="flex items-center bg-surface-container-low rounded-lg px-space-sm">
+<span class="font-code-sm text-code-sm text-outline select-none pr-space-xs">ID:</span>
+<input class="w-full h-9 bg-transparent font-code-md text-code-md text-on-surface uppercase focus:outline-none placeholder:text-outline" id="input-rfc" oninput="updateProemioLive()" placeholder="RFC o Folio Mercantil" type="text" value="FUAR820914HN9"/>
+</div>
+</div>
+<!-- Procedural Address -->
+<div class="flex flex-col gap-space-xxs md:col-span-2">
+<div class="flex items-center justify-between">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold" for="input-domicilio">Domicilio Procesal para Oír y Recibir Notificaciones</label>
+<span class="font-code-sm text-code-sm text-primary">Jurisdicción CDMX</span>
+</div>
+<div class="flex items-center bg-surface-container-low rounded-lg px-space-sm">
+<span class="material-symbols-outlined text-[18px] text-outline select-none pr-space-xs">pin_drop</span>
+<input class="w-full h-9 bg-transparent text-on-surface font-body-md text-body-md focus:outline-none placeholder:text-outline" id="input-domicilio" oninput="updateProemioLive()" placeholder="Calle, número exterior/interior, colonia, alcaldía o municipio y código postal" type="text" value="Av. Insurgentes Sur 1602, Col. Crédito Constructor, Benito Juárez, C.P. 03940, Ciudad de México"/>
+</div>
+</div>
+<!-- Authorized Counsel (Terms: Art 12 LA / 1069 CCo) -->
+<div class="flex flex-col gap-space-xxs md:col-span-2">
+<div class="flex items-center justify-between">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold" for="input-autorizados">Profesionistas Autorizados en Términos Amplios</label>
+<span class="font-code-sm text-code-sm text-tertiary font-semibold">Art. 1069 párr. 3° Cód. Comercio / Art. 12 Ley Amparo</span>
+</div>
+<div class="flex items-start bg-surface-container-low rounded-lg p-space-sm gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-primary pt-1">gavel</span>
+<textarea class="w-full bg-transparent text-on-surface font-body-md text-body-md focus:outline-none resize-none placeholder:text-outline" id="input-autorizados" oninput="updateProemioLive()" placeholder="Nombre completo del abogado postulante y número de Cédula Profesional registrada" rows="2">Lic. María Elena Santos Morales (Céd. Prof. 8492019 DGP) y Lic. Jorge Isaac Calderón (Céd. Prof. 11029482 DGP)</textarea>
+</div>
+</div>
+<!-- Electronic Notification Medium -->
+<div class="flex flex-col gap-space-xxs md:col-span-2">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold">Buzón Judicial y Correos Electrónicos Autorizados</label>
+<div class="flex items-center bg-surface-container-low rounded-lg px-space-sm">
+<span class="material-symbols-outlined text-[18px] text-outline select-none pr-space-xs">alternate_email</span>
+<input class="w-full h-9 bg-transparent text-on-surface font-body-md text-body-md focus:outline-none placeholder:text-outline" id="input-email" oninput="updateProemioLive()" type="text" value="litigio.santos@consorciojuridico.mx, notificaciones@fuentesabogados.com"/>
+</div>
+</div>
+</div>
+<!-- Add Party Trigger Action -->
+<div class="flex flex-col sm:flex-row items-center justify-between gap-space-sm pt-space-xs">
+<div class="flex items-center gap-space-xs text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px] text-emerald-700">task_alt</span>
+<span class="font-code-sm text-code-sm">Datos cotejados con Registro Federal de Cédulas</span>
+</div>
+<div class="flex items-center gap-space-xs w-full sm:w-auto">
+<button class="flex-1 sm:flex-none px-space-md py-space-xs bg-surface-container hover:bg-surface-container-high text-on-surface rounded-lg font-label-md text-label-md transition-colors" type="button">Limpiar Campos</button>
+<button class="flex-1 sm:flex-none px-space-md py-space-xs bg-primary hover:bg-primary-container text-on-primary rounded-lg font-label-md text-label-md font-semibold flex items-center justify-center gap-space-xxs shadow-sm transition-colors" type="button">
+<span class="material-symbols-outlined text-[16px]">add_circle</span>
+<span>+ Guardar e Incorporar Parte</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Dynamic Registered Parties Table -->
+<div class="bg-surface-container-lowest p-space-md rounded-xl shadow-sm flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[20px] text-primary">account_tree</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface">Cuadro Procesal de Partes Registradas</h3>
+</div>
+<span class="bg-surface-container-high text-on-surface px-space-sm py-space-xxs rounded-full font-code-sm text-code-sm font-semibold">3 Sujetos Procesales</span>
+</div>
+<!-- Table Structure -->
+<div class="overflow-x-auto rounded-lg bg-surface-container-low">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm uppercase">
+<th class="py-space-xs px-space-sm">Rol</th>
+<th class="py-space-xs px-space-sm">Nombre o Denominación</th>
+<th class="py-space-xs px-space-sm">Legitimación</th>
+<th class="py-space-xs px-space-sm">Autorizados</th>
+<th class="py-space-xs px-space-sm text-right">Acciones</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container text-on-surface font-body-sm text-body-sm">
+<!-- Row 1: Active Actor -->
+<tr class="bg-surface-container-lowest hover:bg-surface-container-low transition-colors">
+<td class="py-space-xs px-space-sm">
+<span class="px-space-xs py-space-xxs bg-emerald-100 text-emerald-900 rounded font-code-sm text-code-sm font-semibold inline-block">ACTORA</span>
+</td>
+<td class="py-space-xs px-space-sm">
+<div class="font-label-md text-label-md font-semibold text-on-surface">Rodrigo Fuentes Alba</div>
+<div class="font-code-sm text-code-sm text-outline">RFC: FUAR820914HN9</div>
+</td>
+<td class="py-space-xs px-space-sm">
+<span class="font-body-sm text-body-sm text-on-surface">Propio Derecho</span>
+</td>
+<td class="py-space-xs px-space-sm">
+<span class="font-code-sm text-code-sm text-on-surface-variant">Lic. M. Elena Santos (8492019) +1</span>
+</td>
+<td class="py-space-xs px-space-sm text-right">
+<div class="flex items-center justify-end gap-space-xxs">
+<button class="p-space-xxs text-primary hover:bg-surface-container rounded" title="Editar"><span class="material-symbols-outlined text-[16px]">edit</span></button>
+<button class="p-space-xxs text-outline hover:text-error rounded" title="Desvincular"><span class="material-symbols-outlined text-[16px]">delete</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 2: Demandado Principal -->
+<tr class="bg-surface-container-lowest hover:bg-surface-container-low transition-colors">
+<td class="py-space-xs px-space-sm">
+<span class="px-space-xs py-space-xxs bg-secondary-fixed text-on-secondary-fixed rounded font-code-sm text-code-sm font-semibold inline-block">DEMANDADO</span>
+</td>
+<td class="py-space-xs px-space-sm">
+<div class="font-label-md text-label-md font-semibold text-on-surface">Banco Fiduciario & Fideicomisos S.A.</div>
+<div class="font-code-sm text-code-sm text-outline">RFC: BFF940211K01</div>
+</td>
+<td class="py-space-xs px-space-sm">
+<span class="font-body-sm text-body-sm text-on-surface">Persona Moral</span>
+</td>
+<td class="py-space-xs px-space-sm">
+<span class="font-code-sm text-code-sm text-outline">Por emplazar vía Actuario</span>
+</td>
+<td class="py-space-xs px-space-sm text-right">
+<div class="flex items-center justify-end gap-space-xxs">
+<button class="p-space-xxs text-primary hover:bg-surface-container rounded" title="Editar"><span class="material-symbols-outlined text-[16px]">edit</span></button>
+<button class="p-space-xxs text-outline hover:text-error rounded" title="Desvincular"><span class="material-symbols-outlined text-[16px]">delete</span></button>
+</div>
+</td>
+</tr>
+<!-- Row 3: Tercero Co-Demandado -->
+<tr class="bg-surface-container-lowest hover:bg-surface-container-low transition-colors">
+<td class="py-space-xs px-space-sm">
+<span class="px-space-xs py-space-xxs bg-surface-container-highest text-on-surface-variant rounded font-code-sm text-code-sm font-semibold inline-block">TERCERO</span>
+</td>
+<td class="py-space-xs px-space-sm">
+<div class="font-label-md text-label-md font-semibold text-on-surface">Notaría Pública Núm. 142 de la CDMX</div>
+<div class="font-code-sm text-code-sm text-outline">Lic. Gonzalo Treviño Parra</div>
+</td>
+<td class="py-space-xs px-space-sm">
+<span class="font-body-sm text-body-sm text-on-surface">Fedatario Público</span>
+</td>
+<td class="py-space-xs px-space-sm">
+<span class="font-code-sm text-code-sm text-outline">Llamamiento forzoso</span>
+</td>
+<td class="py-space-xs px-space-sm text-right">
+<div class="flex items-center justify-end gap-space-xxs">
+<button class="p-space-xxs text-primary hover:bg-surface-container rounded" title="Editar"><span class="material-symbols-outlined text-[16px]">edit</span></button>
+<button class="p-space-xxs text-outline hover:text-error rounded" title="Desvincular"><span class="material-symbols-outlined text-[16px]">delete</span></button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Right Column: Live Simulated Legal Sheet Preview (5 Cols) -->
+<div class="col-span-12 xl:col-span-5 flex flex-col gap-space-md">
+<!-- Preview Header & Utility Controls -->
+<div class="bg-surface-container-lowest p-space-md rounded-xl shadow-sm flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-tertiary">visibility</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Previsualización del Proemio</span>
+</div>
+<div class="flex items-center gap-space-xxs">
+<button class="p-space-xs hover:bg-surface-container rounded text-on-surface-variant hover:text-primary transition-colors" title="Copiar Texto Formal" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<button class="p-space-xs hover:bg-surface-container rounded text-on-surface-variant hover:text-primary transition-colors" title="Exportar Vista Parcial" type="button">
+<span class="material-symbols-outlined text-[18px]">print</span>
+</button>
+<button class="p-space-xs hover:bg-surface-container rounded text-on-surface-variant hover:text-primary transition-colors" title="Expandir a Pantalla Completa" type="button">
+<span class="material-symbols-outlined text-[18px]">fullscreen</span>
+</button>
+</div>
+</div>
+<!-- Simulated Court Paper (Editorial Authority Canvas) -->
+<div class="bg-surface-container-low p-space-md rounded-xl shadow-inner flex flex-col items-center">
+<!-- Physical Page Sheet Simulation -->
+<div class="w-full bg-surface-container-lowest shadow-md rounded-lg p-space-lg flex flex-col gap-space-md relative overflow-hidden min-h-[640px]">
+<!-- Subtle Judicial Seal Watermark in Background -->
+<div class="absolute right-6 top-6 opacity-5 pointer-events-none select-none">
+<span class="material-symbols-outlined text-[140px] text-primary">account_balance</span>
+</div>
+<!-- Judicial Header & Rubric -->
+<div class="flex flex-col items-end text-right pb-space-xs">
+<span class="font-code-sm text-code-sm text-outline font-semibold">JUICIO: ORDINARIO MERCANTIL</span>
+<span class="font-code-sm text-code-sm text-on-surface font-semibold">ACTOR: <span id="preview-header-actor">RODRIGO FUENTES ALBA</span></span>
+<span class="font-code-sm text-code-sm text-on-surface font-semibold">DEMANDADO: BANCO FIDUCIARIO & FIDEICOMISOS S.A.</span>
+<span class="font-code-sm text-code-sm text-secondary font-semibold">EXPEDIENTE: LAB-001/2026</span>
+<span class="font-code-sm text-code-sm text-outline">SECRETO DE JUZGADO: 3° DE DISTRITO CDMX</span>
+</div>
+<!-- Court Recipient Designation -->
+<div class="font-headline-sm text-headline-sm text-on-surface uppercase tracking-wide pt-space-xs leading-tight font-bold">
+            C. JUEZ DE DISTRITO EN MATERIA CIVIL EN LA CIUDAD DE MÉXICO EN TURNO.-
+          </div>
+<!-- Proemio Body: Source Serif 4 Authentic Legal Editorial Cadence -->
+<div class="font-body-lg text-body-lg text-on-surface leading-relaxed text-justify space-y-space-md">
+<p>
+<strong class="font-semibold uppercase text-primary" id="preview-body-nombre">RODRIGO FUENTES ALBA</strong>, 
+              <span class="italic" id="preview-body-legit">promoviendo por mi propio derecho</span>, 
+              con clave de identificación <span class="font-code-sm text-code-sm bg-surface-container px-space-xxs rounded" id="preview-body-rfc">FUAR820914HN9</span>; señalando como domicilio legal para oír y recibir toda clase de citas, providencias y notificaciones, aún las de carácter personal, el ubicado en <span class="font-semibold underline decoration-outline" id="preview-body-domicilio">Av. Insurgentes Sur 1602, Col. Crédito Constructor, Benito Juárez, C.P. 03940, Ciudad de México</span>; autorizando para tales efectos en los más amplios términos previstos por el tercer párrafo del artículo 1069 del Código de Comercio a los señores:
+            </p>
+<!-- Embedded Quoted Clause for Legal Counsel -->
+<div class="pl-space-md py-space-xs bg-surface-container-low rounded-lg font-body-md text-body-md text-on-surface-variant italic">
+<span id="preview-body-autorizados">Lic. María Elena Santos Morales (Cédula Profesional Núm. 8492019) y Lic. Jorge Isaac Calderón (Cédula Profesional Núm. 11029482)</span>, a quienes expresamente faculta para interponer recursos, rendir pruebas, alegar en audiencia y realizar cualquier acto procesal tendiente a la defensa de los derechos de la parte que promueve.
+            </div>
+<p>
+              Asimismo, señalando como medio técnico de recepción y enlace digital procesal las cuentas <span class="font-code-sm text-code-sm text-secondary font-semibold" id="preview-body-email">litigio.santos@consorciojuridico.mx</span>, ante Usted con el debido respeto y solemnidad comparezco respetuosamente para exponer:
+            </p>
+<div class="pt-space-xs">
+<p class="font-semibold text-center uppercase tracking-widest text-primary font-headline-sm text-headline-sm">
+                Q U E   P O R   M E D I O   D E L   P R E S E N T E   O C U R S O:
+              </p>
+</div>
+<p class="text-on-surface-variant italic">
+              Vengo a demandar en la vía Ordinaria Mercantil al C. representante legal de Banco Fiduciario & Fideicomisos S.A., demandando la restitución de haberes patrimoniales y nulidad relativa de cláusulas unilaterales...
+            </p>
+</div>
+<!-- Bottom Margin Anchor Stamp -->
+<div class="mt-auto pt-space-md flex items-center justify-between text-outline">
+<span class="font-code-sm text-code-sm flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[14px] text-tertiary">fingerprint</span>
+<span>Firma Cotejada FIREL ID: 8840219-MX</span>
+</span>
+<span class="font-code-sm text-code-sm">Página 1 de [En compilación]</span>
+</div>
+</div>
+<!-- AI Assistant Suggestion Callout -->
+<div class="w-full mt-space-sm p-space-sm bg-surface-container-lowest rounded-lg shadow-sm flex items-center gap-space-sm">
+<div class="w-8 h-8 rounded-full bg-tertiary-fixed flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[18px] text-on-tertiary-fixed">smart_toy</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center gap-space-xs">
+<span class="font-label-sm text-label-sm text-on-surface font-bold">Asistente Judicial AI</span>
+<span class="font-code-sm text-code-sm text-emerald-700 bg-emerald-50 px-space-xxs rounded">Concordancia 100%</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant truncate">El proemio satisface los supuestos de la Tesis Jurisprudencial PC.I.C. J/45 K (11a.).</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Wizard Footer Navigation Bar -->
+<div class="col-span-12">
+<div class="bg-surface-container-low p-space-md rounded-xl shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-space-md">
+<!-- Previous Step Button -->
+<button class="flex items-center justify-center gap-space-xs px-space-md py-space-sm bg-surface-container-lowest hover:bg-surface-container-high text-on-surface rounded-lg font-label-lg text-label-lg transition-all shadow-sm" type="button">
+<span class="material-symbols-outlined text-[18px]">arrow_back</span>
+<span>← Anterior: Tipo de Escrito</span>
+</button>
+<!-- Progress Indicator -->
+<div class="flex flex-col items-center gap-space-xxs">
+<div class="flex items-center gap-space-xs">
+<span class="font-label-sm text-label-sm text-on-surface font-semibold">Paso 2 de 6</span>
+<span class="text-outline">•</span>
+<span class="font-code-sm text-code-sm text-primary font-bold">35% Completado</span>
+</div>
+<!-- Progress Bar Track -->
+<div class="w-48 sm:w-64 h-2 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full transition-all duration-300" style="width: 35%;"></div>
+</div>
+</div>
+<!-- Action Group: Draft Save & Advance -->
+<div class="flex items-center gap-space-sm">
+<button class="flex-1 sm:flex-none flex items-center justify-center gap-space-xs px-space-md py-space-sm bg-surface-container hover:bg-surface-container-high text-on-surface rounded-lg font-label-lg text-label-lg transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]">save</span>
+<span>Guardar Borrador Local</span>
+</button>
+<button class="flex-1 sm:flex-none flex items-center justify-center gap-space-xs px-space-lg py-space-sm bg-primary hover:bg-primary-container text-on-primary rounded-lg font-label-lg text-label-lg font-semibold shadow-md transition-all" type="button">
+<span>Continuar a Hechos Circunstanciados</span>
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<script>
+  function setRole(role) {
+    const roles = ['actor', 'demandado', 'tercero'];
+    roles.forEach(r => {
+      const btn = document.getElementById('role-' + r);
+      if (r === role) {
+        btn.className = 'flex items-center justify-center gap-space-xs py-space-xs px-space-sm bg-primary text-on-primary rounded-lg font-label-md text-label-md font-semibold transition-all shadow-sm';
+      } else {
+        btn.className = 'flex items-center justify-center gap-space-xs py-space-xs px-space-sm text-on-surface-variant hover:text-on-surface rounded-lg font-label-md text-label-md font-semibold transition-all';
+      }
+    });
+  }
+
+  function updateProemioLive() {
+    const nombreVal = document.getElementById('input-nombre').value || 'RODRIGO FUENTES ALBA';
+    const rfcVal = document.getElementById('input-rfc').value || 'FUAR820914HN9';
+    const domicilioVal = document.getElementById('input-domicilio').value || 'Av. Insurgentes Sur 1602, Col. Crédito Constructor, CDMX';
+    const autorizadosVal = document.getElementById('input-autorizados').value || 'Lic. María Elena Santos Morales';
+    const emailVal = document.getElementById('input-email').value || 'litigio@consorcio.mx';
+    const personalidad = document.getElementById('select-personalidad').value;
+
+    document.getElementById('preview-header-actor').innerText = nombreVal.toUpperCase();
+    document.getElementById('preview-body-nombre').innerText = nombreVal.toUpperCase();
+    document.getElementById('preview-body-rfc').innerText = rfcVal.toUpperCase();
+    document.getElementById('preview-body-domicilio').innerText = domicilioVal;
+    document.getElementById('preview-body-autorizados').innerText = autorizadosVal;
+    document.getElementById('preview-body-email').innerText = emailVal;
+
+    let legitPhrase = 'promoviendo por mi propio derecho';
+    if (personalidad === 'rep_legal') {
+      legitPhrase = 'en mi carácter de Apoderado General para Pleitos y Cobranzas según se acredita con Testimonio Notarial';
+    } else if (personalidad === 'administrador') {
+      legitPhrase = 'en mi calidad de Administrador Único de la sociedad accionante';
+    } else if (personalidad === 'tutor') {
+      legitPhrase = 'en ejercicio de la patria potestad y representación legal legítima';
+    }
+    document.getElementById('preview-body-legit').innerText = legitPhrase;
+  }
+</script></main></div></body></html>

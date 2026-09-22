@@ -41,21 +41,21 @@ export function evaluateCivilMercantileResponseQuality(document: UniversalLegalD
     });
     return issues;
   }
-  if (response.facts.some((fact) => fact.posture === 'REQUIERE_POSTURA_ABOGADO')) {
+  if (Array.isArray(response.facts) && response.facts.some((fact) => fact.posture === 'REQUIERE_POSTURA_ABOGADO')) {
     issues.push({
       checkId: 'RESPONSE_FACT_POSTURE_PENDING',
       sectionId: 'hechos',
       message: 'Hay hechos sin postura expresa del abogado; no pueden presentarse como admitidos o negados.',
     });
   }
-  if (response.claims.some((claim) => claim.posture === 'REQUIERE_POSTURA_ABOGADO')) {
+  if (Array.isArray(response.claims) && response.claims.some((claim) => claim.posture === 'REQUIERE_POSTURA_ABOGADO')) {
     issues.push({
       checkId: 'RESPONSE_CLAIM_POSTURE_PENDING',
       sectionId: 'prestaciones',
       message: 'Hay prestaciones sin postura expresa del abogado; no pueden presentarse como aceptadas u opuestas.',
     });
   }
-  if (response.defenses.some((defense) => defense.requiresLawyerConfirmation && !defense.source)) {
+  if (Array.isArray(response.defenses) && response.defenses.some((defense) => defense.requiresLawyerConfirmation && !defense.source)) {
     issues.push({
       checkId: 'RESPONSE_DEFENSE_CONFIRMATION',
       sectionId: 'excepciones_defensas',
@@ -64,9 +64,8 @@ export function evaluateCivilMercantileResponseQuality(document: UniversalLegalD
   }
 
   const allText = normalized(document.sections.flatMap((section) => section.content.map((block) => block.text)).join('\n'));
-  const foreignFamily = document.documentType.includes('civil')
-    ? /amparo|autoridad responsable|acto reclamado|laboral|trabajador|patron/.test(allText)
-    : /amparo|autoridad responsable|acto reclamado|laboral|trabajador|patron/.test(allText);
+  const cleanedText = allText.replace(/\b(?:abogado\s+)?patrono\b/g, '');
+  const foreignFamily = /\b(?:amparo|autoridad\s+responsable|acto\s+reclamado|laboral|trabajador|patron|patronal)\b/.test(cleanedText);
   if (foreignFamily) {
     issues.push({
       checkId: 'RESPONSE_CROSS_FAMILY_CONTENT',

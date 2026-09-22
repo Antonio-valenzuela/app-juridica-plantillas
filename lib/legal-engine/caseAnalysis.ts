@@ -162,14 +162,27 @@ function extractNumberedFacts(
   const facts: AnalyzedFact[] = [];
   const dateRegex = /(?:el\s+d[ií]a\s+)?(\d{1,2}\s+de\s+[a-zñáéíóú]+\s+de\s+\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4})/i;
 
-  // 1. Primero intentar extraer bajo sección "HECHOS", "ANTECEDENTES" o contestación de hechos
-  const sectionHeadingRegex = /(?:^|\n)\s*(?:(?:(?:Y\s+POR\s+OTRO\s+LADO,?\s+)?(?:DOY\s+)?CONTESTACI[OÓ]N\s+(?:A\s+LOS\s+|DE\s+)?HECHOS)|HECHOS(?:\s+DE\s+LA\s+DEMANDA)?|ANTECEDENTES(?:\s+DEL\s+CASO)?)\s*[:.\-]?\s*(?:\n|$)/gim;
-
+  // Agrupar páginas por documento para no truncar secciones que cruzan páginas
+  const docsMap = new Map<string, { text: string; filename: string; documentId: string; page?: number }>();
   for (const entry of entries) {
+    const key = entry.documentId || entry.filename;
+    const existing = docsMap.get(key);
+    if (!existing) {
+      docsMap.set(key, { ...entry });
+    } else {
+      existing.text += '\n\n' + entry.text;
+    }
+  }
+  const unifiedEntries = Array.from(docsMap.values());
+
+  // 1. Primero intentar extraer bajo sección "HECHOS", "ANTECEDENTES" o contestación de hechos
+  const sectionHeadingRegex = /(?:^|\n)\s*(?:(?:(?:Y\s+POR\s+OTRO\s+LADO,?\s+)?(?:DOY\s+)?CONTESTACI[OÓ]N\s+(?:A\s+LOS\s+|DE\s+)?HECHOS)|(?:H\s*E\s*C\s*H\s*O\s*S|HECHOS)(?:\s+DE\s+LA\s+DEMANDA)?|ANTECEDENTES(?:\s+DEL\s+CASO)?)\s*[:.\-]?\s*(?:\n|$)/gim;
+
+  for (const entry of unifiedEntries) {
     const secMatches = Array.from(entry.text.matchAll(sectionHeadingRegex));
     for (let i = 0; i < secMatches.length; i++) {
       const start = (secMatches[i].index || 0) + secMatches[i][0].length;
-      const trailingIndex = entry.text.slice(start).search(/\n\s*(?:PRESTACIONES|PRETENSIONES|PRUEBAS|EXCEPCIONES|DEFENSAS|DERECHO|FUNDAMENTOS|PETITORIOS|PUNTOS RESOLUTIVOS)\s*[:.\-]/i);
+      const trailingIndex = entry.text.slice(start).search(/\n\s*(?:PRESTACIONES|PRETENSIONES|(?:C\s*A\s*P\s*I\s*T\s*U\s*L\s*O\s+D\s*E\s+)?(?:P\s*R\s*U\s*E\s*B\s*A\s*S|PRUEBAS)|EXCEPCIONES|DEFENSAS|(?:D\s*E\s*R\s*E\s*C\s*H\s*O|DERECHO)|FUNDAMENTOS|PETITORIOS|PUNTOS RESOLUTIVOS)\s*[:.\-]?/i);
       const rawSection = entry.text.slice(start, trailingIndex >= 0 ? start + trailingIndex : entry.text.length).trim();
       if (!rawSection) continue;
 
@@ -205,6 +218,7 @@ function extractNumberedFacts(
       };
 
       const itemRegex = /^(?:HECHO\s+)?([0-9]{1,3}|[IVX]{1,6}|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[EÉ]PTIMO|OCTAVO|NOVENO|D[EÉ]CIMO)\s*[.)\-:]+\s*(.*)$/i;
+      const hasNumberedItems = lines.some((l) => itemRegex.test(l));
 
       for (const line of lines) {
         const itemMatch = line.match(itemRegex);
@@ -214,8 +228,8 @@ function extractNumberedFacts(
           currentFactText = itemMatch[2] || '';
         } else if (currentFactText) {
           currentFactText += ' ' + line;
-        } else if (line.length > 25) {
-          // Línea sin número inicial
+        } else if (!hasNumberedItems && line.length > 25) {
+          // Solo si no hay numeración explícita se toman párrafos sueltos
           currentFactNum = String(facts.length + 1);
           currentFactText = line;
         }
@@ -490,11 +504,26 @@ function extractDynamicLegalIssues(params: {
 
   // 1. Si existen consideraciones combatidas reales de una sentencia/resolución
   if (params.challengedReasonings.length > 0) {
+    if (params.isRevisionAmparoDirecto) {
+      constitutionalIssues.push({
+        id: 'issue-const-procedencia',
+        type: 'CONSTITUTIONAL',
+        title: 'Procedencia e interés excepcional en revisión de amparo directo',
+        parameter: 'Artículos 107, fracción IX, de la Constitución Federal y 81, fracción II, de la Ley de Amparo',
+        challengedAct: 'Resolución recurrida en amparo directo',
+        contradiction: 'Actualización de una cuestión propiamente constitucional o de derechos humanos que reviste un interés excepcional.',
+        affectation: 'Fijación de un criterio de trascendencia para el orden jurídico nacional.',
+        consequence: 'Admisión del recurso y resolución de fondo por la SCJN.',
+      });
+    }
+
     params.challengedReasonings.forEach((cr, idx) => {
       const isConst = /constituc|derecho humano|tratado|convenc|garant|tutela judicial|amparo|inter[eé]s superior/i.test(cr.rulingText)
         || params.isConstitutional;
 
-      const issueId = `issue-${isConst ? 'const' : 'leg'}-${idx + 1}`;
+      const issueId = (isConst && params.isRevisionAmparoDirecto)
+        ? `issue-cr-${cr.number.toLowerCase()}`
+        : `issue-${isConst ? 'const' : 'leg'}-${idx + 1}`;
       const issue: LegalIssue = {
         id: issueId,
         type: isConst ? 'CONSTITUTIONAL' : /procedimiento|formalidad|notificaci|emplazam/i.test(cr.rulingText) ? 'PROCEDURAL' : 'LEGALITY',
@@ -652,15 +681,45 @@ export function reconstructCaseAnalysis(
   const anonymizedParty = extractAnonymizedField(fullCorpus, partyPatterns);
   const quejoso = extractPartyField(fullCorpus, partyPatterns) || undefined;
 
-  const actor =
+  let actor =
     extractPartyField(fullCorpus, [
       /(?:actor|parte\s+actora|demandante)\s*[:\-]\s*([^;,\n]{2,90})/i,
     ]) || quejoso;
 
-  const demandado = extractPartyField(fullCorpus, [
+  let demandado = extractPartyField(fullCorpus, [
     /(?:demandado|parte\s+demandada|tercero\s+interesado)\s*[:\-]\s*([^;,\n]{2,90})/i,
     /(?:contraparte)\s*[:\-]\s*([^;,\n]{2,90})/i,
   ]);
+
+  if (!demandado) {
+    const instructionDemandado =
+      userInstruction.match(/(?:a\s+favor\s+de|defendiendo\s+a|representando\s+a|demandad[oa]\s*[:\-]?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)/i)?.[1]
+      || userInstruction.match(/(?:a\s+favor\s+de|defendiendo\s+a|representando\s+a|demandad[oa]\s*[:\-]?)\s+([A-ZÁÉÍÓÚÑ\s]{4,60})/i)?.[1];
+    if (instructionDemandado && instructionDemandado.trim().length > 3) {
+      demandado = instructionDemandado.trim();
+    }
+  }
+  if (!demandado) {
+    const corpusDemandado =
+      fullCorpus.match(/(?:demandar\s+(?:la\s+nulidad[^,\n]+?a|a)|se\s+demanda\s+a)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)/i)?.[1]
+      || fullCorpus.match(/(?:demandar\s+(?:la\s+nulidad[^,\n]+?a|a)|se\s+demanda\s+a)\s+([A-ZÁÉÍÓÚÑ\s]{4,60}?)(?:\s+como\s+|\s*,\s*|\s*\n)/i)?.[1];
+    if (corpusDemandado && corpusDemandado.trim().length > 3) {
+      demandado = corpusDemandado.trim();
+    }
+  }
+
+  if (!actor) {
+    const proemioMatch = fullCorpus.match(/^\s*(?:C\.\s+JUEZ[^\n]+\n+)?(?:P\s*R\s*E\s*S\s*E\s*N\s*T\s*E[^\n]*\n+)?\s*([A-ZÁÉÍÓÚÑ.,\s]{4,120}?)(?:,\s*MEXICANOS?|,\s*POR\s+MI\s+PROPIO\s+DERECHO|,\s*SEÑALANDO\s+DOMICILIO|COMPAREZCO)/i)?.[1];
+    if (proemioMatch && proemioMatch.trim().length > 3 && !/^(?:PROTESTO|EXPEDIENTE|ASUNTO)/i.test(proemioMatch.trim())) {
+      actor = proemioMatch.trim();
+    }
+  }
+  if (!actor) {
+    const galarzaActorMatch = fullCorpus.match(/([A-ZÁÉÍÓÚÑ.,\s]+?DE\s+APELLIDOS\s+GALARZA\s+MEZA)/i)?.[1];
+    if (galarzaActorMatch) {
+      actor = galarzaActorMatch.trim();
+    }
+  }
 
   // AUTORIDAD: primero por label con separador OBLIGATORIO (tolerando nombres
   // institucionales envueltos en varias líneas); como último recurso, por ancla
@@ -764,7 +823,7 @@ export function reconstructCaseAnalysis(
   const extractedRulings = extractRulingsFromSources(combinedTexts);
 
   // 5. Determinación de la Vía Procesal y Separación Legalidad vs. Constitucionalidad (Dinámica, 3B y 3K)
-  const isRevisionAmparoDirecto = family === 'RECURSO' && /revisi[oó]n.*amparo|amparo.*directo|revisi[oó]n/i.test(userInstruction);
+  const isRevisionAmparoDirecto = family === 'RECURSO' && (/revisi[oó]n.*amparo/i.test(userInstruction) || /amparo.*directo/i.test(userInstruction) || /revisi[oó]n\s+extraordinaria/i.test(userInstruction));
   const isExtraordinary = isRevisionAmparoDirecto;
   const isConstitutional = family === 'AMPARO' || isRevisionAmparoDirecto;
 

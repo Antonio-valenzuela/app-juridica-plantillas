@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+
+<html lang="es"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"surface-container-highest":"#e4e2e4","on-tertiary-fixed-variant":"#574500","on-tertiary-fixed":"#241a00","on-primary":"#ffffff","tertiary-container":"#cca72f","on-secondary-fixed":"#40000b","on-primary-fixed":"#40000c","error-container":"#ffdad6","secondary-fixed":"#ffdada","on-error-container":"#93000a","primary-fixed-dim":"#ffb3b5","tertiary-fixed":"#ffe088","secondary-fixed-dim":"#ffb3b5","on-background":"#1b1b1d","on-primary-container":"#ff7883","on-primary-fixed-variant":"#8c142a","inverse-primary":"#ffb3b5","surface-bright":"#fcf8fb","tertiary":"#735c00","primary-container":"#78001e","error":"#ba1a1a","surface":"#fcf8fb","surface-container-high":"#eae7ea","background":"#fcf8fb","on-error":"#ffffff","on-secondary-container":"#680018","secondary":"#af2c3e","outline":"#8b7171","tertiary-fixed-dim":"#e9c349","inverse-surface":"#303032","surface-tint":"#ad2f40","primary-fixed":"#ffdada","inverse-on-surface":"#f3f0f2","surface-container-low":"#f6f3f5","surface-variant":"#e4e2e4","secondary-container":"#fd6673","on-secondary":"#ffffff","surface-dim":"#dcd9dc","surface-container":"#f0edef","primary":"#4f0011","outline-variant":"#dfbfbf","on-surface-variant":"#584142","on-tertiary-container":"#4e3d00","on-tertiary":"#ffffff","surface-container-lowest":"#ffffff","on-surface":"#1b1b1d","on-secondary-fixed-variant":"#8e1029"},borderRadius:{DEFAULT:"0.125rem",lg:"0.25rem",xl:"0.5rem",full:"0.75rem"},spacing:{"margin-mobile":"0.75rem","space-xl":"2rem",gutter:"1rem","space-sm":"0.5rem","gutter-compact":"0.5rem","space-xxs":"0.125rem",margin:"1.5rem","space-md":"0.75rem","space-xs":"0.25rem","space-lg":"1.25rem"},fontFamily:{"headline-lg":["\"Source Serif 4\""],"code-md":["JetBrains Mono"],"label-md":["Inter"],"display-lg":["\"Source Serif 4\""],"label-sm":["Inter"],"headline-sm":["\"Source Serif 4\""],"headline-md":["\"Source Serif 4\""],"body-sm":["Inter"],"display-lg-mobile":["\"Source Serif 4\""],"label-lg":["Inter"],"body-md":["Inter"],"headline-lg-mobile":["\"Source Serif 4\""],"code-sm":["JetBrains Mono"],"body-lg":["\"Source Serif 4\""]},fontSize:{"headline-lg":["28px",{lineHeight:"36px",letterSpacing:"-0.01em",fontWeight:"600"}],"code-md":["12px",{lineHeight:"16px",letterSpacing:"-0.01em",fontWeight:"500"}],"label-md":["12px",{lineHeight:"16px",fontWeight:"500"}],"display-lg":["40px",{lineHeight:"48px",letterSpacing:"-0.02em",fontWeight:"600"}],"label-sm":["11px",{lineHeight:"14px",letterSpacing:"0.02em",fontWeight:"600"}],"headline-sm":["16px",{lineHeight:"24px",fontWeight:"600"}],"headline-md":["20px",{lineHeight:"28px",fontWeight:"600"}],"body-sm":["12px",{lineHeight:"16px",fontWeight:"400"}],"display-lg-mobile":["30px",{lineHeight:"38px",letterSpacing:"-0.015em",fontWeight:"600"}],"label-lg":["14px",{lineHeight:"20px",fontWeight:"500"}],"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-lg-mobile":["22px",{lineHeight:"30px",letterSpacing:"-0.01em",fontWeight:"600"}],"code-sm":["10px",{lineHeight:"14px",letterSpacing:"0.02em",fontWeight:"500"}],"body-lg":["17px",{lineHeight:"28px",fontWeight:"400"}]}}}};</script><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Source+Serif+4:wght@100..900&display=swap" rel="stylesheet"/></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><aside class="fixed left-0 top-0 h-full w-64 bg-surface-container-low z-50 flex flex-col shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-16 px-gutter flex items-center gap-space-sm bg-surface-container-low"><span class="material-symbols-outlined text-primary text-[20px]">balance</span><span class="font-headline-sm text-headline-sm text-primary tracking-tight">Dossier Jurídico</span></div><div class="px-gutter py-space-sm bg-surface-container-lowest mx-space-sm rounded-lg shadow-[0_1px_3px_rgba(120,0,30,0.04)] mb-space-md"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Actuario Virtual</span><span class="h-2 w-2 rounded-full bg-emerald-600 animate-pulse"></span></div><p class="font-code-sm text-code-sm text-on-surface mt-space-xxs truncate">CJF Portal Notificaciones: OK</p></div><div class="px-space-md mb-space-xs"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider px-space-sm">Módulos Procesales</span></div><nav class="flex-1 px-space-sm space-y-space-xxs" data-active-classes="bg-primary-container text-on-primary font-label-lg rounded-lg"><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="motor-universal" href="#"><span class="material-symbols-outlined text-[18px]">psychology</span><span class="font-label-lg text-label-lg">Motor Universal</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="escritos-iniciales" href="#"><span class="material-symbols-outlined text-[18px]">post_add</span><span class="font-label-lg text-label-lg">Escritos Iniciales</span></a><a aria-current="page" class="flex items-center gap-space-sm px-space-md py-space-sm transition-colors bg-primary-container text-on-primary font-label-lg rounded-lg" data-path="contestaciones" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span class="font-label-lg text-label-lg">Contestaciones</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="mis-plantillas" href="#"><span class="material-symbols-outlined text-[18px]">library_books</span><span class="font-label-lg text-label-lg">Mis Plantillas</span></a><div class="pt-space-md pb-space-xs"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider px-space-sm">Herramientas Judiciales</span></div><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="jurisprudencia-scjn" href="#"><span class="material-symbols-outlined text-[18px]">gavel</span><span class="font-label-lg text-label-lg">Jurisprudencia SCJN</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="calculadora-terminos" href="#"><span class="material-symbols-outlined text-[18px]">calendar_clock</span><span class="font-label-lg text-label-lg">Cómputo de Términos</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="dof-notificador" href="#"><span class="material-symbols-outlined text-[18px]">newspaper</span><span class="font-label-lg text-label-lg">Alertas DOF y Boletín</span></a></nav><div class="p-space-md bg-surface-container-high m-space-sm rounded-lg"><div class="flex items-center justify-between mb-space-xs"><span class="font-label-sm text-label-sm text-on-surface">Firma Electrónica</span><span class="font-code-sm text-code-sm text-tertiary font-bold">FIREL</span></div><p class="font-body-sm text-body-sm text-on-surface-variant">Certificado vigente hasta Noviembre 2026</p></div></aside><div class="pl-64"><header class="fixed top-0 left-64 right-0 h-16 bg-surface/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 flex items-center justify-between px-gutter"><div class="flex items-center gap-space-md"><img alt="LexPlantillas Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1XvcXfqLrdiK46Ss3raZQ9QyUOlxCxYic53GJW0iSGY6Y4LKiSDIAvLQipmXbtf0kUI7fCeMY-fGZXm3k-sChs_3IuAKWsnkhjz4SvV4giMlIxAYyir9l6riGXKrcpjGXGy_Hxds99HYAqMFUbk-b08bW3Wo6EOUjg-qM2cu27f2NiuYkBOLbY5MV7sOGJm9E0SW-urkJYOZ6_3VT4R2elw6Zmqpym4ItCiAjA9_BldygW1NMFcvl9Cv8vO"/><span class="font-headline-sm text-headline-sm text-primary tracking-tight hidden lg:inline-block">LexPlantillas</span><span class="bg-emerald-100 text-emerald-800 px-space-xs py-space-xxs rounded font-code-sm text-code-sm font-semibold">v1.0 RC1 Producción</span><span class="bg-tertiary-fixed text-on-tertiary-fixed px-space-xs py-space-xxs rounded font-code-sm text-code-sm flex items-center gap-space-xxs"><span class="material-symbols-outlined text-[14px]">verified</span>FIREL Cotejada</span></div><nav class="hidden xl:flex items-center gap-space-xs" data-active-classes="bg-primary-container text-on-primary font-label-md rounded-lg"><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="motor-universal" href="#">Motor Universal</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="escritos-iniciales" href="#">Escritos Iniciales</a><a aria-current="page" class="px-space-md py-space-xs transition-colors bg-primary-container text-on-primary font-label-md rounded-lg" data-path="contestaciones" href="#">Contestaciones</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="mis-plantillas" href="#">Mis Plantillas</a></nav><div class="flex items-center gap-space-md"><div class="hidden md:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container rounded-lg"><span class="h-2 w-2 rounded-full bg-emerald-600"></span><span class="font-code-sm text-code-sm text-on-surface">NVIDIA Build Activo</span></div><div class="hidden 2xl:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-low rounded-lg"><span class="material-symbols-outlined text-[16px] text-primary">folder_open</span><span class="font-code-sm text-code-sm text-on-surface font-medium truncate max-w-[210px]">EXP-800/2026 - Juzgado 3° Civil CDMX</span></div><button class="flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-highest hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface rounded-lg transition-colors"><span class="material-symbols-outlined text-[16px]">search</span><kbd class="font-code-sm text-code-sm bg-surface-container-lowest px-space-xxs rounded text-on-surface">⌘K</kbd></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><div class="fixed top-16 left-64 right-0 h-10 bg-surface-container-low/95 backdrop-blur-sm z-30 flex items-center justify-between px-gutter shadow-[0_1px_3px_rgba(120,0,30,0.02)]"><div class="flex items-center gap-space-xs font-label-sm text-label-sm text-on-surface-variant"><span class="hover:text-primary cursor-pointer transition-colors">LexPlantillas</span><span class="material-symbols-outlined text-[14px]">chevron_right</span><span class="hover:text-primary cursor-pointer transition-colors">Litigio Federal</span><span class="material-symbols-outlined text-[14px]">chevron_right</span><span class="text-on-surface font-semibold">Redacción Jurídica Activa</span></div><div class="flex items-center gap-space-sm"><span class="bg-surface-container-highest text-on-surface-variant px-space-sm py-space-xxs rounded-full font-code-sm text-code-sm uppercase tracking-wide">Materia Civil Federal / Ordinario Mercantil</span><span class="font-code-sm text-code-sm text-secondary font-semibold">Término: 3 Días Hábiles</span></div></div><main class="relative pt-28 bg-surface w-full min-h-screen px-gutter pb-space-xl"><div class="flex flex-col w-full gap-space-lg">
+<!-- CABECERA PRINCIPAL DEL MÓDULO -->
+<div class="bg-surface-container-low rounded-xl p-space-lg shadow-sm">
+<div class="flex flex-col xl:flex-row xl:items-center justify-between gap-space-md">
+<div class="space-y-space-xxs min-w-0">
+<div class="flex items-center gap-space-sm flex-wrap">
+<span class="bg-primary-container text-on-primary px-space-sm py-space-xxs rounded font-code-sm text-code-sm font-semibold tracking-wider uppercase">
+            Módulo Procesal 03
+          </span>
+<span class="bg-surface-container-highest text-on-surface-variant px-space-sm py-space-xxs rounded font-code-sm text-code-sm">
+            Fase de Emplazamiento & Fijación de Litis
+          </span>
+<span class="inline-flex items-center gap-space-xxs bg-tertiary-fixed text-on-tertiary-fixed px-space-sm py-space-xxs rounded font-code-sm text-code-sm font-medium">
+<span class="material-symbols-outlined text-[14px]">verified_user</span>
+            Traslado Certificado Digitalmente
+          </span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-primary tracking-tight">
+          Módulo Especializado en Contestaciones & Excepciones Procesales
+        </h1>
+<div class="flex items-center gap-space-md flex-wrap text-on-surface-variant">
+<div class="flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[16px] text-primary">gavel</span>
+<span class="font-body-md text-body-md font-medium text-on-surface">EXP-442/2026</span>
+</div>
+<span class="text-outline-variant">•</span>
+<span class="font-body-md text-body-md">Juicio Ordinario Civil</span>
+<span class="text-outline-variant">•</span>
+<span class="font-body-md text-body-md">Juzgado 15° de lo Civil de la CDMX</span>
+<span class="text-outline-variant">•</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Actor: Promotora de Inmuebles Residenciales S.A. de C.V.</span>
+</div>
+</div>
+<!-- METADATA TÉRMINO & COBERTURA DE RIESGO -->
+<div class="flex items-center gap-space-md">
+<div class="bg-surface-container-lowest p-space-md rounded-lg shadow-sm flex items-center gap-space-md min-w-[280px]">
+<div class="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-700">
+<span class="material-symbols-outlined text-[24px]">hourglass_top</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center justify-between gap-space-xs">
+<span class="font-label-sm text-label-sm uppercase tracking-wider text-amber-900 font-bold">Término Judicial Fatal</span>
+<span class="h-2 w-2 rounded-full bg-amber-600 animate-ping"></span>
+</div>
+<span class="font-headline-sm text-headline-sm text-amber-950 font-bold">9 Días Hábiles</span>
+<span class="font-code-sm text-code-sm text-amber-800">Vence: 4 de Septiembre de 2026 (23:59 hrs)</span>
+</div>
+</div>
+<div class="hidden 2xl:flex flex-col bg-surface-container-lowest p-space-md rounded-lg shadow-sm w-44">
+<div class="flex items-center justify-between mb-space-xxs">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase">Estatus Hechos</span>
+<span class="font-code-sm text-code-sm text-primary font-bold">6/9 Listos</span>
+</div>
+<div class="w-full bg-surface-container-high h-2 rounded-full overflow-hidden">
+<div class="bg-primary-container h-full rounded-full" style="width: 66.6%;"></div>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant mt-space-xxs">3 Excepciones fijadas</span>
+</div>
+</div>
+</div>
+</div>
+<!-- WORKSPACE DIVIDIDO EN DOS COLUMNAS (SPLIT VIEW PARA LITIGANTES) -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-md items-start">
+<!-- COLUMNA IZQUIERDA: VISOR DE TRASLADO & EXTRACCIÓN (50% -> 6 cols) -->
+<section class="lg:col-span-6 bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col">
+<!-- Toolbar Visor -->
+<div class="bg-surface-container-low px-space-md py-space-sm flex items-center justify-between gap-space-sm">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-primary">description</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Escrito de Demanda (Traslado)</span>
+<span class="bg-surface-container-highest font-code-sm text-code-sm px-space-xs py-space-xxs rounded text-on-surface-variant">Fojas 1 - 18</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<!-- Paginador -->
+<div class="flex items-center bg-surface-container-lowest rounded px-space-xs py-space-xxs shadow-xs">
+<button class="text-on-surface-variant hover:text-primary transition-colors p-space-xxs" title="Página anterior">
+<span class="material-symbols-outlined text-[16px]">chevron_left</span>
+</button>
+<span class="font-code-sm text-code-sm px-space-xs font-semibold text-on-surface">Pág. 4 de 18</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors p-space-xxs" title="Página siguiente">
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</button>
+</div>
+<!-- Herramientas Zoom y Modo -->
+<button class="p-space-xxs text-on-surface-variant hover:text-primary hover:bg-surface-container-high rounded transition-colors" title="Zoom In">
+<span class="material-symbols-outlined text-[18px]">zoom_in</span>
+</button>
+<button class="p-space-xxs text-on-surface-variant hover:text-primary hover:bg-surface-container-high rounded transition-colors" title="Zoom Out">
+<span class="material-symbols-outlined text-[18px]">zoom_out</span>
+</button>
+<button class="p-space-xxs text-on-surface-variant hover:text-primary hover:bg-surface-container-high rounded transition-colors" title="Ajustar al Ancho">
+<span class="material-symbols-outlined text-[18px]">fit_screen</span>
+</button>
+</div>
+</div>
+<!-- Sub-Barra Contextual de Segmentación Fáctica -->
+<div class="bg-surface-container px-space-md py-space-xs flex items-center justify-between text-on-surface-variant">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-[16px] text-tertiary">document_scanner</span>
+<span class="font-label-sm text-label-sm">Segmentación de Hechos Procesada por OCR Óptico SCJN</span>
+</div>
+<div class="flex items-center gap-space-xs font-code-sm text-code-sm">
+<span class="text-emerald-700 font-semibold flex items-center gap-space-xxs">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>Cotejo 100% Legible
+          </span>
+</div>
+</div>
+<!-- Lienzo de Hoja Judicial Simulada -->
+<div class="p-space-lg bg-surface-container-low max-h-[820px] overflow-y-auto space-y-space-md">
+<!-- Hoja de Papel de Juzgado -->
+<div class="bg-surface-container-lowest p-space-xl rounded-lg shadow-sm relative">
+<!-- Sello de Recepción Judicial de la Hoja -->
+<div class="absolute top-space-md right-space-md text-right bg-surface-container-low/70 p-space-xs rounded">
+<p class="font-code-sm text-code-sm text-outline uppercase font-bold tracking-wider">JUZGADO 15° CIVIL CDMX</p>
+<p class="font-code-sm text-code-sm text-on-surface-variant">RECIBIDO OFICIALÍA DE PARTES</p>
+<p class="font-code-sm text-code-sm text-primary font-bold">18 AGO 2026 • 11:24 HRS</p>
+</div>
+<div class="space-y-space-lg font-body-lg text-body-lg text-on-surface pt-space-xl">
+<div class="text-center font-headline-sm text-headline-sm uppercase text-primary tracking-wide">
+              CAPÍTULO DE HECHOS DE LA DEMANDA
+            </div>
+<!-- HECHO PRIMERO SEGMENTADO -->
+<div class="bg-surface-container-low p-space-md rounded-lg relative transition-all hover:shadow-md">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-sm text-label-sm uppercase font-bold text-primary bg-primary-fixed px-space-xs py-space-xxs rounded">
+                  Hecho Primero (Demanda)
+                </span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Foja 4, líneas 12 a 24</span>
+</div>
+<p class="text-on-surface leading-relaxed text-justify italic">
+                “1.- Con fecha 14 de marzo del año 2024, las partes celebraron en la Ciudad de México el contrato de suministro de materiales para construcción denominado ‘CONTRATO-MX-440’, pactándose en su cláusula Quinta el pago por la cantidad líquida de $4,850,000.00 M.N., pagaderos en tres exhibiciones quincenales consecutivas mediante transferencia interbancaria al Banco Mercantil.”
+              </p>
+<!-- Barra de Acciones Rápidas sobre el Hecho -->
+<div class="mt-space-md pt-space-xs flex flex-wrap items-center gap-space-xs bg-surface-container-lowest p-space-xs rounded">
+<span class="font-label-sm text-label-sm text-on-surface-variant px-space-xs">Respuesta Rápida:</span>
+<button class="bg-error text-on-error px-space-sm py-space-xxs rounded font-label-sm text-label-sm flex items-center gap-space-xxs hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-[14px]">cancel</span>
+                  Refutar / Negar Hecho
+                </button>
+<button class="bg-tertiary-container text-on-tertiary-container px-space-sm py-space-xxs rounded font-label-sm text-label-sm flex items-center gap-space-xxs hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-[14px]">rule</span>
+                  Aceptar con Salvedades
+                </button>
+<button class="bg-surface-container-highest text-on-surface px-space-sm py-space-xxs rounded font-label-sm text-label-sm flex items-center gap-space-xxs hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                  Acreditar como Propio
+                </button>
+</div>
+</div>
+<!-- HECHO SEGUNDO SEGMENTADO (ACTIVO / EN FOCO) -->
+<div class="bg-surface-bright p-space-md rounded-lg shadow-md relative">
+<div class="flex items-center justify-between mb-space-xs">
+<div class="flex items-center gap-space-xs">
+<span class="font-label-sm text-label-sm uppercase font-bold text-on-primary bg-primary-container px-space-xs py-space-xxs rounded">
+                    Hecho Segundo (En Revisión Activa)
+                  </span>
+<span class="material-symbols-outlined text-[16px] text-primary animate-bounce">arrow_forward</span>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Foja 4, líneas 25 a 42</span>
+</div>
+<p class="text-on-surface leading-relaxed text-justify selection:bg-tertiary-fixed-dim">
+                “2.- Es el caso que el demandado, no obstante haber recibido a entera satisfacción el primer cargamento de estructuras de acero el día <mark class="bg-tertiary-fixed font-semibold px-space-xxs">28 de abril de 2024</mark>, omitió injustificadamente realizar la liquidación de la segunda parcialidad convenida, incurriendo en mora culpable desde el día siguiente a su presunto vencimiento, negándose sistemáticamente a dar respuesta a los requerimientos notariales practicados.”
+              </p>
+<!-- Selector de fragmentos fácticos con botones contextuales -->
+<div class="mt-space-md pt-space-sm bg-surface-container-low p-space-sm rounded-lg flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-primary font-semibold flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[14px]">edit_note</span>
+                    Inyectar al Cuadro de Contestación:
+                  </span>
+<span class="font-code-sm text-code-sm text-secondary font-medium">Contradicción Fáctica Detectada</span>
+</div>
+<div class="flex items-center gap-space-xs flex-wrap">
+<button class="bg-primary-container text-on-primary px-space-sm py-space-xs rounded font-label-md text-label-md flex items-center gap-space-xs hover:bg-primary transition-colors shadow-xs">
+<span class="material-symbols-outlined text-[16px]">close</span>
+                    [Refutar / Negar Hecho]
+                  </button>
+<button class="bg-tertiary text-on-tertiary px-space-sm py-space-xs rounded font-label-md text-label-md flex items-center gap-space-xs hover:opacity-90 transition-opacity shadow-xs">
+<span class="material-symbols-outlined text-[16px]">flaky</span>
+                    [Aceptar con Salvedades]
+                  </button>
+<button class="bg-surface-container-highest hover:bg-surface-container-high text-on-surface px-space-sm py-space-xs rounded font-label-md text-label-md flex items-center gap-space-xs transition-colors">
+<span class="material-symbols-outlined text-[16px]">done_all</span>
+                    [Acreditar como Propio]
+                  </button>
+</div>
+</div>
+</div>
+<!-- HECHO TERCERO SEGMENTADO -->
+<div class="bg-surface-container-low p-space-md rounded-lg relative opacity-85 hover:opacity-100 transition-opacity">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-sm text-label-sm uppercase font-bold text-on-surface-variant bg-surface-container-highest px-space-xs py-space-xxs rounded">
+                  Hecho Tercero (Demanda)
+                </span>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Foja 5, líneas 1 a 19</span>
+</div>
+<p class="text-on-surface leading-relaxed text-justify italic">
+                “3.- Derivado de dicho impago, mi representada sufrió cuantiosos perjuicios comerciales evaluados pericialmente en $1,200,000.00 M.N., cuyo resarcimiento es exigible conforme al artículo 1949 del Código Civil aplicable al presente fuero común.”
+              </p>
+<div class="mt-space-sm flex items-center justify-end gap-space-xs">
+<button class="text-primary hover:underline font-label-sm text-label-sm flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[14px]">stylus</span>
+                  Asignar postura directa
+                </button>
+</div>
+</div>
+</div>
+<!-- Pie de Foja Procesal -->
+<div class="mt-space-xl pt-space-md flex items-center justify-between font-code-sm text-code-sm text-outline">
+<span>EXP-442/2026 • TRASLADO FOJA 4 DE 18</span>
+<span>FIRMA AUTÓGRAFA Y COTEJO ELECTRÓNICO</span>
+</div>
+</div>
+</div>
+</section>
+<!-- COLUMNA DERECHA: FORMULACIÓN DE CONTESTACIÓN & EXCEPCIONES PREVIAS (50% -> 6 cols) -->
+<section class="lg:col-span-6 bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col">
+<!-- Toolbar Formulación -->
+<div class="bg-surface-container-low px-space-md py-space-sm flex items-center justify-between gap-space-sm">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[18px] text-primary">edit_document</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Estrategia de Contestación & Litis</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="bg-emerald-100 text-emerald-900 px-space-xs py-space-xxs rounded font-code-sm text-code-sm flex items-center gap-space-xxs font-medium">
+<span class="material-symbols-outlined text-[14px]">auto_fix_high</span>
+            IA NVIDIA Litigios On
+          </span>
+<button class="p-space-xxs text-on-surface-variant hover:text-primary rounded" title="Restaurar valores">
+<span class="material-symbols-outlined text-[16px]">restart_alt</span>
+</button>
+</div>
+</div>
+<!-- Contenedor del Editor y Excepciones -->
+<div class="p-space-lg max-h-[820px] overflow-y-auto space-y-space-lg">
+<!-- SECCIÓN A: SELECTOR DE POSTURA FÁCTICA POR HECHO -->
+<div class="space-y-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="w-6 h-6 rounded-full bg-primary text-on-primary flex items-center justify-center font-code-sm text-code-sm font-bold">1</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Pronunciamiento Categórico de Hechos</h2>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface-variant">Obligación Procesal (Art. 266 CPCDF)</span>
+</div>
+<!-- TARJETA POSTURA: HECHO PRIMERO -->
+<div class="bg-surface-container-low rounded-lg p-space-md space-y-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md font-bold text-on-surface">HECHO PRIMERO DE DEMANDA</span>
+<span class="bg-error-container text-on-error-container px-space-sm py-space-xxs rounded-full font-code-sm text-code-sm font-bold flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[12px]">do_not_disturb_on</span>
+                NEGACIÓN TOTAL
+              </span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded font-body-md text-body-md text-on-surface-variant italic">
+              “Con fecha 14 de marzo del año 2024, las partes celebraron en la Ciudad de México el contrato...”
+            </div>
+<div class="space-y-space-xs">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold flex items-center justify-between">
+<span>Redacción de la Contestación al Hecho Primero:</span>
+<span class="font-code-sm text-code-sm text-secondary">Fórmula Procesal Vigente</span>
+</label>
+<textarea class="w-full bg-surface-container-lowest p-space-sm rounded font-body-md text-body-md text-on-surface focus:outline-none focus:ring-1 focus:ring-primary shadow-xs" rows="3">EL HECHO PRIMERO SE NIEGA por no ser un hecho propio de mi mandante y ser totalmente falso en la forma en que se encuentra expuesto por la actora. Es falso de toda falsedad que se hubiere celebrado el contrato de suministro el 14 de marzo de 2024, toda vez que en dicha data mi representada se encontraba legalmente imposibilitada.</textarea>
+</div>
+</div>
+<!-- TARJETA POSTURA: HECHO SEGUNDO (DETALLE AVANZADO) -->
+<div class="bg-surface-container-high rounded-lg p-space-md space-y-space-sm">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md font-bold text-primary">HECHO SEGUNDO DE DEMANDA</span>
+<span class="bg-tertiary-fixed text-on-tertiary-fixed px-space-sm py-space-xxs rounded-full font-code-sm text-code-sm font-bold flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[12px]">fact_check</span>
+                ADMITE CON SALVEDADES
+              </span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded font-body-md text-body-md text-on-surface italic">
+              “...recibido a entera satisfacción el primer cargamento de estructuras de acero el día 28 de abril de 2024...”
+            </div>
+<!-- Selector Radio de Categoría de Contestación -->
+<div class="grid grid-cols-3 gap-space-xs pt-space-xxs">
+<label class="flex items-center gap-space-xs p-space-xs bg-surface-container-lowest rounded cursor-pointer hover:bg-surface-container-high transition-colors">
+<input class="text-primary accent-primary" name="postura_hecho_2" type="radio"/>
+<span class="font-label-sm text-label-sm text-on-surface">Negativa Lisa</span>
+</label>
+<label class="flex items-center gap-space-xs p-space-xs bg-surface-container-lowest rounded cursor-pointer bg-primary-fixed/30 font-semibold">
+<input checked="" class="text-primary accent-primary" name="postura_hecho_2" type="radio"/>
+<span class="font-label-sm text-label-sm text-primary">Admite Parcial</span>
+</label>
+<label class="flex items-center gap-space-xs p-space-xs bg-surface-container-lowest rounded cursor-pointer hover:bg-surface-container-high transition-colors">
+<input class="text-primary accent-primary" name="postura_hecho_2" type="radio"/>
+<span class="font-label-sm text-label-sm text-on-surface">Ignora Hecho</span>
+</label>
+</div>
+<!-- Redacción Activa -->
+<div class="space-y-space-xs">
+<label class="font-label-sm text-label-sm text-on-surface font-semibold flex items-center justify-between">
+<span>Redacción Defensiva con Salvedad Expresa:</span>
+<span class="font-code-sm text-code-sm text-emerald-800">Protección procesal activa</span>
+</label>
+<textarea class="w-full bg-surface-container-lowest p-space-sm rounded font-body-md text-body-md text-on-surface focus:outline-none focus:ring-1 focus:ring-primary shadow-xs" rows="4">EL HECHO SEGUNDO SE ADMITE ÚNICAMENTE en cuanto a la fecha 28 de abril de 2024; pero SE ACLARA Y REFUTA EN SU TOTALIDAD en cuanto a que los perfiles metálicos hubiesen sido recibidos a “entera satisfacción”, pues se levantó Minuta de Observaciones por defectos ostensibles de origen, no existiendo exigibilidad respecto a la parcialidad pretendida.</textarea>
+</div>
+<div class="flex items-center justify-between text-on-surface-variant font-code-sm text-code-sm pt-space-xxs">
+<span>Relacionado a: Prueba Documental Privada 02</span>
+<button class="text-primary hover:underline flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[14px]">attach_file</span>
+                Vincular Anexo de Objeción
+              </button>
+</div>
+</div>
+</div>
+<!-- SECCIÓN B: EXCEPCIONES DILATORIAS Y PERENTORIAS -->
+<div class="space-y-space-md pt-space-xs">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="w-6 h-6 rounded-full bg-primary text-on-primary flex items-center justify-center font-code-sm text-code-sm font-bold">2</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Excepciones y Defensas Procesales</h2>
+</div>
+<span class="bg-surface-container-highest px-space-xs py-space-xxs rounded font-code-sm text-code-sm text-on-surface">3 Activas de 7 Disponibles</span>
+</div>
+<div class="space-y-space-sm">
+<!-- EXCEPCIÓN 1: FALTA DE LEGITIMACIÓN -->
+<div class="bg-surface-container-low p-space-md rounded-lg space-y-space-xs shadow-xs">
+<div class="flex items-start justify-between gap-space-sm">
+<label class="flex items-start gap-space-sm cursor-pointer">
+<input checked="" class="mt-1 w-4 h-4 text-primary accent-primary rounded" type="checkbox"/>
+<div>
+<div class="flex items-center gap-space-xs">
+<span class="font-headline-sm text-headline-sm text-on-surface">Falta de Legitimación en la Causa (Sine Actione Agis)</span>
+<span class="bg-primary text-on-primary font-code-sm text-code-sm px-space-xs py-space-xxs rounded">Perentoria</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-xxs">
+                      La persona moral demandante carece de titularidad activa sobre los derechos litigiosos al no acreditar personería societaria idónea.
+                    </p>
+</div>
+</label>
+<span class="material-symbols-outlined text-[18px] text-emerald-700">check_circle</span>
+</div>
+<div class="bg-surface-container-lowest p-space-xs rounded font-code-sm text-code-sm text-on-surface-variant">
+<span class="font-bold text-primary">Fundamento Procesal Automático:</span> Arts. 1°, 35 fracción IV del CPCDF; Tesis Jurisprudencial 1a./J. 38/2016 (SCJN).
+              </div>
+</div>
+<!-- EXCEPCIÓN 2: PRESCRIPCIÓN DE LA ACCIÓN -->
+<div class="bg-surface-container-low p-space-md rounded-lg space-y-space-xs shadow-xs">
+<div class="flex items-start justify-between gap-space-sm">
+<label class="flex items-start gap-space-sm cursor-pointer">
+<input checked="" class="mt-1 w-4 h-4 text-primary accent-primary rounded" type="checkbox"/>
+<div>
+<div class="flex items-center gap-space-xs">
+<span class="font-headline-sm text-headline-sm text-on-surface">Prescripción Negativa de la Acción Rescisoria</span>
+<span class="bg-primary text-on-primary font-code-sm text-code-sm px-space-xs py-space-xxs rounded">Perentoria</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-xxs">
+                      Extinción por el transcurso de más de un año en materia mercantil/civil sin gestión judicial formalmente notificada.
+                    </p>
+</div>
+</label>
+<span class="material-symbols-outlined text-[18px] text-emerald-700">check_circle</span>
+</div>
+<div class="bg-surface-container-lowest p-space-xs rounded font-code-sm text-code-sm text-on-surface-variant">
+<span class="font-bold text-primary">Fundamento Procesal Automático:</span> Arts. 1158 y 1161 del Código Civil para el Distrito Federal.
+              </div>
+</div>
+<!-- EXCEPCIÓN 3: INCOMPETENCIA POR TERRITORIO -->
+<div class="bg-surface-container-low p-space-md rounded-lg space-y-space-xs shadow-xs">
+<div class="flex items-start justify-between gap-space-sm">
+<label class="flex items-start gap-space-sm cursor-pointer">
+<input checked="" class="mt-1 w-4 h-4 text-primary accent-primary rounded" type="checkbox"/>
+<div>
+<div class="flex items-center gap-space-xs">
+<span class="font-headline-sm text-headline-sm text-on-surface">Incompetencia por Razón de Territorio (Declinatoria)</span>
+<span class="bg-tertiary-container text-on-tertiary-container font-code-sm text-code-sm px-space-xs py-space-xxs rounded">Dilatoria / Previa</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-xxs">
+                      Sometimiento expreso pactado en la Cláusula Décima Segunda a los Tribunales del Primer Partido Judicial de Guadalajara, Jalisco.
+                    </p>
+</div>
+</label>
+<span class="material-symbols-outlined text-[18px] text-emerald-700">check_circle</span>
+</div>
+<div class="bg-surface-container-lowest p-space-xs rounded font-code-sm text-code-sm text-on-surface-variant">
+<span class="font-bold text-primary">Fundamento Procesal Automático:</span> Arts. 156 fracción IV y 163 del Código de Procedimientos Civiles para el D.F.
+              </div>
+</div>
+<!-- EXCEPCIÓN 4: INADMISIBILIDAD (INACTIVA) -->
+<div class="bg-surface-container-low/60 p-space-md rounded-lg space-y-space-xs opacity-75 hover:opacity-100 transition-opacity">
+<label class="flex items-start gap-space-sm cursor-pointer">
+<input class="mt-1 w-4 h-4 text-primary accent-primary rounded" type="checkbox"/>
+<div>
+<div class="flex items-center gap-space-xs">
+<span class="font-headline-sm text-headline-sm text-on-surface">Litispendencia o Conexidad de la Causa</span>
+<span class="bg-surface-container-highest text-on-surface-variant font-code-sm text-code-sm px-space-xs py-space-xxs rounded">Dilatoria</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-xxs">
+                    Juicio preliminar conexo radicado ante el Juzgado 4° de Distrito en Materia Civil.
+                  </p>
+</div>
+</label>
+</div>
+</div>
+</div>
+<!-- RECAPITULACIÓN JURISPRUDENCIAL SCJN ADJUNTA -->
+<div class="bg-surface-container p-space-md rounded-lg flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[20px]">account_balance</span>
+<div>
+<p class="font-label-sm text-label-sm text-on-surface font-bold uppercase">Criterios SCJN Acoplados a Excepciones</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">3 tesis de jurisprudencia por reiteración listas para el capítulo de derecho.</p>
+</div>
+</div>
+<span class="font-code-sm text-code-sm bg-surface-container-lowest text-primary px-space-sm py-space-xxs rounded font-bold">
+            Registro: 2024190
+          </span>
+</div>
+</div>
+</section>
+</div>
+<!-- BARRA INFERIOR DE CONTROL Y ACCIÓN PROCESAL -->
+<div class="bg-surface-container-lowest rounded-xl p-space-md shadow-md">
+<div class="flex flex-col md:flex-row items-center justify-between gap-space-md">
+<!-- Indicadores de Calidad & Blindaje Procesal -->
+<div class="flex items-center gap-space-md flex-wrap">
+<div class="flex items-center gap-space-xs">
+<span class="h-2.5 w-2.5 rounded-full bg-emerald-600"></span>
+<span class="font-label-md text-label-md font-semibold text-on-surface">Blindaje de Litis: Conforme a Derecho</span>
+</div>
+<div class="h-4 w-px bg-outline-variant hidden sm:block"></div>
+<div class="flex items-center gap-space-xxs text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]">verified</span>
+<span class="font-code-sm text-code-sm">Cotejo FIREL Integrado</span>
+</div>
+<div class="flex items-center gap-space-xxs text-secondary">
+<span class="material-symbols-outlined text-[16px]">timer</span>
+<span class="font-code-sm text-code-sm font-semibold">Término en cómputo judicial</span>
+</div>
+</div>
+<!-- Botones Operativos Litigiosos -->
+<div class="flex items-center gap-space-sm flex-wrap w-full md:w-auto justify-end">
+<!-- Sintetizar Agravios con NVIDIA -->
+<button class="bg-surface-container-high hover:bg-surface-container-highest text-on-surface px-space-md py-space-sm rounded-lg font-label-md text-label-md flex items-center gap-space-xs transition-colors shadow-xs">
+<span class="material-symbols-outlined text-[18px] text-emerald-800">neurology</span>
+<span>Sintetizar Agravios con NVIDIA</span>
+</button>
+<!-- Validar Guarda de No-Contaminación -->
+<button class="bg-surface-container-high hover:bg-surface-container-highest text-on-surface px-space-md py-space-sm rounded-lg font-label-md text-label-md flex items-center gap-space-xs transition-colors shadow-xs">
+<span class="material-symbols-outlined text-[18px] text-tertiary">security</span>
+<span>Validar Guarda de No-Contaminación</span>
+</button>
+<!-- Botón principal: Generar Escrito de Contestación Completo (Vino tinto #78001e) -->
+<button class="bg-primary-container hover:bg-primary text-on-primary px-space-lg py-space-sm rounded-lg font-label-lg text-label-lg flex items-center gap-space-sm transition-all shadow-md active:scale-95">
+<span class="material-symbols-outlined text-[20px]">contract</span>
+<span>Generar Escrito de Contestación Completo</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // Micro-interacción: simular feedback de botones procesales
+  document.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      if(this.textContent.includes('Generar Escrito')) {
+        const originalText = this.innerHTML;
+        this.innerHTML = '<span class="material-symbols-outlined text-[20px] animate-spin">sync</span><span>Compilando Auto y Contestación...</span>';
+        setTimeout(() => {
+          this.innerHTML = '<span class="material-symbols-outlined text-[20px]">task_alt</span><span>¡Escrito Compilado y Firmado FIREL!</span>';
+          setTimeout(() => {
+            this.innerHTML = originalText;
+          }, 3000);
+        }, 1200);
+      }
+    });
+  });
+</script></main></div></body></html>

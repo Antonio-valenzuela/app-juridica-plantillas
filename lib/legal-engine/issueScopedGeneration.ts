@@ -154,6 +154,9 @@ export function classifyIssueGeneration(input: {
 }): IssueGenerationClass {
   const { issue, taskType } = input;
   if (taskType === 'LEGAL_RESEARCH') return 'RESEARCH_DEPENDENT';
+  if (taskType === 'FACT_RESPONSE' || taskType === 'CLAIM') {
+    return 'SOURCE_GROUNDED';
+  }
   if (issue) {
     if (issue.issueType === 'AUTHORITY_RESEARCH') return 'RESEARCH_DEPENDENT';
     if (issue.status === 'NEEDS_RESEARCH' || issue.researchStatus === 'NEEDS_RESEARCH') {
@@ -161,26 +164,26 @@ export function classifyIssueGeneration(input: {
     }
   }
   if (
-    taskType === 'FACT_RESPONSE' ||
-    taskType === 'CLAIM' ||
     taskType === 'EVIDENCE' ||
     taskType === 'SECTION_SUPPORT' ||
     taskType === 'COVERAGE_ITEM'
   ) {
     return 'SOURCE_GROUNDED';
   }
-  if (!issue) return 'RESEARCH_DEPENDENT';
-  if (
-    issue.issueType === 'FACT_DISPUTE' ||
-    issue.issueType === 'CLAIM_ELEMENT' ||
-    issue.issueType === 'EVIDENCE_RELEVANCE' ||
-    issue.issueType === 'EVIDENCE_SUFFICIENCY' ||
-    issue.issueType === 'PETITION_SUPPORT' ||
-    issue.issueType === 'PROCEDURAL_ISSUE' ||
-    issue.issueType === 'SOURCE_ARGUMENT'
-  ) {
-    return 'SOURCE_GROUNDED';
+  if (issue) {
+    if (
+      issue.issueType === 'FACT_DISPUTE' ||
+      issue.issueType === 'CLAIM_ELEMENT' ||
+      issue.issueType === 'EVIDENCE_RELEVANCE' ||
+      issue.issueType === 'EVIDENCE_SUFFICIENCY' ||
+      issue.issueType === 'PETITION_SUPPORT' ||
+      issue.issueType === 'PROCEDURAL_ISSUE' ||
+      issue.issueType === 'SOURCE_ARGUMENT'
+    ) {
+      return 'SOURCE_GROUNDED';
+    }
   }
+  if (!issue) return 'RESEARCH_DEPENDENT';
   if (issue.researchStatus === 'NOT_REQUIRED') {
     return 'SOURCE_GROUNDED';
   }

@@ -76,7 +76,28 @@ function projectEvidence(rich: RichCaseAnalysis, mention: EvidenceMention, losse
 export function projectRichCaseAnalysis(rich: RichCaseAnalysis, base: CaseAnalysis): LegacyProjectionResult {
   const losses: string[] = [];
   const evidence = rich.evidenceMentions.map((mention) => projectEvidence(rich, mention, losses));
-  const facts = rich.facts.map(projectFact);
+  const rawNumbers = rich.facts.map((fact) => {
+    const excerpt = fact.provenance[0]?.excerpt;
+    return excerpt?.match(/^\s*(?:HECHO\s+)?(\d+|[IVXLCDM]+|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[ÉE]PTIMO|OCTAVO|NOVENO|D[ÉE]CIMO)\s*[.)\-:]/i)?.[1];
+  });
+  const reservedNumbers = new Set(rawNumbers.filter((n): n is string => Boolean(n)));
+  const usedNumbers = new Set<string>();
+  let nextSequential = 1;
+
+  const facts = rich.facts.map((fact, index) => {
+    const projected = projectFact(fact, index);
+    const explicit = rawNumbers[index];
+    if (explicit && !usedNumbers.has(explicit)) {
+      projected.number = explicit;
+    } else {
+      while (reservedNumbers.has(String(nextSequential)) || usedNumbers.has(String(nextSequential))) {
+        nextSequential++;
+      }
+      projected.number = String(nextSequential++);
+    }
+    usedNumbers.add(projected.number);
+    return projected;
+  });
   if (rich.facts.some((fact) => fact.assertionStatus === 'SOURCE_ASSERTION')) {
     losses.push('SourceAssertion remains a source assertion and cannot be represented as an established legacy fact');
   }

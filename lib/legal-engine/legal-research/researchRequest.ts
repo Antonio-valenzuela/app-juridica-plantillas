@@ -99,3 +99,13 @@ export async function normalizeResearchQuery(
     relevantDate: request.relevantDate,
   };
 }
+
+export function projectAbstractLegalQuery(query: string): string {
+  return query
+    .replace(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\b/g, '')
+    .replace(/\b(?:expediente|exp\.|toca|amparo\s+directo|amparo\s+indirecto)\s*[:\-]?\s*[A-Z0-9\-\/\.]+/gi, '')
+    .replace(/\b(?:domicilio|dirección|calle|colonia|c\.p\.)\s*[:\-]?\s*[^,\n]+/gi, '')
+    .replace(/\d{1,8}\/\d{2,4}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

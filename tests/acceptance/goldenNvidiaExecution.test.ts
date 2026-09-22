@@ -54,7 +54,10 @@ function lastByTask<T extends { taskId: string }>(entries: readonly T[]): Map<st
 }
 
 describe('golden real NVIDIA contract and materialization audit', () => {
-  it('traces the canonical civil answer through NVIDIA, validation, DraftBlock, assembly, and editor model', async () => {
+  const hasKey = !!process.env.NVIDIA_API_KEY?.trim();
+  const shouldRunReal = hasKey && process.env.NVIDIA_REAL_TEST === 'true';
+
+  it.skipIf(!shouldRunReal)('traces the canonical civil answer through NVIDIA, validation, DraftBlock, assembly, and editor model', async () => {
     expect(process.env.NVIDIA_API_KEY?.trim(), 'NVIDIA_API_KEY must come from .env; never embed it in a test').toBeTruthy();
     expect(fs.existsSync(GOLDEN_PATH)).toBe(true);
 

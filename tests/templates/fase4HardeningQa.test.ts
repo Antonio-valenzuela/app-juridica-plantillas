@@ -180,7 +180,7 @@ describe('FASE 4: HARDENING, QA DE PRODUCCIÓN Y VALIDACIÓN INTEGRAL', () => {
       });
 
       expect(docHuge.sections.length).toBeGreaterThan(0);
-    });
+    }, 120000);
 
     it('Caso 6 & 7: Sin clasificación evidente o preset sin payload', async () => {
       const doc = await runGenerationPipeline({

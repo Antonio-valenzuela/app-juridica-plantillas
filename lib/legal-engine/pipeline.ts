@@ -334,6 +334,8 @@ export async function runLegalResearchOnly(
 
   return { requests, bundles, readiness, trace: traces };
 }
+
+export const runAutomaticLegalResearch = runLegalResearchOnly;
 import {
   buildGenerationTasksForSection,
   executeGenerationTask,
@@ -799,6 +801,7 @@ export interface PipelineInput {
   sectionGenerationMode?: 'legacy' | 'section';
   /** Contrato opt-in para contestaciones jurídicas extensas medidas por páginas. */
   generationExtension?: GenerationExtensionInput;
+  legalResearchProvider?: LegalResearchProvider;
 }
 
 export function buildLawyerStyleDirective(profile: LawyerProfile): string {
@@ -2794,7 +2797,8 @@ export async function generateSection(
     (/prestaci|pretensi/i.test(sectionTitleKey) && (hasClaims || hasFacts)) ||
     (/excepcion|defensa/i.test(sectionTitleKey) && (hasConfirmedDefenses || hasFacts)) ||
     (/prueba|evidencia/i.test(sectionTitleKey) && (hasEvidence || hasFacts)) ||
-    (/alegato/i.test(sectionTitleKey) && (hasConfirmedDefenses || hasConfirmedFactPositions || hasFacts))
+    (/alegato/i.test(sectionTitleKey) && (hasConfirmedDefenses || hasConfirmedFactPositions || hasFacts)) ||
+    /derecho/i.test(sectionTitleKey)
   );
   const aiEligibleSection = !formalSection && (
     isSubstantiveContestacionSection ||
@@ -3103,7 +3107,7 @@ export async function generateSection(
     }
   }
 
-  if (customGenerator && aiEligibleSection) {
+  if (customGenerator && (!formalSection || aiEligibleSection)) {
     const customText = await customGenerator({ section: sec, doc });
     const sanitized = sanitizeGeneratedText(String(customText));
     sec.content = [{

@@ -671,6 +671,7 @@ export interface CaseDocument {
   lifecycle?: DocumentLifecycleMetadata;
   name: string;
   type: string;
+  documentType?: string;
   fileUrl?: string;
   pageCount: number;
   pages: Array<{ page: number; text: string; chars: number; ocrStatus: string; blocks?: DocumentBlock[] }>;

@@ -163,6 +163,19 @@ const RESPONSE_REQUIRED_SECTION_IDS = [
   'firma',
 ] as const;
 
+export const CIVIL_RESPONSE_REQUIRED_SECTION_IDS = [
+  'proemio',
+  'comparecencia',
+  'objeto',
+  'prestaciones',
+  'hechos',
+  'excepciones_defensas',
+  'pruebas',
+  'derecho',
+  'petitorios',
+  'firma',
+] as const;
+
 const RECONVENTION_REQUIRED_SECTION_IDS = [
   'proemio',
   'comparecencia',
@@ -268,7 +281,7 @@ function responseStrategy(
 }
 
 export const CIVIL_CONTESTATION_STRATEGY = responseStrategy(
-  'contestacion_demanda_civil', 'CIVIL', 'CONTESTACION_DEMANDA_CIVIL', 'demandado', CIVIL_RESPONSE_FIELD_IDS, RESPONSE_REQUIRED_SECTION_IDS,
+  'contestacion_demanda_civil', 'CIVIL', 'CONTESTACION_DEMANDA_CIVIL', 'demandado', CIVIL_RESPONSE_FIELD_IDS, CIVIL_RESPONSE_REQUIRED_SECTION_IDS,
 );
 export const MERCANTILE_CONTESTATION_STRATEGY = responseStrategy(
   'contestacion_demanda_mercantil', 'MERCANTIL', 'CONTESTACION_DEMANDA_MERCANTIL', 'demandado', CIVIL_RESPONSE_FIELD_IDS, RESPONSE_REQUIRED_SECTION_IDS,

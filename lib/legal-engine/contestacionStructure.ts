@@ -69,10 +69,13 @@ export function resolveContestacionRoles(
     (caseAnalysis?.authorities && caseAnalysis.authorities[0]) ||
     '';
 
-  const expediente =
+  const rawExpediente =
     doc.caseRefs?.expediente ||
-    caseAnalysis?.caseNumbers?.principal ||
-    '[DATO PENDIENTE DE EXPEDIENTE: Número de expediente]';
+    caseAnalysis?.caseNumbers?.principal;
+  const expediente =
+    rawExpediente && !/\.(docx|pdf|xlsx|txt|rtf)$/i.test(rawExpediente.trim())
+      ? rawExpediente
+      : '[DATO PENDIENTE DE EXPEDIENTE: Número de expediente]';
 
   return { contesta, contraparte, autoridad, expediente };
 }
@@ -237,15 +240,45 @@ export function buildContestacionSkeleton(
     `RESPUESTA: ${fact.lawyerObservation || fact.manualResponse || (fact.lawyerPosition && fact.lawyerPosition !== 'UNDEFINED' ? fact.lawyerPosition : fact.response) || '[REQUIERE DEFINIR POSTURA DEL ABOGADO]'}`,
     `FUENTE: ${fact.sourceReference?.documentId || fact.documentId || 'fuente-no-identificada'}${fact.sourceReference?.page || fact.page ? ` · página ${fact.sourceReference?.page || fact.page}` : ''}.`,
   ].join('\n')).join('\n\n');
-  const prestacionesRef = (caseAnalysis?.claimResponses || []).length
+  const prestacionesSeed = (caseAnalysis?.claimResponses || []).length
     ? (caseAnalysis?.claimResponses || []).map((claim) => `PRESTACIÓN ${claim.number}.- La parte actora reclama: "${claim.text}"\nPOSTURA: ${claim.lawyerPosition === 'ACCEPT' || claim.position === 'ACCEPT' ? 'SE ACEPTA' : claim.lawyerPosition === 'OPPOSE' || claim.position === 'OPPOSE' ? 'SE OPONE' : claim.lawyerPosition === 'PARTIAL' || claim.position === 'PARTIAL' ? 'SE ACEPTA PARCIALMENTE' : '[REQUIERE DEFINIR POSTURA DEL ABOGADO]'}\nRESPUESTA: ${claim.lawyerObservation || claim.generatedResponse || (claim.lawyerPosition && claim.lawyerPosition !== 'UNDEFINED' ? claim.lawyerPosition : claim.response) || '[REQUIERE INSTRUCCIÓN DEL ABOGADO]'}`).join('\n\n')
     : (caseAnalysis?.claims || []).map((claim, i) => `PRESTACIÓN ${i + 1}.- La parte actora reclama: "${claim}"\nPOSTURA: [REQUIERE DEFINIR POSTURA DEL ABOGADO]`).join('\n\n');
 
   const proemioSeed = `${roles.autoridad || '[DATO PENDIENTE DE EXPEDIENTE: Autoridad competente]'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`;
   const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: [DATO PENDIENTE DE EXPEDIENTE: Personalidad y domicilio para oír notificaciones]`;
   const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE (responder punto por punto; conserva redacciones *****):\n${hechosRef || '[DATO PENDIENTE DE EXPEDIENTE: Hechos del expediente]'}`;
-  const prestacionesSeed = `PRESTACIONES RECLAMADAS:\n${prestacionesRef || '[DATO PENDIENTE DE EXPEDIENTE: Prestaciones reclamadas]'}`;
-  const pruebasSeed = `FUENTES PROBATORIAS DISPONIBLES EN EL EXPEDIENTE:\n${(caseAnalysis?.evidence || []).map((e) => `- ${e.description}`).join('\n') || '[Sin pruebas identificadas en el expediente]'}`;
+  const confirmedEvidence = (caseAnalysis?.evidence || []).filter((e) => e.confirmed === true);
+  const pruebasSeed = confirmedEvidence.length > 0
+    ? `PRUEBAS:\n\n${confirmedEvidence.map((e, i) => `${i + 1}. ${e.description}`).join('\n')}`
+    : (caseAnalysis?.evidence || []).length > 0
+      ? `FUENTES PROBATORIAS DISPONIBLES EN EL EXPEDIENTE:\n${caseAnalysis!.evidence.map((e) => `- ${e.description}`).join('\n')}\n\n[REQUIERE DEFINIR PRUEBAS A OFRECER]`
+      : '[REQUIERE DEFINIR PRUEBAS A OFRECER]';
+
+  const isLaboral =
+    (doc.matter && /laboral/i.test(doc.matter)) ||
+    (doc.documentType && /laboral/i.test(doc.documentType));
+
+  if (!isLaboral) {
+    const objecionPruebasSeed = 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA:\nSe objetan en cuanto a su alcance y valor probatorio las pruebas ofrecidas por la contraria.';
+    const derechoSeed = 'DERECHO:\nSon aplicables las disposiciones legales sustantivas y adjetivas conforme a derecho.';
+
+    return [
+      mkSection(templateId, 'sec-con-proemio', 'header', 'PROEMIO', 1, proemioSeed),
+      mkSection(templateId, 'sec-con-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2, comparecenciaSeed),
+      mkSection(templateId, 'sec-con-objeto', 'argument', 'OBJETO DEL ESCRITO', 3,
+        `Se contesta la demanda promovida por ${roles.contraparte} dentro de los autos del expediente ${roles.expediente}.`),
+      mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 4, prestacionesSeed),
+      mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 5, hechosSeed),
+      mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
+        'EXCEPCIONES Y DEFENSAS DERIVADAS DEL EXPEDIENTE O DE LAS INSTRUCCIONES DEL ABOGADO:\nNo se identificaron elementos suficientes para formular una excepción concreta. [REQUIERE INSTRUCCIÓN DEL ABOGADO].'),
+      mkSection(templateId, 'sec-con-objecion-pruebas', 'argument', 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA', 7, objecionPruebasSeed),
+      mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS PROPIAS DE LA DEMANDADA', 8, pruebasSeed),
+      mkSection(templateId, 'sec-con-derecho', 'legal_grounds', 'DERECHO', 9, derechoSeed),
+      mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', 10, 'PETITORIOS'),
+      mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', 11,
+        `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: [DATO PENDIENTE DE EXPEDIENTE: Lugar y fecha de presentación]\n\n_________________________________________\n${roles.contesta}`),
+    ];
+  }
 
   const sections: DocumentNode[] = [
     mkSection(templateId, 'sec-con-proemio', 'header', 'PROEMIO', 1, proemioSeed),
@@ -258,7 +291,7 @@ export function buildContestacionSkeleton(
       'EXCEPCIONES Y DEFENSAS DERIVADAS DEL EXPEDIENTE O DE LAS INSTRUCCIONES DEL ABOGADO:\nNo se identificaron elementos suficientes para formular una excepción concreta. [REQUIERE INSTRUCCIÓN DEL ABOGADO].'),
     mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7, pruebasSeed),
     mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
-      'SÍNTESIS ALEGATIVA DESDE LA POSICIÓN DEL DEMANDADO:\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: confirmar teoría defensiva y consecuencia solicitada].'),
+      'SÍNTESIS ALEGATIVA DESDE LA POSICIÓN DEL DEMANDADO:\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: definir postura procesal y consecuencia solicitada].'),
     mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', 9, 'PETITORIOS'),
     mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', 10,
       `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: [DATO PENDIENTE DE EXPEDIENTE: Lugar y fecha de presentación]\n\n_________________________________________\n${roles.contesta}`),

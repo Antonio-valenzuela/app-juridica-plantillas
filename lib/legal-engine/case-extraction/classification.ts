@@ -28,11 +28,12 @@ function sectionFromCandidate(candidate: ExtractionCandidate): string | undefine
   const provenanceSection = candidate.provenance.find((item) => item.section)?.section;
   if (provenanceSection) {
     const raw = provenanceSection.replace(/[\s:;,.\-]+$/, '').trim().toUpperCase();
-    if (/HECHO/i.test(raw)) return 'HECHOS';
-    if (/PRESTACI|PRETENS|PETICI/i.test(raw)) return 'PRESTACIONES';
-    if (/PRUEBA|EVIDENC/i.test(raw)) return 'PRUEBAS';
-    if (/DERECHO|FUNDAMENTO|AGRAVIO|ARGUMENTO/i.test(raw)) return 'ARGUMENTOS';
-    return raw;
+    const unspaced = raw.replace(/\s+/g, '');
+    if (/HECHO/i.test(raw) || /HECHO/i.test(unspaced)) return 'HECHOS';
+    if (/PRESTACI|PRETENS|PETICI/i.test(raw) || /PRESTACI|PRETENS|PETICI/i.test(unspaced)) return 'PRESTACIONES';
+    if (/PRUEBA|EVIDENC/i.test(raw) || /PRUEBA|EVIDENC/i.test(unspaced)) return 'PRUEBAS';
+    if (/DERECHO|FUNDAMENTO|AGRAVIO|ARGUMENTO/i.test(raw) || /DERECHO|FUNDAMENTO|AGRAVIO|ARGUMENTO/i.test(unspaced)) return 'ARGUMENTOS';
+    return unspaced || raw;
   }
   const prefix = candidate.rawText.match(/^\s*([^:.-]{3,80})\s*:/)?.[1];
   if (prefix) {
@@ -94,6 +95,7 @@ function classifyOne(candidate: ExtractionCandidate): ExtractionCandidate {
   let reason = 'No deterministically specific category was found; review is required.';
   const courtKind = courtReasoningKind(text);
   const speakerRole = courtKind ? 'RESOLUTOR' : inferSpeakerRole(text);
+  const isScjnMetadata = /^(?:Registro\s+digital|Instancia|Tesis|Fuente:\s*Semanario|Suprema\s+Corte\s+de\s+Justicia|Tipo:\s*Jurisprudencia|Contradicci[óo]n\s+de\s+tesis)\b/i.test(text);
 
   if (courtKind) {
     kind = courtKind;
@@ -101,6 +103,10 @@ function classifyOne(candidate: ExtractionCandidate): ExtractionCandidate {
     reason = courtKind === 'HOLDING'
       ? 'Deterministic judicial holding marker is present outside quoted or reported party text.'
       : 'Deterministic court-reasoning marker is present outside quoted or reported party text.';
+  } else if (isScjnMetadata) {
+    kind = 'AUTHORITY';
+    confidence = 0.98;
+    reason = 'SCJN metadata or judicial citation line in source text.';
   } else if (explicitParty(text)) {
     kind = 'PARTY';
     confidence = 0.99;

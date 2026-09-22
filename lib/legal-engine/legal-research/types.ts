@@ -111,7 +111,7 @@ export interface NormalizedResearchQuery {
 export interface AuthorityCandidate {
   id: string;
   requestId: string;
-  provider?: 'SCJN' | 'FEDERAL_LEGISLATION' | 'DOF' | 'STATE_OFFICIAL' | 'FIXTURE_OFFICIAL';
+  provider?: 'SCJN' | 'FEDERAL_LEGISLATION' | 'DOF' | 'STATE_OFFICIAL' | 'FIXTURE_OFFICIAL' | 'CORPUS_IURIS' | 'LEX_MX' | 'RESEARCH_ROUTER';
   identifier?: string;
   title?: string;
   sourceAuthorityMentionId?: string;

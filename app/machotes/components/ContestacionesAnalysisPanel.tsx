@@ -37,7 +37,7 @@ export function ContestacionesAnalysisPanel({
   const authority = caseAnalysis?.authorities?.[0];
   const summary =
     caseAnalysis?.caseTheory?.legalTheory ||
-    caseAnalysis?.summary ||
+    (caseAnalysis as any)?.summary ||
     'El sistema mostrará aquí una lectura ejecutiva del documento cargado.';
 
   const isCompleted = hasDocument && analysisAvailable;
@@ -57,13 +57,17 @@ export function ContestacionesAnalysisPanel({
   const detectedTags = React.useMemo(() => {
     const tags: Array<{ label: string; tone: 'blue' | 'amber' }> = [];
     if (claims.length > 0) {
-      tags.push({ label: claims[0].slice(0, 30), tone: 'blue' });
+      const firstClaim = claims[0];
+      const claimText = typeof firstClaim === 'string' ? firstClaim : String((firstClaim as any)?.text || (firstClaim as any)?.claim || '');
+      if (claimText) tags.push({ label: claimText.slice(0, 30), tone: 'blue' });
     }
     if (vulnerabilities.length > 0) {
       tags.push({ label: typeof vulnerabilities[0] === 'string' ? vulnerabilities[0].slice(0, 30) : 'Riesgo procesal', tone: 'amber' });
     }
     if (argumentAxes.length > 0) {
-      tags.push({ label: typeof argumentAxes[0] === 'string' ? argumentAxes[0].slice(0, 30) : 'Eje argumentativo', tone: 'blue' });
+      const axis = argumentAxes[0];
+      const axisTitle = typeof axis === 'string' ? axis : (axis?.title || axis?.issue || 'Eje argumentativo');
+      tags.push({ label: axisTitle.slice(0, 30), tone: 'blue' });
     }
     // Fallback standard legal tags if few detected
     if (tags.length < 3) {
@@ -207,13 +211,13 @@ export function ContestacionesAnalysisPanel({
                 </p>
               ) : (
                 claims.map((claim, idx) => (
-                  <div key={claim.id || idx} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                  <div key={(claim as any)?.id || idx} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
                     <div className="flex items-start gap-2.5">
                       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">
                         {idx + 1}
                       </span>
                       <p className="text-sm leading-relaxed text-slate-700">
-                        {claim.text || claim.claim || 'Prestación identificada'}
+                        {typeof claim === 'string' ? claim : ((claim as any)?.text || (claim as any)?.claim || 'Prestación identificada')}
                       </p>
                     </div>
                   </div>

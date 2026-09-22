@@ -6,7 +6,7 @@
  * páginas basada en el mismo renderer PDF que se entrega al usuario.
  */
 
-export type GenerationExtensionMode = 'standard' | 'extended-legal';
+export type GenerationExtensionMode = 'standard' | 'extended-legal' | 'extended';
 
 export interface GenerationExtensionInput {
   generationMode?: GenerationExtensionMode;
@@ -75,7 +75,7 @@ function boundedInteger(value: unknown, fallback: number, min: number, max: numb
 export function resolveGenerationExtensionContract(
   input?: GenerationExtensionInput | null,
 ): GenerationExtensionContract {
-  const mode = input?.generationMode === 'extended-legal' ? 'extended-legal' : 'standard';
+  const mode = (input?.generationMode === 'extended-legal' || input?.generationMode === 'extended') ? 'extended-legal' : 'standard';
   const defaults = mode === 'extended-legal' ? EXTENDED_DEFAULTS : STANDARD_LIMITS;
   const targetPages = mode === 'extended-legal'
     ? boundedInteger(input?.targetPages, defaults.targetPages, 1, 200)
@@ -226,5 +226,49 @@ export function buildContinuationPrompt(input: ContinuationPromptInput): string 
     'NO REPITAS párrafos, encabezados, premisas ni citas ya presentes. No inventes hechos, fuentes ni autoridades.',
     'Si ya no existe un punto pendiente que pueda desarrollarse con el expediente, responde únicamente [SECCIÓN_COMPLETA].',
   ].join('\n');
+}
+
+export function deduplicateNewContent(
+  existingText: string,
+  incomingText: string,
+): { cleanText: string; removedParagraphs: number; isDuplicate: boolean } {
+  if (!incomingText || !incomingText.trim()) {
+    return { cleanText: '', removedParagraphs: 0, isDuplicate: false };
+  }
+  const existingParagraphs = existingText
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const incomingParagraphs = incomingText
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  let removedParagraphs = 0;
+  const cleanParagraphs: string[] = [];
+
+  for (const paragraph of incomingParagraphs) {
+    const normParagraph = normalizeParagraph(paragraph);
+    if (!normParagraph) continue;
+
+    const isDup = existingParagraphs.some((existing) => {
+      const normExisting = normalizeParagraph(existing);
+      if (normExisting === normParagraph) return true;
+      const sim = paragraphSimilarity(existing, paragraph);
+      return sim >= 0.75;
+    });
+
+    if (isDup) {
+      removedParagraphs += 1;
+    } else {
+      cleanParagraphs.push(paragraph);
+    }
+  }
+
+  const cleanText = cleanParagraphs.join('\n\n');
+  const isDuplicate = removedParagraphs > 0 && cleanParagraphs.length === 0;
+
+  return { cleanText, removedParagraphs, isDuplicate };
 }
 

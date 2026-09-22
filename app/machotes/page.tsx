@@ -1570,13 +1570,31 @@ export default function MachotesPage() {
     const catalogMatter = catalogEntry && catalogEntry.kind === 'DOCUMENT_TYPE'
       ? (catalogEntry.areaId.charAt(0).toUpperCase() + catalogEntry.areaId.slice(1))
       : undefined;
-    const requestedMatter = catalogMatter || (/laboral/i.test(userInstructions) ? 'Laboral' : /mercantil/i.test(userInstructions) ? 'Mercantil' : /civil/i.test(userInstructions) ? 'Civil' : 'General');
-    const requestedDocumentType = selectedDocumentTypeFromUi || (/laboral/i.test(userInstructions)
-      ? 'contestacion_demanda_laboral'
-      : 'contestacion_demanda_civil');
-    const requestedDocumentLabel = documentTypeLabelFromUi || (/laboral/i.test(userInstructions)
-      ? 'Contestación de Demanda Laboral'
-      : /mercantil/i.test(userInstructions) ? 'Contestación de Demanda Mercantil' : 'Contestación de Demanda Civil');
+    const requestedMatter = catalogMatter || (/laboral/i.test(userInstructions) ? 'Laboral' : /mercantil/i.test(userInstructions) ? 'Mercantil' : /amparo/i.test(userInstructions) ? 'Amparo' : /civil/i.test(userInstructions) ? 'Civil' : (selectedFicha?.materia || 'General'));
+    const inferredFromContext =
+      (/laboral/i.test(userInstructions) ? 'contestacion_demanda_laboral' :
+       /mercantil/i.test(userInstructions) ? 'contestacion_demanda_mercantil' :
+       /amparo/i.test(userInstructions) ? 'recurso_revision_amparo_directo' :
+       /familiar/i.test(userInstructions) ? 'contestacion_divorcio' :
+       /agrario/i.test(userInstructions) ? 'contestacion_demanda_agraria' :
+       /fiscal/i.test(userInstructions) ? 'contestacion_nulidad_fiscal' :
+       /administrativ/i.test(userInstructions) ? 'contestacion_nulidad_administrativa' :
+       undefined)
+      || (selectedCaseDoc?.documentType && selectedCaseDoc.documentType !== 'DOCUMENTO_JURIDICO_NO_CLASIFICADO' ? selectedCaseDoc.documentType : undefined)
+      || (selectedFicha?.materia ? (
+          /laboral/i.test(selectedFicha.materia) ? 'contestacion_demanda_laboral' :
+          /mercantil/i.test(selectedFicha.materia) ? 'contestacion_demanda_mercantil' :
+          /amparo/i.test(selectedFicha.materia) ? 'recurso_revision_amparo_directo' :
+          /familiar/i.test(selectedFicha.materia) ? 'contestacion_divorcio' :
+          /agrario/i.test(selectedFicha.materia) ? 'contestacion_demanda_agraria' :
+          /fiscal/i.test(selectedFicha.materia) ? 'contestacion_nulidad_fiscal' :
+          /administrativ/i.test(selectedFicha.materia) ? 'contestacion_nulidad_administrativa' :
+          undefined
+        ) : undefined);
+
+    const requestedDocumentType = selectedDocumentTypeFromUi || inferredFromContext;
+    const requestedDocumentLabel = documentTypeLabelFromUi
+      || (requestedDocumentType ? (catalogEntry?.label || requestedDocumentType.replace(/_/g, ' ')) : undefined);
 
     const effectiveGenMode = generationModeFromUi || generationMode;
     const effectiveRefId = effectiveGenMode === 'automatic'

@@ -300,6 +300,16 @@ function recordTrace(
 ): void {
   const paragraphs = traceParagraphs(model);
   const styleCounts: Record<string, number> = {};
+  if (!trace.assemblyMetadata) {
+    (trace as any).assemblyMetadata = {
+      plannedSectionIds: [],
+      generatedSectionIds: [],
+      renderedSectionIds: [],
+      paragraphs: [],
+    };
+  } else if (!Array.isArray(trace.assemblyMetadata.paragraphs)) {
+    trace.assemblyMetadata.paragraphs = [];
+  }
   paragraphs.forEach((paragraph, paragraphIndex) => {
     styleCounts[paragraph.role] = (styleCounts[paragraph.role] || 0) + 1;
     trace.assemblyMetadata.paragraphs.push({

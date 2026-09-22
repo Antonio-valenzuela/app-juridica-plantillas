@@ -479,17 +479,17 @@ export function runQualityGateCheck(
 
   const factsSectionText = doc.sections.find((candidate) => /hechos/.test(normalizedText(candidate.title)))?.content.map((block) => block.text).join('\n') || '';
   for (const fact of isDemandContestacion ? facts : []) {
-    const marker = `AL HECHO ${fact.number}`;
-    const first = factsSectionText.indexOf(marker);
-    const second = first >= 0 ? factsSectionText.indexOf(marker, first + marker.length) : -1;
-    if (second >= 0) {
+    const markerRegex = new RegExp(`\\bAL\\s+HECHO\\s+${fact.number}(?![0-9])`, 'gi');
+    const matches = Array.from(factsSectionText.matchAll(markerRegex));
+    if (matches.length > 1) {
       duplicateFactResponseCount++;
       criticalErrors.push({ checkId: 'DUPLICATE_FACT_RESPONSE', message: `El hecho ${fact.number} tiene más de una respuesta en la salida.` });
     }
     const canonical = fact.lawyerPosition || (fact.position === 'IGNORE_PERSONAL_KNOWLEDGE' ? 'NOT_KNOWN' : fact.position === 'REQUIRE_LAWYER_INPUT' || fact.position === 'UNDETERMINED' ? 'UNDEFINED' : fact.position);
-    const start = first >= 0 ? first : -1;
-    const next = start >= 0 ? factsSectionText.slice(start + marker.length).search(/\n\s*AL HECHO\s+/i) : -1;
-    const block = start >= 0 ? factsSectionText.slice(start, next >= 0 ? start + marker.length + next : undefined) : '';
+    const firstMatch = matches[0];
+    const start = firstMatch ? firstMatch.index! : -1;
+    const next = start >= 0 ? factsSectionText.slice(start + firstMatch![0].length).search(/\n\s*AL HECHO\s+/i) : -1;
+    const block = start >= 0 ? factsSectionText.slice(start, next >= 0 ? start + firstMatch![0].length + next : undefined) : '';
     if (canonical === 'UNDEFINED' && /\b(?:se admite|se niega|se rechaza|es falso|falsa|improcedente|no procede)\b/i.test(block)) {
       contradictoryPositionCount++;
       criticalErrors.push({ checkId: 'CONTRADICTORY_POSITION', message: `El hecho ${fact.number} quedó sin postura, pero contiene una conclusión categórica.` });
@@ -507,8 +507,13 @@ export function runQualityGateCheck(
   // Control mínimo y auditable de hechos concretos: una fecha que aparece en
   // la salida debe existir en el corpus autorizado o en la entrada del abogado.
   const authorizedFacts = normalizedText(`${sourceText} ${doc.intake?.request || ''} ${facts.map((fact) => fact.sourceFact || fact.text).join(' ')}`);
-  const generatedDates = allText.match(/\b(?:\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})\b/gi) || [];
-  const unsupportedDate = generatedDates.find((date) => !authorizedFacts.includes(normalizedText(date)));
+  const normAuthorized = authorizedFacts.replace(/\bdel\b/g, 'de');
+  const generatedDates = allText.match(/\b(?:\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}\s+(?:de|del)\s+[a-záéíóúñ]+\s+(?:de|del)\s+\d{4})\b/gi) || [];
+  const unsupportedDate = generatedDates.find((date) => {
+    const norm = normalizedText(date).replace(/\bdel\b/g, 'de');
+    const unpadded = normalizedText(date.replace(/\b0(\d)/g, '$1')).replace(/\bdel\b/g, 'de');
+    return !normAuthorized.includes(norm) && !normAuthorized.includes(unpadded);
+  });
   if (unsupportedDate) {
     unsupportedFactualClaimCount++;
     criticalErrors.push({ checkId: 'UNSUPPORTED_FACTUAL_CLAIM', message: `La salida introduce la fecha no respaldada "${unsupportedDate}".` });

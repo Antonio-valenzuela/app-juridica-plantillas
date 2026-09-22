@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+
+<html lang="es"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{colors:{"surface-container-highest":"#e4e2e4","on-tertiary-fixed-variant":"#574500","on-tertiary-fixed":"#241a00","on-primary":"#ffffff","tertiary-container":"#cca72f","on-secondary-fixed":"#40000b","on-primary-fixed":"#40000c","error-container":"#ffdad6","secondary-fixed":"#ffdada","on-error-container":"#93000a","primary-fixed-dim":"#ffb3b5","tertiary-fixed":"#ffe088","secondary-fixed-dim":"#ffb3b5","on-background":"#1b1b1d","on-primary-container":"#ff7883","on-primary-fixed-variant":"#8c142a","inverse-primary":"#ffb3b5","surface-bright":"#fcf8fb","tertiary":"#735c00","primary-container":"#78001e","error":"#ba1a1a","surface":"#fcf8fb","surface-container-high":"#eae7ea","background":"#fcf8fb","on-error":"#ffffff","on-secondary-container":"#680018","secondary":"#af2c3e","outline":"#8b7171","tertiary-fixed-dim":"#e9c349","inverse-surface":"#303032","surface-tint":"#ad2f40","primary-fixed":"#ffdada","inverse-on-surface":"#f3f0f2","surface-container-low":"#f6f3f5","surface-variant":"#e4e2e4","secondary-container":"#fd6673","on-secondary":"#ffffff","surface-dim":"#dcd9dc","surface-container":"#f0edef","primary":"#4f0011","outline-variant":"#dfbfbf","on-surface-variant":"#584142","on-tertiary-container":"#4e3d00","on-tertiary":"#ffffff","surface-container-lowest":"#ffffff","on-surface":"#1b1b1d","on-secondary-fixed-variant":"#8e1029"},borderRadius:{DEFAULT:"0.125rem",lg:"0.25rem",xl:"0.5rem",full:"0.75rem"},spacing:{"margin-mobile":"0.75rem","space-xl":"2rem",gutter:"1rem","space-sm":"0.5rem","gutter-compact":"0.5rem","space-xxs":"0.125rem",margin:"1.5rem","space-md":"0.75rem","space-xs":"0.25rem","space-lg":"1.25rem"},fontFamily:{"headline-lg":["\"Source Serif 4\""],"code-md":["JetBrains Mono"],"label-md":["Inter"],"display-lg":["\"Source Serif 4\""],"label-sm":["Inter"],"headline-sm":["\"Source Serif 4\""],"headline-md":["\"Source Serif 4\""],"body-sm":["Inter"],"display-lg-mobile":["\"Source Serif 4\""],"label-lg":["Inter"],"body-md":["Inter"],"headline-lg-mobile":["\"Source Serif 4\""],"code-sm":["JetBrains Mono"],"body-lg":["\"Source Serif 4\""]},fontSize:{"headline-lg":["28px",{lineHeight:"36px",letterSpacing:"-0.01em",fontWeight:"600"}],"code-md":["12px",{lineHeight:"16px",letterSpacing:"-0.01em",fontWeight:"500"}],"label-md":["12px",{lineHeight:"16px",fontWeight:"500"}],"display-lg":["40px",{lineHeight:"48px",letterSpacing:"-0.02em",fontWeight:"600"}],"label-sm":["11px",{lineHeight:"14px",letterSpacing:"0.02em",fontWeight:"600"}],"headline-sm":["16px",{lineHeight:"24px",fontWeight:"600"}],"headline-md":["20px",{lineHeight:"28px",fontWeight:"600"}],"body-sm":["12px",{lineHeight:"16px",fontWeight:"400"}],"display-lg-mobile":["30px",{lineHeight:"38px",letterSpacing:"-0.015em",fontWeight:"600"}],"label-lg":["14px",{lineHeight:"20px",fontWeight:"500"}],"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-lg-mobile":["22px",{lineHeight:"30px",letterSpacing:"-0.01em",fontWeight:"600"}],"code-sm":["10px",{lineHeight:"14px",letterSpacing:"0.02em",fontWeight:"500"}],"body-lg":["17px",{lineHeight:"28px",fontWeight:"400"}]}}}};</script><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Source+Serif+4:wght@100..900&display=swap" rel="stylesheet"/></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><aside class="fixed left-0 top-0 h-full w-64 bg-surface-container-low z-50 flex flex-col shadow-[0_1px_8px_rgba(0,0,0,0.04)]"><div class="h-16 px-gutter flex items-center gap-space-sm bg-surface-container-low"><span class="material-symbols-outlined text-primary text-[20px]">balance</span><span class="font-headline-sm text-headline-sm text-primary tracking-tight">Dossier Jurídico</span></div><div class="px-gutter py-space-sm bg-surface-container-lowest mx-space-sm rounded-lg shadow-[0_1px_3px_rgba(120,0,30,0.04)] mb-space-md"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Actuario Virtual</span><span class="h-2 w-2 rounded-full bg-emerald-600 animate-pulse"></span></div><p class="font-code-sm text-code-sm text-on-surface mt-space-xxs truncate">CJF Portal Notificaciones: OK</p></div><div class="px-space-md mb-space-xs"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider px-space-sm">Módulos Procesales</span></div><nav class="flex-1 px-space-sm space-y-space-xxs" data-active-classes="bg-primary-container text-on-primary font-label-lg rounded-lg"><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="motor-universal" href="#"><span class="material-symbols-outlined text-[18px]">psychology</span><span class="font-label-lg text-label-lg">Motor Universal</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="escritos-iniciales" href="#"><span class="material-symbols-outlined text-[18px]">post_add</span><span class="font-label-lg text-label-lg">Escritos Iniciales</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="contestaciones" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span class="font-label-lg text-label-lg">Contestaciones</span></a><a aria-current="page" class="flex items-center gap-space-sm px-space-md py-space-sm transition-colors bg-primary-container text-on-primary font-label-lg rounded-lg" data-path="mis-plantillas" href="#"><span class="material-symbols-outlined text-[18px]">library_books</span><span class="font-label-lg text-label-lg">Mis Plantillas</span></a><div class="pt-space-md pb-space-xs"><span class="font-label-sm text-label-sm text-outline uppercase tracking-wider px-space-sm">Herramientas Judiciales</span></div><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="jurisprudencia-scjn" href="#"><span class="material-symbols-outlined text-[18px]">gavel</span><span class="font-label-lg text-label-lg">Jurisprudencia SCJN</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="calculadora-terminos" href="#"><span class="material-symbols-outlined text-[18px]">calendar_clock</span><span class="font-label-lg text-label-lg">Cómputo de Términos</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="dof-notificador" href="#"><span class="material-symbols-outlined text-[18px]">newspaper</span><span class="font-label-lg text-label-lg">Alertas DOF y Boletín</span></a></nav><div class="p-space-md bg-surface-container-high m-space-sm rounded-lg"><div class="flex items-center justify-between mb-space-xs"><span class="font-label-sm text-label-sm text-on-surface">Firma Electrónica</span><span class="font-code-sm text-code-sm text-tertiary font-bold">FIREL</span></div><p class="font-body-sm text-body-sm text-on-surface-variant">Certificado vigente hasta Noviembre 2026</p></div></aside><div class="pl-64"><header class="fixed top-0 left-64 right-0 h-16 bg-surface/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 flex items-center justify-between px-gutter"><div class="flex items-center gap-space-md"><img alt="LexPlantillas Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1XvcXfqLrdiK46Ss3raZQ9QyUOlxCxYic53GJW0iSGY6Y4LKiSDIAvLQipmXbtf0kUI7fCeMY-fGZXm3k-sChs_3IuAKWsnkhjz4SvV4giMlIxAYyir9l6riGXKrcpjGXGy_Hxds99HYAqMFUbk-b08bW3Wo6EOUjg-qM2cu27f2NiuYkBOLbY5MV7sOGJm9E0SW-urkJYOZ6_3VT4R2elw6Zmqpym4ItCiAjA9_BldygW1NMFcvl9Cv8vO"/><span class="font-headline-sm text-headline-sm text-primary tracking-tight hidden lg:inline-block">LexPlantillas</span><span class="bg-emerald-100 text-emerald-800 px-space-xs py-space-xxs rounded font-code-sm text-code-sm font-semibold">v1.0 RC1 Producción</span><span class="bg-tertiary-fixed text-on-tertiary-fixed px-space-xs py-space-xxs rounded font-code-sm text-code-sm flex items-center gap-space-xxs"><span class="material-symbols-outlined text-[14px]">verified</span>FIREL Cotejada</span></div><nav class="hidden xl:flex items-center gap-space-xs" data-active-classes="bg-primary-container text-on-primary font-label-md rounded-lg"><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="motor-universal" href="#">Motor Universal</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="escritos-iniciales" href="#">Escritos Iniciales</a><a class="px-space-md py-space-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors" data-path="contestaciones" href="#">Contestaciones</a><a aria-current="page" class="px-space-md py-space-xs transition-colors bg-primary-container text-on-primary font-label-md rounded-lg" data-path="mis-plantillas" href="#">Mis Plantillas</a></nav><div class="flex items-center gap-space-md"><div class="hidden md:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container rounded-lg"><span class="h-2 w-2 rounded-full bg-emerald-600"></span><span class="font-code-sm text-code-sm text-on-surface">NVIDIA Build Activo</span></div><div class="hidden 2xl:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-low rounded-lg"><span class="material-symbols-outlined text-[16px] text-primary">folder_open</span><span class="font-code-sm text-code-sm text-on-surface font-medium truncate max-w-[210px]">EXP-800/2026 - Juzgado 3° Civil CDMX</span></div><button class="flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-highest hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface rounded-lg transition-colors"><span class="material-symbols-outlined text-[16px]">search</span><kbd class="font-code-sm text-code-sm bg-surface-container-lowest px-space-xxs rounded text-on-surface">⌘K</kbd></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><div class="fixed top-16 left-64 right-0 h-10 bg-surface-container-low/95 backdrop-blur-sm z-30 flex items-center justify-between px-gutter shadow-[0_1px_3px_rgba(120,0,30,0.02)]"><div class="flex items-center gap-space-xs font-label-sm text-label-sm text-on-surface-variant"><span class="hover:text-primary cursor-pointer transition-colors">LexPlantillas</span><span class="material-symbols-outlined text-[14px]">chevron_right</span><span class="hover:text-primary cursor-pointer transition-colors">Litigio Federal</span><span class="material-symbols-outlined text-[14px]">chevron_right</span><span class="text-on-surface font-semibold">Redacción Jurídica Activa</span></div><div class="flex items-center gap-space-sm"><span class="bg-surface-container-highest text-on-surface-variant px-space-sm py-space-xxs rounded-full font-code-sm text-code-sm uppercase tracking-wide">Materia Civil Federal / Ordinario Mercantil</span><span class="font-code-sm text-code-sm text-secondary font-semibold">Término: 3 Días Hábiles</span></div></div><main class="relative pt-28 bg-surface w-full min-h-screen px-gutter pb-space-xl"><div class="flex flex-col w-full">
+<!-- Top Editor Toolbar Sticky Deck -->
+<header class="w-full bg-surface-container-lowest shadow-md rounded-xl p-space-md mb-space-lg">
+<div class="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-space-md">
+<!-- Title & Persistence Badge -->
+<div class="flex flex-col sm:flex-row sm:items-center gap-space-sm">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-primary text-[22px]">description</span>
+<span class="font-headline-sm text-headline-sm text-on-surface font-semibold tracking-tight">DEMANDA_DE_AMPARO_INDIRECTO_EXP_800_2026.docx</span>
+</div>
+<div class="flex items-center gap-space-xxs bg-emerald-50 text-emerald-800 px-space-sm py-space-xxs rounded-full">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+<span class="font-code-sm text-code-sm font-medium">✓ Guardado en Neon PostgreSQL (hace 2 min)</span>
+</div>
+</div>
+<!-- Quick Export Actions -->
+<div class="flex items-center gap-space-xs w-full sm:w-auto flex-wrap">
+<button class="flex items-center gap-space-xs bg-surface-container-high hover:bg-surface-container-highest text-on-surface px-space-md py-space-xs rounded-lg transition-colors shadow-sm" id="btnExportDocx">
+<span class="material-symbols-outlined text-primary text-[18px]">article</span>
+<span class="font-label-md text-label-md font-semibold">Exportar DOCX (PK ZIP Nativo)</span>
+</button>
+<button class="flex items-center gap-space-xs bg-primary hover:bg-primary-container text-on-primary px-space-md py-space-xs rounded-lg transition-colors shadow-md" id="btnExportPdf">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+<span class="font-label-md text-label-md font-medium">Exportar PDF 1.4 (WinAnsi CP1252)</span>
+<span class="bg-tertiary-container/30 text-tertiary-fixed px-space-xxs rounded font-code-sm text-code-sm flex items-center">
+<span class="material-symbols-outlined text-[13px]">verified</span>
+</span>
+</button>
+<button class="p-space-xs bg-surface-container hover:bg-surface-container-high text-on-surface-variant rounded-lg transition-colors" title="Historial de Versiones Git-Jurídico">
+<span class="material-symbols-outlined text-[18px]">history</span>
+</button>
+</div>
+</div>
+<!-- Forensic Formatting Control Strip -->
+<div class="mt-space-md pt-space-sm flex flex-wrap items-center justify-between gap-space-sm bg-surface-container-low p-space-sm rounded-lg">
+<div class="flex flex-wrap items-center gap-space-md">
+<!-- Preset Dropdown -->
+<div class="flex items-center gap-space-xs">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Cierre:</span>
+<select class="bg-surface-container-lowest text-on-surface font-label-sm text-label-sm px-space-xs py-space-xxs rounded shadow-sm focus:outline-none">
+<option selected="">Fórmula de Cierre: Formal Tradicional ("PROTESTO LO NECESARIO")</option>
+<option>Fórmula Simplificada (Justicia Cotidiana SCJN)</option>
+<option>Fórmula Notarial con Atestación de Instrumento</option>
+</select>
+</div>
+<!-- Margins -->
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[16px] text-outline">format_align_left</span>
+<span class="font-code-sm text-code-sm text-on-surface">Margen Izq: <strong class="text-primary font-semibold">3.0 cm</strong> (Cosedura Expediente)</span>
+</div>
+<!-- Line Height -->
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[16px] text-outline">format_line_spacing</span>
+<span class="font-code-sm text-code-sm text-on-surface">Interlineado: <strong class="text-on-surface font-semibold">1.5 pt</strong></span>
+</div>
+<!-- Numbering Scheme -->
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[16px] text-outline">format_list_numbered</span>
+<span class="font-code-sm text-code-sm text-on-surface">Estructura: <span class="bg-surface-container-highest px-space-xs py-0.5 rounded text-on-surface-variant font-medium">Numeración Romana (I, II, III)</span></span>
+</div>
+</div>
+<!-- Live Page Metrics -->
+<div class="flex items-center gap-space-sm">
+<span class="font-code-sm text-code-sm text-on-surface-variant">Pág. 1 de 4 (Carta Judicial)</span>
+<div class="w-16 bg-surface-container-highest h-1.5 rounded-full overflow-hidden">
+<div class="bg-primary h-full w-1/4"></div>
+</div>
+</div>
+</div>
+</header>
+<!-- Workspace Grid: Sidebar Navigation & Central Courtroom Sheet -->
+<div class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg relative">
+<!-- Left Forensic Index & Validation Column (3 Cols) -->
+<aside class="xl:col-span-3 space-y-space-md">
+<!-- Document Tree Outline -->
+<div class="bg-surface-container-lowest rounded-xl p-space-md shadow-md">
+<div class="flex items-center justify-between mb-space-sm">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider font-semibold">Sumario Procesal</span>
+<span class="bg-secondary-fixed text-on-secondary-fixed font-code-sm text-code-sm px-space-xs py-space-xxs rounded">Art. 108 LA</span>
+</div>
+<nav class="space-y-space-xxs">
+<a class="flex items-center justify-between p-space-xs rounded bg-surface-container-low text-primary font-label-sm text-label-sm" href="#rubro">
+<span class="flex items-center gap-space-xs"><span class="material-symbols-outlined text-[14px]">bookmark</span>I. Rubro & Autoridad</span>
+<span class="font-code-sm text-code-sm text-outline">Pág. 1</span>
+</a>
+<a class="flex items-center justify-between p-space-xs rounded hover:bg-surface-container text-on-surface-variant font-label-sm text-label-sm transition-colors" href="#proemio">
+<span class="flex items-center gap-space-xs"><span class="material-symbols-outlined text-[14px]">person</span>II. Proemio & Personalidad</span>
+<span class="font-code-sm text-code-sm text-outline">Pág. 1</span>
+</a>
+<a class="flex items-center justify-between p-space-xs rounded bg-primary/5 text-primary font-label-sm text-label-sm font-semibold" href="#hechos">
+<span class="flex items-center gap-space-xs"><span class="material-symbols-outlined text-[14px]">edit_note</span>III. Hechos Bajo Protesta</span>
+<span class="h-2 w-2 rounded-full bg-secondary"></span>
+</a>
+<a class="flex items-center justify-between p-space-xs rounded hover:bg-surface-container text-on-surface-variant font-label-sm text-label-sm transition-colors" href="#conceptos">
+<span class="flex items-center gap-space-xs"><span class="material-symbols-outlined text-[14px]">gavel</span>IV. Conceptos de Violación</span>
+<span class="font-code-sm text-code-sm text-outline">Pág. 2</span>
+</a>
+<a class="flex items-center justify-between p-space-xs rounded hover:bg-surface-container text-on-surface-variant font-label-sm text-label-sm transition-colors" href="#puntos-petitorios">
+<span class="flex items-center gap-space-xs"><span class="material-symbols-outlined text-[14px]">fact_check</span>V. Puntos Petitorios</span>
+<span class="font-code-sm text-code-sm text-outline">Pág. 4</span>
+</a>
+</nav>
+</div>
+<!-- Judicial Compliance Widget -->
+<div class="bg-surface-container-lowest rounded-xl p-space-md shadow-md">
+<div class="flex items-center gap-space-xs mb-space-xs">
+<span class="material-symbols-outlined text-tertiary text-[18px]">verified_user</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">Validación de Admisión</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-space-sm">Verificación algorítmica de requisitos de procedencia (Ley de Amparo Vigente).</p>
+<div class="space-y-space-xs">
+<div class="p-space-xs bg-emerald-50 rounded flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-emerald-950">Acreditación Personalidad</span>
+<span class="material-symbols-outlined text-emerald-700 text-[16px]">check</span>
+</div>
+<div class="p-space-xs bg-emerald-50 rounded flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-emerald-950">Fecha de Notificación Oportuna</span>
+<span class="font-code-sm text-code-sm text-emerald-800">Día 4 de 15</span>
+</div>
+<div class="p-space-xs bg-amber-50 rounded flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-amber-950">Juego de Copias de Traslado</span>
+<span class="font-code-sm text-code-sm text-amber-800">Digital FIREL</span>
+</div>
+</div>
+</div>
+<!-- Legal Context Quote Badge -->
+<div class="bg-surface-container-high rounded-xl p-space-md text-on-surface">
+<span class="font-code-sm text-code-sm text-primary uppercase font-bold tracking-wider">Cotejo Criterio SCJN</span>
+<p class="font-headline-sm text-headline-sm mt-space-xxs text-primary italic">"El principio de definitividad en amparo indirecto civil."</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-xxs">Registro Digital 2024119. Pleno Regional en Materia Civil de la Región Centro-Sur.</p>
+</div>
+</aside>
+<!-- Central Paper Canvas (9 Cols) -->
+<main class="xl:col-span-9 flex flex-col items-center">
+<!-- Simulated Judicial Sheet (Standard US Letter 8.5 x 11 in ratio) -->
+<article class="w-full max-w-[850px] bg-surface-container-lowest text-on-surface shadow-xl rounded-sm p-8 sm:p-14 transition-all relative">
+<!-- Physical Page Binding Margin Marker Indicator (Left 3.0cm) -->
+<div class="absolute left-0 top-0 bottom-0 w-8 sm:w-10 bg-surface-container-low/40 pointer-events-none flex flex-col items-center justify-between py-6">
+<span class="font-code-sm text-code-sm text-outline-variant transform -rotate-90 origin-center whitespace-nowrap">MARGEN COSEDURA 3.0 CM</span>
+<span class="material-symbols-outlined text-outline-variant text-[16px]">hardware</span>
+<span class="font-code-sm text-code-sm text-outline-variant transform -rotate-90 origin-center whitespace-nowrap">EXP-800/2026</span>
+</div>
+<div class="pl-4 sm:pl-8">
+<!-- Rubro Header (Right-Aligned Classical Mexican Judicial Structure) -->
+<section class="flex justify-end mb-space-lg" id="rubro">
+<div class="max-w-md bg-surface-container-low p-space-md rounded-lg shadow-sm">
+<div class="space-y-space-xxs font-label-sm text-label-sm leading-relaxed">
+<div>
+<span class="text-outline uppercase font-semibold">QUEJOSO:</span>
+<span class="font-semibold text-primary">RODRIGO FUENTES ALBA</span>
+</div>
+<div>
+<span class="text-outline uppercase font-semibold">TERCERO INTERESADO:</span>
+<span class="font-semibold text-on-surface">COMERCIALIZADORA DEL BAJÍO, S.A. DE C.V.</span>
+</div>
+<div>
+<span class="text-outline uppercase font-semibold">AUTORIDAD RESPONSABLE:</span>
+<span class="text-on-surface">JUEZ TERCERO DE LO CIVIL DE LA CDMX</span>
+</div>
+<div class="pt-space-xxs">
+<span class="text-outline uppercase font-semibold">ASUNTO:</span>
+<span class="font-semibold text-secondary">SE INTERPONE DEMANDA DE AMPARO INDIRECTO</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Autoridad Header -->
+<section class="mb-space-lg">
+<h2 class="font-headline-sm text-headline-sm text-primary tracking-wide uppercase font-bold">
+              C. JUEZ DE DISTRITO EN MATERIA CIVIL EN EL PRIMER CIRCUITO EN TURNO.
+            </h2>
+<p class="font-body-sm text-body-sm text-outline mt-space-xxs uppercase tracking-wider">
+              PRESENTE.
+            </p>
+</section>
+<!-- Proemio Block -->
+<section class="mb-space-lg" id="proemio">
+<p class="font-body-lg text-body-lg text-justify text-on-surface leading-relaxed indent-8">
+<strong class="font-semibold text-primary">RODRIGO FUENTES ALBA</strong>, promoviendo por mi propio derecho, señalando como domicilio para oír y recibir toda clase de notificaciones el ubicado en Calle Paseo de la Reforma número 450, Piso 14, Colonia Juárez, Alcaldía Cuauhtémoc, Código Postal 06600, en esta Ciudad de México, y autorizando en los más amplios términos del artículo 12 de la Ley de Amparo al Licenciado en Derecho <span class="font-semibold text-on-surface">LIC. ALEJANDRO MONROY SOLÍS</span>, con cédula profesional federal número 4920412 debidamente registrada ante el Sistema Computarizado del Consejo de la Judicatura Federal, ante Usted, con el debido respeto y solemnidad comparezco para exponer:
+            </p>
+<p class="font-body-lg text-body-lg text-justify text-on-surface leading-relaxed indent-8 mt-space-sm">
+              Que por medio del presente escrito, y con fundamento en lo preceptuado en los artículos 103, fracción I, y 107, fracción VII de la Constitución Política de los Estados Unidos Mexicanos; 1°, 107, 108 y demás relativos y aplicables de la Ley de Amparo, vengo a solicitar el <strong>AMPARO Y PROTECCIÓN DE LA JUSTICIA FEDERAL</strong> en contra de los actos y autoridades que a continuación se precisan.
+            </p>
+</section>
+<!-- Hechos Block (Manually Editable with Subtle Border and Badge) -->
+<section class="mb-space-lg relative group" id="hechos">
+<div class="flex items-center justify-between mb-space-xs">
+<h3 class="font-headline-sm text-headline-sm text-primary uppercase font-bold">
+                III. ANTECEDENTES DEL ACTO RECLAMADO (BAJO PROTESTA DE DECIR VERDAD)
+              </h3>
+<!-- Badge: isManuallyEdited: true -->
+<span class="inline-flex items-center gap-space-xxs bg-secondary-fixed/50 text-on-secondary-fixed font-code-sm text-code-sm px-space-xs py-space-xxs rounded-full">
+<span class="h-1.5 w-1.5 rounded-full bg-secondary animate-pulse"></span>
+                Editado manualmente por Abogado
+              </span>
+</div>
+<!-- Editable Text Container -->
+<div class="bg-surface-container-lowest p-space-md rounded-lg shadow-sm space-y-space-sm hover:shadow-md transition-shadow cursor-text" contenteditable="true">
+<p class="font-body-lg text-body-lg text-justify text-on-surface leading-relaxed">
+<strong>PRIMERO.—</strong> Con fecha 12 de enero de 2026, la empresa tercero interesada Comercializadora del Bajío, S.A. de C.V. radicó juicio ejecutivo mercantil en contra del suscrito, radicado bajo el toca 800/2026 ante el Juzgado Tercero de lo Civil de la Ciudad de México.
+              </p>
+<p class="font-body-lg text-body-lg text-justify text-on-surface leading-relaxed">
+<strong>SEGUNDO.—</strong> Sin mediar diligencia de emplazamiento ajustada a las formalidades esenciales del procedimiento consagradas en el Código de Comercio, el actuario adscrito asentó una supuesta cédula de notificación con un tercero no facultado, omitiendo requerir legalmente el pago previo o fijar citatorio reglamentario en términos del artículo 1393 de la legislación mercantil.
+              </p>
+<p class="font-body-lg text-body-lg text-justify text-on-surface leading-relaxed">
+<strong>TERCERO.—</strong> El pasado 19 de febrero de 2026, se ejecutó de forma intempestiva e ilegal la traba de embargo sobre las cuentas bancarias de nómina del suscrito radicadas en BBVA Bancomer Institución de Banca Múltiple, causando un menoscabo patrimonial irreversible de subsistencia.
+              </p>
+</div>
+<div class="mt-space-xxs flex justify-between items-center text-outline font-code-sm text-code-sm">
+<span>Clic para editar texto procesal • Se guardará automáticamente</span>
+<span>184 Palabras • 3 Párrafos</span>
+</div>
+</section>
+<!-- Conceptos de Violación Block (Art 14 y 16 Constitucionales) -->
+<section class="mb-space-lg" id="conceptos">
+<h3 class="font-headline-sm text-headline-sm text-primary uppercase font-bold mb-space-sm">
+              IV. CONCEPTOS DE VIOLACIÓN
+            </h3>
+<div class="bg-surface-container-low p-space-md rounded-lg shadow-sm mb-space-md">
+<div class="flex items-center gap-space-xs text-primary font-headline-sm text-headline-sm font-semibold mb-space-xs">
+<span class="material-symbols-outlined text-[18px]">balance</span>
+<span>PRIMERO. VIOLACIÓN DIRECTA AL ARTÍCULO 14 CONSTITUCIONAL</span>
+</div>
+<p class="font-body-lg text-body-lg text-justify text-on-surface leading-relaxed">
+                El acto reclamado vulnera de manera flagrante el derecho humano al <em>debido proceso legal</em> y a la garantía de audiencia previa. El emplazamiento constituye la actuación procesal de mayor solemnidad y trascendencia en cualquier litigio jurisdiccional; su vicio de origen contamina toda actuación ulterior, privando al suscrito quejoso de la oportunidad fundamental de deducir defensas y aportar probanzas de descargo.
+              </p>
+</div>
+<!-- Concepto Segundo with Interactive Suggestion Anchor -->
+<div class="bg-surface-container-low p-space-md rounded-lg shadow-sm relative">
+<div class="flex items-center justify-between mb-space-xs">
+<div class="flex items-center gap-space-xs text-primary font-headline-sm text-headline-sm font-semibold">
+<span class="material-symbols-outlined text-[18px]">balance</span>
+<span>SEGUNDO. TRANSGRESIÓN FLAGRANTE AL ARTÍCULO 16 CONSTITUCIONAL</span>
+</div>
+<span class="bg-amber-100 text-amber-900 font-code-sm text-code-sm px-space-xs py-space-xxs rounded flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[14px]">bolt</span> Sugerencia IA Disponible
+                </span>
+</div>
+<p class="font-body-lg text-body-lg text-justify text-on-surface leading-relaxed" id="parrafoConceptoSegundo">
+                Asimismo, el auto admisorio y mandamiento de embargo carecen de la debida fundamentación y motivación que exige el primer párrafo del artículo 16 de la Carta Magna. La autoridad responsable omitió fundar con meridiana exactitud el nexo de causalidad entre la supuesta notificación irregular y la orden de congelamiento patrimonial, consumando un acto de molestia arbitrario desprovisto de respaldo probatorio fehaciente.
+              </p>
+</div>
+</section>
+<!-- Traditional Mexican Court Closing Formula (Petitorios) -->
+<section class="pt-space-md" id="puntos-petitorios">
+<p class="font-body-lg text-body-lg text-center font-bold text-primary tracking-wider uppercase mb-space-md">
+              "PROTESTO LO NECESARIO"
+            </p>
+<div class="text-center font-body-sm text-body-sm text-outline">
+              Ciudad de México, a la fecha de su presentación electrónica con FIREL.
+            </div>
+<div class="mt-space-xl flex flex-col items-center justify-center">
+<div class="w-72 border-b border-on-surface/40 mb-space-xs"></div>
+<p class="font-headline-sm text-headline-sm text-on-surface font-semibold">RODRIGO FUENTES ALBA</p>
+<p class="font-code-sm text-code-sm text-outline">Firma Electrónica Avanzada: SHA-256 Validado</p>
+</div>
+</section>
+</div>
+<!-- Page Footer Technical Stamp -->
+<footer class="mt-space-xl pt-space-md flex flex-col sm:flex-row items-center justify-between text-outline font-code-sm text-code-sm bg-surface-container-high/40 p-space-xs rounded">
+<span>Cadena Original: CJF-MX-2026-F89A-0021-998C</span>
+<span class="flex items-center gap-space-xxs">
+<span class="material-symbols-outlined text-[14px] text-tertiary">lock</span> Sellado Criptográfico SCJN
+          </span>
+</footer>
+</article>
+<!-- Page Pagination Control Below Canvas -->
+<div class="mt-space-md flex items-center gap-space-sm bg-surface-container-lowest px-space-md py-space-xs rounded-full shadow-md">
+<button class="p-space-xxs hover:bg-surface-container rounded transition-colors text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">first_page</span>
+</button>
+<button class="p-space-xxs hover:bg-surface-container rounded transition-colors text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<span class="font-code-sm text-code-sm text-on-surface font-semibold px-space-xs">PÁGINA 1 / 4</span>
+<button class="p-space-xxs hover:bg-surface-container rounded transition-colors text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+<button class="p-space-xxs hover:bg-surface-container rounded transition-colors text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">last_page</span>
+</button>
+</div>
+</main>
+</div>
+<!-- Docked Contextual Floating Assistant: Asistente Jurídico Lex -->
+<aside class="fixed bottom-6 right-6 w-96 max-w-[calc(100vw-2rem)] bg-surface-container-lowest rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col transition-all duration-300" id="chatAsistente">
+<!-- Header with Drag/Collapse Handle -->
+<div class="bg-primary text-on-primary px-space-md py-space-sm flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<div class="w-7 h-7 rounded-full bg-tertiary-container text-on-tertiary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-[16px]">psychology</span>
+</div>
+<div>
+<h4 class="font-label-lg text-label-lg font-semibold leading-tight">Asistente Jurídico Lex</h4>
+<span class="font-code-sm text-code-sm text-primary-fixed-dim">Modelo SCJN Judicial 2026</span>
+</div>
+</div>
+<div class="flex items-center gap-space-xxs">
+<button class="text-on-primary/80 hover:text-on-primary p-space-xxs" id="btnToggleChat">
+<span class="material-symbols-outlined text-[18px]">remove</span>
+</button>
+</div>
+</div>
+<!-- Mode Selector Strip -->
+<div class="flex bg-surface-container-low p-space-xxs gap-space-xxs font-label-sm text-label-sm">
+<button class="flex-1 py-1 text-center font-semibold rounded bg-surface-container-lowest text-primary shadow-sm">
+        Sugerir Tesis
+      </button>
+<button class="flex-1 py-1 text-center text-on-surface-variant hover:text-on-surface rounded transition-colors">
+        Doctrina
+      </button>
+<button class="flex-1 py-1 text-center text-on-surface-variant hover:text-on-surface rounded transition-colors">
+        Auditoría 14/16
+      </button>
+</div>
+<!-- Chat Messages Flow Container -->
+<div class="p-space-md space-y-space-sm max-h-80 overflow-y-auto bg-surface-bright" id="chatBody">
+<!-- Assistant Notification Card -->
+<div class="flex items-start gap-space-xs">
+<div class="w-6 h-6 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-[14px]">gavel</span>
+</div>
+<div class="space-y-space-xs flex-1">
+<div class="bg-surface-container p-space-sm rounded-lg text-on-surface">
+<p class="font-body-sm text-body-sm leading-relaxed">
+              He analizado el <strong>Concepto de Violación Segundo</strong> (Art. 16). Se detecta oportunidad de robustecer el alegato de indebida fundamentación del embargo mercantil.
+            </p>
+<!-- Jurisprudence Card Recommendation -->
+<div class="mt-space-xs bg-surface-container-lowest p-space-xs rounded text-on-surface shadow-sm">
+<span class="font-code-sm text-code-sm text-secondary font-bold">Tesis 1a./J. 42/2024 (11a.)</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5 italic">
+                "EMBARGO PRECAUTORIO MERCANTIL. EXIGE MOTIVACIÓN REFORZADA RESPECTO AL PELIGRO EN LA DEMORA Y PROPORCIONALIDAD CUANDO RECAE EN CUENTAS BANCARIAS."
+              </p>
+<span class="font-code-sm text-code-sm text-outline block mt-1">Registro Digital: 2029810 • SCJN Primera Sala</span>
+</div>
+</div>
+<!-- Immediate Action CTA -->
+<button class="w-full flex items-center justify-center gap-space-xs bg-secondary hover:bg-on-secondary-container text-on-secondary py-space-xs px-space-sm rounded font-label-sm text-label-sm font-semibold transition-colors shadow-sm" id="btnAplicarTesis">
+<span class="material-symbols-outlined text-[16px]">add_task</span>
+            Aplicar Tesis a este Bloque
+          </button>
+</div>
+</div>
+</div>
+<!-- Assistant Prompt Input -->
+<div class="p-space-xs bg-surface-container-lowest flex items-center gap-space-xs">
+<input class="flex-1 bg-surface-container-low text-on-surface placeholder:text-outline text-label-sm font-label-sm px-space-sm py-space-xs rounded focus:outline-none focus:bg-surface-container" placeholder="Instruya al asistente (ej. Agregar prueba pericial)..." type="text"/>
+<button class="bg-primary hover:bg-primary-container text-on-primary p-space-xs rounded flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-[16px]">send</span>
+</button>
+</div>
+</aside>
+<!-- Interactive Client-side Script -->
+<script>
+    // Interaction: Applying Suggested Jurisprudence into the Document Canvas
+    const btnAplicarTesis = document.getElementById('btnAplicarTesis');
+    const parrafoConceptoSegundo = document.getElementById('parrafoConceptoSegundo');
+
+    if (btnAplicarTesis && parrafoConceptoSegundo) {
+      btnAplicarTesis.addEventListener('click', () => {
+        const tesisBlock = document.createElement('div');
+        tesisBlock.className = 'mt-space-sm p-space-sm bg-surface-container-lowest rounded shadow-sm text-on-surface transition-all';
+        tesisBlock.innerHTML = `
+          <p class="font-code-sm text-code-sm text-primary font-bold">ROBUSTEZ JURISPRUDENCIAL INCORPORADA:</p>
+          <p class="font-body-md text-body-md italic text-justify text-on-surface mt-space-xxs">
+            "Sirve de sustento obligatorio a lo anterior la Jurisprudencia por reiteración 1a./J. 42/2024 (11a.), emitida por la Primera Sala de la Suprema Corte de Justicia de la Nación, de rubro: <strong>'EMBARGO PRECAUTORIO MERCANTIL. EXIGE MOTIVACIÓN REFORZADA RESPECTO AL PELIGRO EN LA DEMORA Y PROPORCIONALIDAD CUANDO RECAE EN CUENTAS BANCARIAS'</strong>, la cual determina que la afectación indiscriminada de fondos sin justificar idoneidad vulnera de manera irreparable el mínimo vital."
+          </p>
+        `;
+        parrafoConceptoSegundo.parentNode.appendChild(tesisBlock);
+        
+        // Update Button State
+        btnAplicarTesis.disabled = true;
+        btnAplicarTesis.className = 'w-full flex items-center justify-center gap-space-xs bg-emerald-800 text-on-primary py-space-xs px-space-sm rounded font-label-sm text-label-sm opacity-90 cursor-default';
+        btnAplicarTesis.innerHTML = '<span class="material-symbols-outlined text-[16px]">check_circle</span> Tesis Insertada con Éxito';
+      });
+    }
+
+    // Interaction: DOCX & PDF Export Micro-feedback
+    const btnDocx = document.getElementById('btnExportDocx');
+    const btnPdf = document.getElementById('btnExportPdf');
+
+    function triggerNotice(btn, originalHtml, successText) {
+      btn.innerHTML = `<span class="material-symbols-outlined text-[16px] animate-spin">sync</span> Generando ${successText}...`;
+      setTimeout(() => {
+        btn.innerHTML = `<span class="material-symbols-outlined text-[16px]">download_done</span> Descarga Lista`;
+        setTimeout(() => {
+          btn.innerHTML = originalHtml;
+        }, 2500);
+      }, 900);
+    }
+
+    if (btnDocx) {
+      const origDocx = btnDocx.innerHTML;
+      btnDocx.addEventListener('click', () => triggerNotice(btnDocx, origDocx, 'DOCX Nativo'));
+    }
+
+    if (btnPdf) {
+      const origPdf = btnPdf.innerHTML;
+      btnPdf.addEventListener('click', () => triggerNotice(btnPdf, origPdf, 'PDF CP1252'));
+    }
+
+    // Toggle minimize chat
+    const btnToggleChat = document.getElementById('btnToggleChat');
+    const chatBody = document.getElementById('chatBody');
+    let isCollapsed = false;
+
+    if (btnToggleChat && chatBody) {
+      btnToggleChat.addEventListener('click', () => {
+        isCollapsed = !isCollapsed;
+        chatBody.style.display = isCollapsed ? 'none' : 'block';
+        btnToggleChat.innerHTML = `<span class="material-symbols-outlined text-[18px]">${isCollapsed ? 'expand_less' : 'remove'}</span>`;
+      });
+    }
+  </script>
+</div></main></div></body></html>
