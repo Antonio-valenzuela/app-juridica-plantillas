@@ -1,9 +1,8 @@
 'use client';
 
-import React from 'react';
-import Link from 'next/link';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLegalWorkspaceContext } from '@/context/LegalWorkspaceContext';
-import { useSearchParams } from 'next/navigation';
+import { LexLogo } from './LexLogo';
 
 interface LexTopbarProps {
   sidebarState: 'expanded' | 'compact' | 'hidden';
@@ -16,178 +15,114 @@ export function LexTopbar({
   onToggleSidebar,
   onOpenSearch,
 }: LexTopbarProps) {
-  const { activeCase, activeDocument } = useLegalWorkspaceContext();
-  const searchParams = useSearchParams();
-  const currentTab = searchParams.get('tab') || 'inicio';
+  const { activeCase } = useLegalWorkspaceContext();
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Ctrl/⌘K enfoca el buscador (convención ya usada en la app).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // El buscador delega en el asistente legal existente (contrato 'open-legal-chat').
+  const submitSearch = () => {
+    const q = query.trim();
+    if (!q) return;
+    if (onOpenSearch) {
+      onOpenSearch();
+      return;
+    }
+    try {
+      window.dispatchEvent(new CustomEvent('open-legal-chat', { detail: { query: q } }));
+    } catch {
+      /* sin asistente disponible: no-op */
+    }
+  };
 
   const leftOffsetClass =
     sidebarState === 'expanded'
-      ? 'lg:left-64'
+      ? 'lg:left-[250px]'
       : sidebarState === 'compact'
-      ? 'lg:left-16'
+      ? 'lg:left-[68px]'
       : 'left-0';
 
-  const isNavActive = (tab: string) => {
-    if (tab === 'universal' && currentTab === 'universal') return true;
-    if (tab === 'initial_writings' && currentTab === 'initial_writings') return true;
-    if (tab === 'contestaciones' && (currentTab === 'contestaciones' || currentTab === 'responses_resources')) return true;
-    if (tab === 'plantillas' && (currentTab === 'plantillas' || currentTab === 'my-templates')) return true;
-    return false;
-  };
-
   return (
-    <>
-      {/* ── Main Topbar Header (Fixed top, 64px) ── */}
-      <header
-        className={`lex-reference-topbar fixed top-0 left-0 right-0 h-16 bg-surface/90 backdrop-blur-md shadow-[0_1px_8px_rgba(0,0,0,0.04)] border-b border-outline-variant/50 z-40 flex items-center justify-between px-gutter transition-all duration-200 ${leftOffsetClass}`}
-      >
-        {/* Left: Hamburger & Brand Tags */}
-        <div className="flex items-center gap-space-sm sm:gap-space-md">
-          <button
-            onClick={onToggleSidebar}
-            className="p-space-xs rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors lg:hidden"
-            aria-label="Alternar barra lateral"
-            title="Alternar barra lateral"
-          >
-            <span className="material-symbols-outlined text-[22px]">menu</span>
-          </button>
-
-          <span className="font-headline-sm text-headline-sm text-primary tracking-tight font-bold hidden sm:inline-block">
-            LexPlantillas
+    <header
+      className={`fixed top-0 right-0 left-0 h-16 bg-white border-b border-slate-200 z-40 flex items-center gap-4 px-4 sm:px-5 transition-[left] duration-200 ease-out ${leftOffsetClass}`}
+    >
+      {/* Izquierda: hamburguesa (móvil) + logo */}
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          onClick={onToggleSidebar}
+          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors lg:hidden"
+          aria-label="Abrir menú de navegación"
+        >
+          <span className="material-symbols-outlined text-[22px]" aria-hidden="true">
+            menu
           </span>
-
-          <span className="lex-release-badge bg-emerald-100 text-emerald-800 px-space-xs py-space-xxs rounded font-code-sm text-code-sm font-semibold">
-            v1.0 RC1 Producción
-          </span>
-
-          <span className="hidden md:flex bg-tertiary-fixed text-on-tertiary-fixed px-space-xs py-space-xxs rounded font-code-sm text-code-sm items-center gap-space-xxs font-semibold">
-            <span className="material-symbols-outlined text-[14px]">verified</span>
-            FIREL Cotejada
-          </span>
-        </div>
-
-        {/* Center: Primary Module Navigation Tabs */}
-        <nav className="hidden xl:flex items-center gap-space-xs">
-          <Link
-            href="/machotes?tab=universal"
-            className={`px-space-md py-space-xs font-label-md text-label-md rounded-lg transition-colors ${
-              isNavActive('universal')
-                ? 'bg-primary-container text-on-primary font-semibold'
-                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-            }`}
-          >
-            Motor Universal
-          </Link>
-          <Link
-            href="/machotes?tab=initial_writings"
-            className={`px-space-md py-space-xs font-label-md text-label-md rounded-lg transition-colors ${
-              isNavActive('initial_writings')
-                ? 'bg-primary-container text-on-primary font-semibold'
-                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-            }`}
-          >
-            Escritos Iniciales
-          </Link>
-          <Link
-            href="/machotes?tab=responses_resources"
-            className={`px-space-md py-space-xs font-label-md text-label-md rounded-lg transition-colors ${
-              isNavActive('contestaciones')
-                ? 'bg-primary-container text-on-primary font-semibold'
-                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-            }`}
-          >
-            Contestaciones
-          </Link>
-          <Link
-            href="/machotes?tab=plantillas"
-            className={`px-space-md py-space-xs font-label-md text-label-md rounded-lg transition-colors ${
-              isNavActive('plantillas')
-                ? 'bg-primary-container text-on-primary font-semibold'
-                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-            }`}
-          >
-            Mis Plantillas
-          </Link>
-        </nav>
-
-        {/* Secondary actions stay available without crowding the primary tabs. */}
-        <details className="lex-secondary-menu hidden lg:block relative">
-          <summary className="flex cursor-pointer list-none items-center gap-1 rounded-md border border-outline-variant/50 bg-surface-container-lowest px-2 py-1 text-[11px] font-semibold text-on-surface-variant">
-            <span className="material-symbols-outlined text-[15px]">menu</span>
-            <span>Más</span>
-          </summary>
-          <div className="absolute right-0 top-8 z-[70] min-w-[190px] rounded-md border border-outline-variant/60 bg-white p-1.5 shadow-lg">
-            <Link href="/machotes?tab=investigacion" className="block rounded px-2.5 py-2 text-xs text-on-surface hover:bg-surface-container-low">Jurisprudencia SCJN</Link>
-            <Link href="/machotes?tab=expedientes" className="block rounded px-2.5 py-2 text-xs text-on-surface hover:bg-surface-container-low">Expedientes</Link>
-            <Link href="/machotes?tab=inicio" className="block rounded px-2.5 py-2 text-xs text-on-surface hover:bg-surface-container-low">Cómputo de términos</Link>
-            <Link href="/machotes?tab=inicio" className="block rounded px-2.5 py-2 text-xs text-on-surface hover:bg-surface-container-low">Alertas DOF y Boletín</Link>
-          </div>
-        </details>
-
-        {/* Right: Engine Telemetry & Active Case & User */}
-        <div className="flex items-center gap-space-sm sm:gap-space-md">
-          {/* Engine indicator */}
-          <div className="lex-engine-badge hidden md:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container rounded-lg border border-outline-variant/40">
-            <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse"></span>
-            <span className="font-code-sm text-code-sm text-on-surface font-semibold">NVIDIA Build Activo</span>
-          </div>
-
-          {/* Active Case chip */}
-          <div className="lex-active-case-chip hidden 2xl:flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-low rounded-lg border border-outline-variant/50">
-            <span className="material-symbols-outlined text-[16px] text-primary">folder_open</span>
-            <span className="font-code-sm text-code-sm text-on-surface font-medium truncate max-w-[220px]">
-              {activeCase?.expedienteNumber ? `EXP-${activeCase.expedienteNumber}` : 'EXP-800/2026 - Juzgado 3° Civil CDMX'}
-            </span>
-          </div>
-
-          {/* Search Trigger */}
-          <button
-            onClick={onOpenSearch}
-            className="flex items-center gap-space-xs px-space-sm py-space-xxs bg-surface-container-highest hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface rounded-lg transition-colors"
-            title="Buscar (⌘K)"
-          >
-            <span className="material-symbols-outlined text-[16px]">search</span>
-            <kbd className="font-code-sm text-code-sm bg-surface-container-lowest px-space-xxs rounded text-on-surface font-mono">
-              ⌘K
-            </kbd>
-          </button>
-
-          {/* User profile avatar in Imperial Burgundy */}
-          <div
-            className="w-8 h-8 rounded-full bg-primary flex items-center justify-center cursor-pointer shadow-xs"
-            title="Perfil Litigante"
-          >
-            <span className="material-symbols-outlined text-on-primary text-[18px]">person</span>
-          </div>
-        </div>
-      </header>
-
-      {/* ── Secondary Sub-Header Status Strip (Fixed top-16, 40px) ── */}
-      <div
-        className={`lex-reference-subbar fixed top-16 left-0 right-0 h-10 bg-surface-container-low/95 backdrop-blur-sm z-30 flex items-center justify-between px-gutter shadow-[0_1px_3px_rgba(120,0,30,0.02)] border-b border-outline-variant/40 transition-all duration-200 ${leftOffsetClass}`}
-      >
-        <div className="flex items-center gap-space-xs font-label-sm text-label-sm text-on-surface-variant truncate">
-          <Link href="/machotes?tab=universal" className="hover:text-primary cursor-pointer transition-colors">
-            LexPlantillas
-          </Link>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-          <span className="hover:text-primary cursor-pointer transition-colors">Litigio Federal</span>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-          <span className="text-on-surface font-semibold">
-            {activeDocument?.templateName || 'Redacción Jurídica Activa'}
-          </span>
-        </div>
-
-        <div className="hidden sm:flex items-center gap-space-sm shrink-0">
-          <span className="bg-surface-container-highest text-on-surface-variant px-space-sm py-space-xxs rounded-full font-code-sm text-code-sm uppercase tracking-wide">
-            {activeCase?.matter ? `Materia ${activeCase.matter}` : 'Materia Civil Federal / Ordinario Mercantil'}
-          </span>
-          <span className="font-code-sm text-code-sm text-secondary font-semibold">
-            Término: 3 Días Hábiles
-          </span>
-        </div>
+        </button>
+        <LexLogo size="sm" />
       </div>
-    </>
+
+      {/* Centro: buscador */}
+      <form
+        className="flex-1 min-w-0 max-w-xl"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submitSearch();
+        }}
+        role="search"
+      >
+        <label className="flex items-center gap-2 h-10 px-3 rounded-lg bg-slate-100 border border-slate-200 focus-within:bg-white focus-within:border-[#007aff] focus-within:ring-2 focus-within:ring-[#007aff]/15 transition-colors">
+          <span className="material-symbols-outlined text-[18px] text-slate-400 shrink-0" aria-hidden="true">
+            search
+          </span>
+          <input
+            ref={searchRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar expedientes, documentos, plantillas..."
+            aria-label="Buscar en el asistente legal"
+            className="w-full min-w-0 bg-transparent outline-none text-[13px] text-slate-900 placeholder:text-slate-400"
+          />
+          <kbd className="hidden sm:inline-block shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 font-mono">
+            Ctrl K
+          </kbd>
+        </label>
+      </form>
+
+      {/* Derecha: estado real existente */}
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
+        <span className="hidden md:inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 whitespace-nowrap">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+          NVIDIA Build Activo
+        </span>
+        <span className="hidden xl:block text-right leading-tight">
+          <span className="block text-[12px] font-semibold text-slate-900 font-mono truncate max-w-[180px]">
+            {activeCase?.expedienteNumber ? `EXP-${activeCase.expedienteNumber}` : 'EXP-800/2026'}
+          </span>
+          <span className="block text-[11px] text-slate-500 truncate max-w-[180px]">
+            {activeCase?.court || 'Juzgado 3° Civil CDMX'}
+          </span>
+        </span>
+        <span
+          className="w-8 h-8 rounded-full bg-[#0B2545] text-white flex items-center justify-center shrink-0"
+          title="Perfil Litigante"
+          aria-label="Perfil Litigante"
+        >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+            person
+          </span>
+        </span>
+      </div>
+    </header>
   );
 }
 

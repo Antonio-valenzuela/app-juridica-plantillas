@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 import FloatingLegalChat from "@/components/ai/FloatingLegalChat";
 import AppShell from "@/components/layout/AppShell";
@@ -25,9 +26,9 @@ export default function RootLayout({
     <html lang="es-MX" className={inter.variable}>
       <body className={`${inter.className} antialiased font-sans`}>
         <LegalWorkspaceProvider>
-          <AppShell>
-            {children}
-          </AppShell>
+          <Suspense fallback={<div className="min-h-screen bg-[#f5f7fa]" />}>
+            <AppShell>{children}</AppShell>
+          </Suspense>
           <FloatingLegalChat />
         </LegalWorkspaceProvider>
       </body>

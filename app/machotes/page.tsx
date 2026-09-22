@@ -193,6 +193,14 @@ export default function MachotesPage() {
   const [activeNavTab, setActiveNavTab] = useState<LegalWorkspaceMode>(
     validTabs.includes(initialTab) ? initialTab : 'universal'
   );
+  // Sincroniza ?tab= de la URL con la pestaña activa (navegación lateral global).
+  // Solo acepta modos válidos; ignora valores desconocidos sin alterar el estado.
+  const urlTab = searchParams.get('tab') as LegalWorkspaceMode | null;
+  useEffect(() => {
+    if (urlTab && (validTabs as string[]).includes(urlTab) && urlTab !== activeNavTab) {
+      setActiveNavTab(urlTab);
+    }
+  }, [urlTab]); // eslint-disable-line react-hooks/exhaustive-deps
   const [universalDoc, setUniversalDoc] = useState<UniversalLegalDocument | null>(null);
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
   const [activeSection, setActiveSection] = useState<DocumentNode | null>(null);
@@ -206,7 +214,6 @@ export default function MachotesPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null);
   const [selectedTemplateRefText, setSelectedTemplateRefText] = useState<string>('');
   const [generationMode, setGenerationMode] = useState<GenerationMode>('automatic');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDraftGeneratorOpen, setIsDraftGeneratorOpen] = useState(false);
   const [isSaveCustomOpen, setIsSaveCustomOpen] = useState(false);
   const [editTemplateData, setEditTemplateData] = useState<any>(null);
@@ -727,7 +734,6 @@ export default function MachotesPage() {
 
   const handleSwitchMode = (mode: LegalWorkspaceMode) => {
     setActiveNavTab(mode);
-    setIsSidebarOpen(false);
     // Persistir tab en URL (§24)
     try {
       const params = new URLSearchParams(searchParams.toString());
@@ -2254,55 +2260,6 @@ export default function MachotesPage() {
         }
       `}</style>
       <div className="machotes-shell-body flex-1 flex min-h-0 min-w-0 overflow-hidden">
-        <aside className={`machotes-side shrink-0 ${isSidebarOpen ? 'is-open' : 'is-collapsed'}`}>
-          <button
-            type="button"
-            className="machotes-side-toggle"
-            onClick={() => setIsSidebarOpen((open) => !open)}
-            aria-label={isSidebarOpen ? 'Cerrar menú de navegación' : 'Abrir menú de navegación'}
-            aria-expanded={isSidebarOpen}
-          >
-            <span aria-hidden="true">{isSidebarOpen ? '×' : '☰'}</span>
-            <span className="machotes-side-toggle-label">Menú</span>
-          </button>
-          <div className="machotes-side-brand"><div className="machotes-side-mark" aria-hidden="true" /><span>Radar Jurídico</span></div>
-          <nav className="machotes-side-nav" aria-label="Módulos de Machotes">
-            <button className={`machotes-side-btn ${activeNavTab === 'universal' ? 'is-active' : ''}`} onClick={() => handleSwitchMode('universal')}><span>⚙</span><span>Motor Jurídico</span></button>
-            <button className={`machotes-side-btn ${activeNavTab === 'initial_writings' ? 'is-active' : ''}`} onClick={() => handleSwitchMode('initial_writings')}><span>▤</span><span>Escritos Iniciales</span></button>
-            <button className={`machotes-side-btn ${activeNavTab === 'responses_resources' ? 'is-active' : ''}`} onClick={() => handleSwitchMode('responses_resources')}><span>⚖</span><span>Contestaciones</span></button>
-            <button className={`machotes-side-btn ${activeNavTab === 'my-templates' ? 'is-active' : ''}`} onClick={() => handleSwitchMode('my-templates')}><span>□</span><span>Mis Plantillas</span></button>
-          </nav>
-          <div
-            className="machotes-side-footer"
-            style={{
-              marginTop: 'auto',
-              paddingTop: 16,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              paddingLeft: 8,
-              paddingRight: 8,
-            }}
-          >
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: '9999px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 12,
-                fontWeight: 800,
-                color: '#fff',
-                background: 'linear-gradient(135deg,#B58A5A,#8F6745)',
-                boxShadow: '0 0 0 2px rgba(214,184,135,.35)',
-              }}
-            >
-              N
-            </div>
-          </div>
-        </aside>
         <section className="machotes-main flex-1 min-w-0 min-h-0 overflow-hidden">
           <div className="machotes-main-scroll">
       {/* ── BANNER DE NOTIFICACIONES / FEEDBACK ────────────────────────────── */}
@@ -2855,102 +2812,123 @@ export default function MachotesPage() {
           </div>
         ) : activeNavTab === 'universal' && universalViewMode === 'analysis' ? (
           /* TAB 1: MOTOR UNIVERSAL — 2 COLUMNAS (Contexto | Análisis jurídico) */
-          <div className="w-full min-h-0 overflow-y-auto font-sans">
-            <div className="w-full max-w-[1800px] mx-auto px-5 md:px-6 py-5 md:py-6 space-y-4">
-              {/* Encabezado Superior */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-1">
-                <div className="space-y-0.5">
-                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                    Motor Jurídico
+          <div className="w-full min-h-0 overflow-y-auto font-sans bg-[#f4f7f9]">
+            <div className="w-full max-w-[1600px] mx-auto px-5 md:px-8 py-5 md:py-6">
+              {/* Breadcrumb */}
+              <nav aria-label="Migas de pan" className="flex items-center gap-1.5 text-[12px] text-slate-500">
+                <span>Motor Jurídico</span>
+                <span aria-hidden="true" className="text-slate-300">›</span>
+                <span>Redacción Jurídica</span>
+                {selectedFicha?.expediente ? (
+                  <>
+                    <span aria-hidden="true" className="text-slate-300">›</span>
+                    <span className="font-mono font-medium text-slate-700 truncate">{selectedFicha.expediente}</span>
+                  </>
+                ) : null}
+              </nav>
+
+              {/* Encabezado */}
+              <div className="mt-1.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h1 className="text-[30px] leading-tight font-bold text-[#0B2545] tracking-tight">
+                    Redacción Jurídica
                   </h1>
-                  <p className="text-xs text-slate-500 font-medium">
-                    Analiza problemas jurídicos utilizando documentos, legislación, jurisprudencia y fuentes verificables.
+                  <p className="mt-1 text-[15px] text-slate-500">
+                    Genera escritos jurídicos con soporte en jurisprudencia, legislación y doctrina.
                   </p>
                 </div>
                 {universalDoc ? (
                   <button
                     onClick={() => setUniversalViewMode('editor')}
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+                    className="shrink-0 px-4 h-10 rounded-lg bg-white border border-slate-200 hover:border-slate-300 text-[#0B2545] text-[13px] font-semibold shadow-sm transition flex items-center gap-1.5"
                   >
                     <span>Continuar al editor jurídico</span>
-                    <span>→</span>
+                    <span aria-hidden="true">→</span>
                   </button>
                 ) : hasSavedDraft ? (
                   <button
                     onClick={() => { void handleReopenDraft(); }}
-                    className="px-4 py-2 rounded-xl bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+                    className="shrink-0 px-4 h-10 rounded-lg bg-white border border-slate-200 hover:border-slate-300 text-[#0B2545] text-[13px] font-semibold shadow-sm transition flex items-center gap-1.5"
                   >
                     <span>↩ Reabrir último borrador</span>
                   </button>
                 ) : null}
               </div>
 
-              {/* Motor Jurídico: contexto y ejecución en una sola superficie */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4.5 items-start">
-                {/* ── CONTEXTO PRINCIPAL (ancho completo) ── */}
-                <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-                  <h2 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-2">
-                    Contexto
-                  </h2>
-
-                  {/* ¿Qué necesitas hacer? (BLOCK D) */}
+              {/* Cuerpo: formulario + inspector */}
+              <div className="mt-4 flex flex-col xl:flex-row gap-5 items-start">
+                {/* ── FORMULARIO PRINCIPAL ── */}
+                <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                  {/* ¿Qué necesitas hacer? */}
                   <div className="space-y-2">
-                    <label className="font-black text-[#0B2545] text-xs uppercase tracking-widest block">¿Qué necesitas hacer?</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       {[
-                        { value: 'analizar', label: 'Analizar', icon: '🔍', desc: 'Revisar expediente' },
-                        { value: 'investigar', label: 'Investigar', icon: '📚', desc: 'Buscar criterio' },
-                        { value: 'redactar', label: 'Redactar', icon: '✍️', desc: 'Generar escrito' },
-                      ].map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setUniversalForm((p) => ({ ...p, intent: opt.value as any }))}
-                          className={`p-2.5 rounded-xl border text-center transition ${universalForm.intent === opt.value ? 'bg-[#0B2545] text-white border-[#0B2545] shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'}`}
-                        >
-                          <div className="text-sm">{opt.icon}</div>
-                          <div className="text-[11px] font-black">{opt.label}</div>
-                          <div className={`text-[9px] ${universalForm.intent === opt.value ? 'text-slate-300' : 'text-slate-400'}`}>{opt.desc}</div>
-                        </button>
-                      ))}
+                        { value: 'analizar', label: 'Analizar', icon: 'search', desc: 'Revisar expediente' },
+                        { value: 'investigar', label: 'Investigar', icon: 'menu_book', desc: 'Buscar criterio jurídico' },
+                        { value: 'redactar', label: 'Redactar', icon: 'edit', desc: 'Generar escrito' },
+                      ].map((opt) => {
+                        const selected = universalForm.intent === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setUniversalForm((p) => ({ ...p, intent: opt.value as any }))}
+                            aria-pressed={selected}
+                            className={`flex items-center gap-3 p-3 rounded-lg border text-left transition ${selected ? 'bg-[#0B2545] text-white border-[#0B2545] shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'}`}
+                          >
+                            <span aria-hidden="true" className={`material-symbols-outlined text-[22px] shrink-0 ${selected ? 'text-white' : 'text-[#007aff]'}`}>
+                              {opt.icon}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[13px] font-semibold leading-tight">{opt.label}</span>
+                              <span className={`block text-[11px] leading-tight mt-0.5 ${selected ? 'text-slate-300' : 'text-slate-500'}`}>{opt.desc}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
-                  <div className="space-y-3.5 text-xs text-slate-800">
+                  <div className="space-y-4 text-[13px] text-slate-800">
                     {/* Pregunta Jurídica */}
-                    <div className="space-y-1">
-                      <label className="font-bold text-slate-700 block">Pregunta jurídica</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[13px] font-semibold text-slate-800 block">Pregunta jurídica o solicitud</label>
                       <textarea
-                        rows={4}
+                        rows={6}
                         value={universalForm.pregunta}
                         onChange={(e) => setUniversalForm((prev) => ({ ...prev, pregunta: e.target.value }))}
-                        placeholder="Escribe la consulta o problema procesal a analizar..."
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-[#0B2545] leading-relaxed"
+                        placeholder="Ej. Elabora una demanda de amparo directo en contra de la sentencia de fecha..."
+                        className="w-full p-3 bg-white border border-slate-200 rounded-lg text-[13px] text-slate-800 focus:outline-none focus:border-[#007aff] focus:ring-2 focus:ring-[#007aff]/15 leading-relaxed min-h-[140px]"
                       />
                     </div>
 
                     {/* Documentos */}
                     <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-700">Documentos</span>
+                      <div className="flex items-center justify-between gap-3">
                         <button
                           type="button"
                           onClick={() => fileInputHiddenRef.current?.click()}
-                          className="text-[11px] font-bold text-[#0B2545] hover:underline"
+                          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-white border border-slate-200 hover:border-slate-300 text-[13px] font-semibold text-slate-700 shadow-sm transition"
                         >
-                          [+ Agregar]
+                          <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-slate-500">
+                            attach_file
+                          </span>
+                          Agregar documentos
                         </button>
+                        <span className="text-[11px] text-slate-500">Formatos permitidos: PDF, DOCX, TXT (máx. 20 MB por archivo)</span>
                       </div>
 
                       <div className="space-y-1 max-h-28 overflow-y-auto">
                         {uploadedSourceDocs.length === 0 ? (
-                          <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-400 italic">
+                          <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-[12px] text-slate-400 italic">
                             Sin documentos adjuntos.
                           </div>
                         ) : (
                           uploadedSourceDocs.map((doc) => (
-                            <div key={doc.id} className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 truncate font-mono flex items-center gap-1.5">
-                              <span>📄</span>
+                            <div key={doc.id} className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[12px] text-slate-700 truncate font-mono flex items-center gap-1.5">
+                              <span aria-hidden="true" className="material-symbols-outlined text-[15px] text-slate-400">
+                                description
+                              </span>
                               <span className="truncate">{doc.name}</span>
                             </div>
                           ))
@@ -2958,13 +2936,14 @@ export default function MachotesPage() {
                       </div>
                     </div>
 
-                    {/* Expediente — opciones REALES derivadas del caso detectado y documentos subidos */}
-                    <div className="space-y-1">
-                      <label className="font-bold text-slate-700 block">Expediente</label>
+                    {/* Expediente + Tipo | Materia + Jurisdicción — taxonomía centralizada */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[13px] font-semibold text-slate-800 block">Expediente</label>
                       <select
                         value={universalForm.expediente}
                         onChange={(e) => setUniversalForm((prev) => ({ ...prev, expediente: e.target.value }))}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-[#0B2545]"
+                        className="w-full px-3 h-[44px] bg-white border border-slate-200 rounded-lg text-[13px] text-slate-800 focus:outline-none focus:border-[#007aff] focus:ring-2 focus:ring-[#007aff]/15"
                       >
                         <option value="">{caseFicha?.expediente || liveCaseFicha?.expediente ? 'Detectado automáticamente al ejecutar análisis' : 'Sin expediente seleccionado'}</option>
                         {(caseFicha?.expediente ? [caseFicha.expediente] : [])
@@ -2976,9 +2955,20 @@ export default function MachotesPage() {
                           ))}
                       </select>
                     </div>
-
-                    {/* Materia + Jurisdicción — taxonomía centralizada */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <TaxonomySelect
+                      label="Tipo de escrito"
+                      value={universalForm.tipoEscrito}
+                      options={[
+                        ...DOCUMENT_TYPES.map((d) => ({ value: d.value, label: d.label })),
+                        ...(getCatalogDocument(universalForm.tipoEscrito)?.kind === 'DOCUMENT_TYPE'
+                          && !DOCUMENT_TYPES.some((d) => d.value === universalForm.tipoEscrito)
+                          ? [{ value: universalForm.tipoEscrito, label: getCatalogDocument(universalForm.tipoEscrito)?.label || universalForm.tipoEscrito }]
+                          : []),
+                      ]}
+                      onChange={(v) => setUniversalForm((prev) => ({ ...prev, tipoEscrito: v }))}
+                      customValue={universalForm.tipoEscritoCustom}
+                      onCustomChange={(v) => setUniversalForm((prev) => ({ ...prev, tipoEscritoCustom: sanitizeCustomValue(v) || v.slice(0, CUSTOM_VALUE_MAX_LENGTH) }))}
+                    />
                       <TaxonomySelect
                         label="Materia"
                         value={universalForm.materia}
@@ -2996,22 +2986,8 @@ export default function MachotesPage() {
                         onCustomChange={(v) => setUniversalForm((prev) => ({ ...prev, jurisdiccionCustom: sanitizeCustomValue(v) || v.slice(0, CUSTOM_VALUE_MAX_LENGTH) }))}
                       />
                     </div>
-                    <TaxonomySelect
-                      label="Tipo de escrito"
-                      value={universalForm.tipoEscrito}
-                      options={[
-                        ...DOCUMENT_TYPES.map((d) => ({ value: d.value, label: d.label })),
-                        ...(getCatalogDocument(universalForm.tipoEscrito)?.kind === 'DOCUMENT_TYPE'
-                          && !DOCUMENT_TYPES.some((d) => d.value === universalForm.tipoEscrito)
-                          ? [{ value: universalForm.tipoEscrito, label: getCatalogDocument(universalForm.tipoEscrito)?.label || universalForm.tipoEscrito }]
-                          : []),
-                      ]}
-                      onChange={(v) => setUniversalForm((prev) => ({ ...prev, tipoEscrito: v }))}
-                      customValue={universalForm.tipoEscritoCustom}
-                      onCustomChange={(v) => setUniversalForm((prev) => ({ ...prev, tipoEscritoCustom: sanitizeCustomValue(v) || v.slice(0, CUSTOM_VALUE_MAX_LENGTH) }))}
-                    />
                     <details className="border-t border-slate-100 pt-2">
-                      <summary className="cursor-pointer select-none text-xs font-bold text-[#0B2545]">Explorar catálogo profesional</summary>
+                      <summary className="cursor-pointer select-none text-[13px] font-semibold text-[#0B2545]">Explorar catálogo profesional</summary>
                       <LegalCatalogNavigator
                         className="mt-3"
                         onSelect={(documentTypeId, context) => setUniversalForm((prev) => ({ ...prev, materia: context?.areaId || prev.materia, tipoEscrito: documentTypeId, tipoEscritoCustom: '' }))}
@@ -3021,14 +2997,16 @@ export default function MachotesPage() {
                     <details className="pt-1 border-t border-slate-100" open={universalForm.showAdvanced}>
                       <summary
                         onClick={(e) => { e.preventDefault(); setUniversalForm((p) => ({ ...p, showAdvanced: !p.showAdvanced })); }}
-                        className="font-bold text-slate-700 block text-xs cursor-pointer select-none list-none flex items-center justify-between"
+                        className="text-slate-700 text-[13px] font-semibold cursor-pointer select-none list-none flex items-center gap-1.5"
                       >
-                        <span>Configuración avanzada</span>
-                        <span className="text-slate-400 text-[11px]">{universalForm.showAdvanced ? '▲' : '▼'}</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[16px] text-slate-400">
+                          {universalForm.showAdvanced ? 'expand_more' : 'chevron_right'}
+                        </span>
+                        <span>Opciones avanzadas</span>
                       </summary>
                       <div className="space-y-1.5 pt-2">
-                        <span className="font-bold text-slate-700 block text-xs">Fuentes</span>
-                        <div className="space-y-1.5 text-[11px] text-slate-600">
+                        <span className="font-semibold text-slate-700 block text-[13px]">Fuentes</span>
+                        <div className="space-y-1.5 text-[12px] text-slate-600">
                           <label className="flex items-center gap-2 cursor-pointer select-none">
                             <input
                               type="checkbox"
@@ -3061,7 +3039,7 @@ export default function MachotesPage() {
                       </details>
 
                     {/* Botón Ejecutar Análisis */}
-                    <div className="pt-2">
+                    <div className="pt-2 flex justify-end">
                       <button
                         onClick={async () => {
                           const effMatterU = universalForm.materia === 'otro' ? (universalForm.materiaCustom || 'Otro') : (MATTERS.find((m) => m.value === universalForm.materia)?.label || universalForm.materia);
@@ -3100,15 +3078,132 @@ export default function MachotesPage() {
                           } as any);
                         }}
                         disabled={isUniversalGenerating}
-                        className="w-full py-2.5 rounded-xl bg-[#0B2545] hover:bg-[#081d39] disabled:opacity-50 text-white text-xs font-extrabold shadow-xs transition flex items-center justify-center gap-2"
+                        className="h-11 px-6 rounded-lg bg-[#0B2545] hover:bg-[#081d39] disabled:opacity-50 text-white text-[13px] font-semibold shadow-sm transition flex items-center justify-center gap-2"
                       >
-                        <span>⚡</span>
+                        <span aria-hidden="true" className="material-symbols-outlined text-[18px]">
+                          bolt
+                        </span>
                         <span>{isUniversalGenerating ? 'Ejecutando análisis...' : 'Ejecutar análisis'}</span>
+                        <span aria-hidden="true">→</span>
                       </button>
                     </div>
                   </div>
                 </div>
 
+                {/* ── INSPECTOR DERECHO (solo datos reales del sistema) ── */}
+                <aside className="w-full xl:w-[340px] shrink-0 space-y-4" aria-label="Contexto del expediente">
+                  <section className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                    <h2 className="text-[14px] font-semibold text-slate-900">Contexto del expediente</h2>
+                    {selectedFicha ? (
+                      <div className="mt-3 rounded-lg border border-slate-200 p-3 space-y-2.5">
+                        <div className="flex items-start gap-2">
+                          <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-[#007aff] shrink-0">
+                            folder_open
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[13px] font-semibold text-slate-900 font-mono truncate">{selectedFicha.expediente}</p>
+                            {selectedFicha.tipo ? (
+                              <p className="text-[12px] text-slate-500 truncate">{selectedFicha.tipo}</p>
+                            ) : null}
+                          </div>
+                          {selectedFicha.materia ? (
+                            <span className="ml-auto shrink-0 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                              {selectedFicha.materia}
+                            </span>
+                          ) : null}
+                        </div>
+                        <dl className="space-y-2 text-[12px]">
+                          {selectedFicha.actor ? (
+                            <div>
+                              <dt className="text-slate-500">Actor</dt>
+                              <dd className="font-medium text-slate-800">{selectedFicha.actor}</dd>
+                            </div>
+                          ) : null}
+                          {selectedFicha.demandado ? (
+                            <div>
+                              <dt className="text-slate-500">Demandado</dt>
+                              <dd className="font-medium text-slate-800">{selectedFicha.demandado}</dd>
+                            </div>
+                          ) : null}
+                          {selectedFicha.autoridad ? (
+                            <div>
+                              <dt className="text-slate-500">Juzgado</dt>
+                              <dd className="font-medium text-slate-800">{selectedFicha.autoridad}</dd>
+                            </div>
+                          ) : null}
+                          {selectedFicha.fechas ? (
+                            <div>
+                              <dt className="text-slate-500">Última actividad</dt>
+                              <dd className="font-medium text-slate-800">{selectedFicha.fechas}</dd>
+                            </div>
+                          ) : null}
+                        </dl>
+                        <button
+                          type="button"
+                          onClick={() => handleSwitchMode('responses_resources')}
+                          className="w-full h-9 rounded-lg border border-slate-200 hover:border-slate-300 text-[13px] font-semibold text-[#0B2545] transition flex items-center justify-center gap-1.5"
+                        >
+                          Ver expediente completo
+                          <span aria-hidden="true">→</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-[12px] leading-relaxed text-slate-500">
+                        Sin expediente detectado. Sube un documento o ejecuta un análisis para ver el contexto aquí.
+                      </p>
+                    )}
+                  </section>
+
+                  <section className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-[14px] font-semibold text-slate-900">Documentos del expediente</h2>
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchMode('responses_resources')}
+                        className="text-[12px] font-semibold text-[#007aff] hover:underline"
+                      >
+                        Ver todos
+                      </button>
+                    </div>
+                    <div className="mt-3 space-y-1">
+                      {caseDocuments.length === 0 && uploadedSourceDocs.length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-[12px] text-slate-500">
+                          Aún no hay documentos en este expediente.
+                        </p>
+                      ) : (
+                        <>
+                          {caseDocuments.slice(0, 6).map((doc) => (
+                            <div key={doc.id} className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-slate-50 transition">
+                              <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-slate-400 shrink-0">
+                                description
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[13px] font-medium text-slate-800">{doc.name}</p>
+                                <p className="text-[11px] text-slate-500">
+                                  {doc.pageCount} {doc.pageCount === 1 ? 'página' : 'páginas'}
+                                  {doc.uploadedAt ? ` · ${new Date(doc.uploadedAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                          {uploadedSourceDocs.slice(0, Math.max(0, 6 - caseDocuments.slice(0, 6).length)).map((doc) => (
+                            <div key={doc.id} className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-slate-50 transition">
+                              <span aria-hidden="true" className="material-symbols-outlined text-[20px] text-slate-400 shrink-0">
+                                description
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[13px] font-medium text-slate-800">{doc.name || doc.filename || 'Documento sin nombre'}</p>
+                                <p className="text-[11px] text-slate-500">
+                                  {(doc.uploadedAt || doc.uploadDate) ? new Date((doc.uploadedAt || doc.uploadDate) as string).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Adjunto de sesión'}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  </section>
+                </aside>
               </div>
             </div>
           </div>
