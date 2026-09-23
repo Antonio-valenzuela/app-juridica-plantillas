@@ -3,7 +3,7 @@ import {
   verifyCompatibilityMaterialization,
   verifyFinalDocumentExportability,
 } from './finalDocumentMaterializationGate';
-import { materializePreparedFinalDocument } from './finalDocumentMaterialization';
+import { materializePreparedFinalDocument, renderableBodyParagraphs } from './finalDocumentMaterialization';
 import type { LawyerProfile } from '../workspace/lawyerProfileTypes';
 import { DEFAULT_LAWYER_PROFILE } from '../workspace/lawyerProfileTypes';
 import {
@@ -409,7 +409,7 @@ function paragraphLines(
 }
 
 function bodyParagraphs(model: ExportRenderModel): readonly RenderParagraph[] {
-  return model.sections.flatMap((section) => section.paragraphs);
+  return renderableBodyParagraphs(model);
 }
 
 function allParagraphs(model: ExportRenderModel): readonly RenderParagraph[] {
@@ -683,10 +683,6 @@ function verifiedInputForPreparedDocument(
   return verifyCompatibilityMaterialization({ document, exportValidation });
 }
 
-/**
- * Public compatibility signature. Preparation and verification happen here;
- * the binary renderer itself receives only ExportRenderModel and options.
- */
 export const exportUniversalToPdf = async (
   docData: UniversalLegalDocument,
   trace?: GenerationTrace,
@@ -694,6 +690,7 @@ export const exportUniversalToPdf = async (
   const prepared = await prepareUniversalDocumentForExport(docData);
   const exportValidation = validateForExport(prepared.document);
   const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation);
+
   const model = materializePreparedFinalDocument(verified);
   const artifact = await renderPdf(model, {
     format: 'pdf',

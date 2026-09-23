@@ -17,7 +17,7 @@ import {
   verifyCompatibilityMaterialization,
   verifyFinalDocumentExportability,
 } from './finalDocumentMaterializationGate';
-import { materializePreparedFinalDocument } from './finalDocumentMaterialization';
+import { materializePreparedFinalDocument, renderableBodyParagraphs } from './finalDocumentMaterialization';
 import type { UniversalLegalDocument } from './types';
 import type { LawyerProfile } from '../workspace/lawyerProfileTypes';
 import { DEFAULT_LAWYER_PROFILE } from '../workspace/lawyerProfileTypes';
@@ -218,7 +218,7 @@ function renderParagraphs(paragraphs: readonly RenderParagraph[], placement: 'BO
 }
 
 function modelBodyParagraphs(model: ExportRenderModel): readonly RenderParagraph[] {
-  return model.sections.flatMap((section) => section.paragraphs);
+  return renderableBodyParagraphs(model);
 }
 
 function buildDocx(model: ExportRenderModel, options: DocxRenderOptions): Document {

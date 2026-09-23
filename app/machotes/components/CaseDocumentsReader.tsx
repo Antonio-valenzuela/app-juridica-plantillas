@@ -133,10 +133,17 @@ export const RESPONSE_DOCUMENT_TYPES = [
   { value: 'contestacion_demanda_civil', label: 'Contestación de Demanda Civil' },
   { value: 'contestacion_demanda_laboral', label: 'Contestación de Demanda Laboral' },
   { value: 'contestacion_demanda_mercantil', label: 'Contestación de Demanda Mercantil' },
+  { value: 'apelacion_civil', label: 'Apelación Civil' },
+  { value: 'apelacion_mercantil', label: 'Apelación Mercantil' },
+  { value: 'apelacion_familiar', label: 'Apelación Familiar' },
+  { value: 'demanda_amparo_directo', label: 'Demanda de Amparo Directo' },
+  { value: 'demanda_amparo_indirecto', label: 'Demanda de Amparo Indirecto' },
   { value: 'recurso_revision_amparo_directo', label: 'Recurso de Revisión en Amparo Directo' },
-  { value: 'contestacion_revision_extraordinaria_amparo_directo', label: 'Contestación / Revisión extraordinaria de Amparo Directo' },
+  { value: 'recurso_revision_amparo', label: 'Recurso de Revisión en Amparo' },
+  { value: 'recurso_queja_amparo', label: 'Recurso de Queja en Amparo' },
   { value: 'recurso_reclamacion', label: 'Recurso de Reclamación' },
   { value: 'incidente_procesal', label: 'Incidente Procesal / de Nulidad' },
+  { value: 'redaccion_libre', label: 'Redacción Libre — Escribir directamente lo que quiero' },
 ] as const;
 
 function formatContestacionesFileSize(bytes?: number) {
@@ -182,6 +189,51 @@ export function CaseDocumentsReader({
   const [activePage, setActivePage] = useState(1);
   const [viewMode, setViewMode] = useState<'original' | 'structure'>('original');
   const [isDragging, setIsDragging] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+
+  // Exportar para chat — texto extraído completo
+  const getFullExtractedText = useCallback(() => {
+    const source = selectedSourceDoc || sourceDocs[0];
+    if (source?.extractedText) return source.extractedText;
+    if (source?.content) return source.content;
+    if (selectedDoc?.pages?.length) return selectedDoc.pages.map((p) => `--- Página ${p.page} ---\n${p.text}`).join('\n\n');
+    return '';
+  }, [selectedSourceDoc, sourceDocs, selectedDoc]);
+
+  const handleCopyForChat = useCallback(async () => {
+    const text = getFullExtractedText();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFeedback('Copiado — pégalo en el chat');
+      setTimeout(() => setCopyFeedback(null), 2500);
+    } catch {
+      setCopyFeedback('No se pudo copiar');
+      setTimeout(() => setCopyFeedback(null), 2500);
+    }
+  }, [getFullExtractedText]);
+
+  const handleExportTxtForChat = useCallback(() => {
+    const text = getFullExtractedText();
+    if (!text) return;
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (selectedDoc?.name?.replace(/\.[^/.]+$/, '') || 'documento') + '_para_chat.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, [getFullExtractedText]);
+
+  const handleSendToChat = useCallback(() => {
+    const text = getFullExtractedText().slice(0, 8000);
+    if (!text) return;
+    try {
+      window.dispatchEvent(new CustomEvent('open-legal-chat', { detail: { query: `Revisa este documento y dame un análisis breve:\n\n${text.slice(0, 4000)}` } }));
+    } catch {}
+  }, [getFullExtractedText]);
 
   // Estados de configuración de contestación
   const [customPrompt, setCustomPrompt] = useState('');
@@ -263,7 +315,7 @@ export function CaseDocumentsReader({
     if (inferredMatter === 'CIVIL' || inferredSourceType === 'DEMANDA_CIVIL') {
       return 'contestacion_demanda_civil';
     }
-    return 'contestacion_demanda_civil';
+    return undefined;
   }, [inferredSourceType, inferredMatter]);
 
   useEffect(() => {
@@ -274,6 +326,10 @@ export function CaseDocumentsReader({
 
   const checkDocCompatibility = useCallback(
     (docType: string): { compatible: boolean; reason?: string } => {
+      // Redacción Libre acepta cualquier fuente intencionalmente
+      if (docType === 'redaccion_libre') {
+        return { compatible: true };
+      }
       if (!sourceDocs || sourceDocs.length === 0) {
         return { compatible: true };
       }
@@ -376,9 +432,11 @@ export function CaseDocumentsReader({
     configDefined: Boolean(selectedResponseType),
   });
 
+  const hasDirectInstruction = customPrompt.trim().length >= 10;
+  const effectiveCompatible = currentDocCompatibility.compatible || hasDirectInstruction || selectedResponseType === 'redaccion_libre';
   const generationBlockReason = getContestacionesGenerationBlockReason({
     hasDocument: Boolean(selectedDoc),
-    compatible: currentDocCompatibility.compatible,
+    compatible: effectiveCompatible,
     compatibilityReason: currentDocCompatibility.reason,
     generationMode,
     hasCompatibleTemplate: compatibleMachotes.length > 0,
@@ -402,13 +460,15 @@ export function CaseDocumentsReader({
 
   const handleTriggerGenerate = () => {
     if (generationBlockReason) return;
+    const effectiveDocType = selectedDocOption.value === 'redaccion_libre' ? (inferredSourceType === 'SENTENCIA_AMPARO_DIRECTO' ? 'recurso_revision_amparo_directo' : (suggestedDocType || 'escrito_libre')) : selectedDocOption.value;
+    const effectiveLabel = selectedDocOption.value === 'redaccion_libre' ? 'Redacción Libre — Instrucción directa' : selectedDocOption.label;
     onGenerateResponse?.({
       userInstructions: buildContestacionInstruction(),
-      selectedDocumentType: selectedDocOption.value,
-      documentTypeLabel: selectedDocOption.label,
+      selectedDocumentType: effectiveDocType,
+      documentTypeLabel: effectiveLabel,
       generationMode,
       generationExtension: extensionMode === 'extended-legal'
-        ? { generationMode: 'extended-legal', targetPages: 40, minPages: 36, maxPages: 44 }
+        ? { generationMode: 'extended-legal', targetPages: 40, minPages: 40, maxPages: 44 }
         : { generationMode: 'standard' },
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
@@ -635,6 +695,33 @@ export function CaseDocumentsReader({
                         <span>Abrir aparte</span>
                       </a>
                     )}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleCopyForChat}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                        title="Copiar texto extraído para pegar en ChatGPT/Asistente"
+                      >
+                        📋 Copiar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExportTxtForChat}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+                        title="Descargar texto extraído como .txt para chat"
+                      >
+                        ⬇ TXT
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSendToChat}
+                        className="inline-flex items-center gap-1 rounded-lg bg-[#0B2545] px-2.5 py-2 text-xs font-bold text-white hover:bg-slate-900 transition"
+                        title="Enviar texto al Asistente Jurídico interno"
+                      >
+                        💬 Chat
+                      </button>
+                    </div>
+                    {copyFeedback && <span className="text-xs font-medium text-emerald-600">{copyFeedback}</span>}
                   </div>
 
                   <div className="h-[62vh] min-h-[440px] max-h-[820px] bg-white lg:h-[74vh] lg:min-h-[600px]">
@@ -820,12 +907,12 @@ export function CaseDocumentsReader({
 
           <ContestacionesChecklist
             hasDocument={Boolean(selectedDoc)}
-            analysisCompleted={analysisAvailable}
+            analysisCompleted={analysisAvailable || hasDirectInstruction}
             configDefined={Boolean(selectedResponseType)}
             isGenerating={isGenerating}
             generationJob={generationJob}
             blockReason={generationBlockReason}
-            isIncompatible={!currentDocCompatibility.compatible}
+            isIncompatible={!effectiveCompatible}
             onGenerate={handleTriggerGenerate}
             onOpenEditor={onOpenEditor}
           />

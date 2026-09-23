@@ -135,14 +135,14 @@ export function materializePreparedFinalDocument(
       const sectionOrderPath = [...parentOrderPath, section.order];
       const region = paragraphRegion(section.type, inheritedRegion);
       const paragraphs = section.content.map((block, blockIndex) => renderParagraph(
-        input.document.id,
-        input.verificationMode,
-        section,
-        parentSectionId,
-        sectionOrderPath,
-        block,
-        blockIndex,
-      ));
+          input.document.id,
+          input.verificationMode,
+          section,
+          parentSectionId,
+          sectionOrderPath,
+          block,
+          blockIndex,
+        ));
       const renderSection: RenderSection = {
         id: section.id,
         ...(parentSectionId ? { parentId: parentSectionId } : {}),
@@ -206,5 +206,38 @@ export function materializeDocumentForPageMeasurement(
     exportValidation: {} as VerifiedCompatibilityInput['exportValidation'],
     lifecycleValid: true,
     requiredStructuralChecksPass: true,
+  });
+}
+
+/**
+ * Renderer boundary: section titles are semantic headings, not block text.
+ * Both binary exporters use this projection so prepared models keep their
+ * existing block fidelity while headings become visible in DOCX/PDF output.
+ */
+export function renderableBodyParagraphs(model: ExportRenderModel): readonly RenderParagraph[] {
+  return model.sections.flatMap((section) => {
+    const first = section.paragraphs[0];
+    const heading: RenderParagraph = {
+      id: `heading-${section.id}`,
+      text: section.title,
+      runs: [{ text: section.title, bold: true }],
+      role: 'TITLE',
+      style: { fontWeight: 'bold' },
+      orderPath: [...section.orderPath, -1],
+      keepNext: true,
+      keepTogether: true,
+      pageBreakBefore: false,
+      provenance: first?.provenance || {
+        documentId: model.documentId,
+        verificationMode: 'COMPATIBILITY',
+        sectionId: section.id,
+        coverageItemIds: [],
+        legalIssueIds: [],
+        sourceDocumentIds: [],
+        sourceRefs: [],
+        manualEdit: false,
+      },
+    };
+    return [heading, ...section.paragraphs];
   });
 }

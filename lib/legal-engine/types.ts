@@ -324,7 +324,7 @@ export interface DocumentNode {
    *  GENERATED = construido desde DocumentTemplate (fuente solo referencia)
    *  MACHOTE   = estructura provista deliberadamente por el abogado (machote)
    *  SOURCE    = bloque heredado del expediente (prohibido en escritos de parte) */
-  _provenance?: 'GENERATED' | 'MACHOTE' | 'SOURCE';
+  _provenance?: 'GENERATED' | 'CANONICAL_GENERATED' | 'MACHOTE' | 'SOURCE';
   generation?: {
     provider: string | null;
     model: string | null;

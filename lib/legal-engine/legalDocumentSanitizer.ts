@@ -78,6 +78,7 @@ const WATERMARK_PATTERNS = [
 const PLACEHOLDER_PATTERNS = [
   /\{\{\s*[A-Za-z0-9_áéíóúñÁÉÍÓÚÑ]+\s*\}\}/g,
   /\$\{[a-zA-Z0-9_]+\}/g,
+  /\[(?:REQUIERE|PENDIENTE|DATO\s+PENDIENTE|TODO|TBD|FIXME)[^\]]*\]/gi,
   // <variable> but not HTML? keep simple
 ];
 
@@ -263,7 +264,9 @@ function handlePlaceholders(text: string): { out: string; found: string[]; class
         classified.push({ marker: token, kind: 'TECHNICAL_UNRESOLVED' });
       }
     }
-    out = out.replace(re, '________');
+    out = out.replace(re, (token) =>
+      /^\[(?:REQUIERE|PENDIENTE|DATO\s+PENDIENTE)/i.test(token) ? token : '________'
+    );
   }
   // Los marcadores jurídicos permanecen visibles para que el gate pueda
   // bloquearlos, pero siempre se reportan en forma canónica.

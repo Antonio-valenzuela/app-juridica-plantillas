@@ -35,7 +35,7 @@ import { buildLegalIssueMatrix, type LegalIssueMatrix } from './legalIssueMatrix
 
 export interface DocumentPlanResult {
   sections: DocumentNode[];
-  planSource: Extract<NonNullable<DocumentNode['_provenance']>, 'GENERATED' | 'MACHOTE'>;
+  planSource: Extract<NonNullable<DocumentNode['_provenance']>, 'GENERATED' | 'CANONICAL_GENERATED' | 'MACHOTE'>;
   templateId: string;
   coverageMatrix?: CoverageMatrix;
   legalIssueMatrix?: LegalIssueMatrix;
@@ -252,6 +252,31 @@ export function buildTemplateSkeleton(tpl: DocumentTemplate, doc: UniversalLegal
 }
 
 /**
+ * Registro canónico mínimo para apelación civil cuando no existe machote.
+ * Solo define arquitectura reusable; los hechos, normas y agravios concretos
+ * siguen dependiendo de las fuentes y de la posición confirmada por el abogado.
+ */
+const CANONICAL_APPEAL_CIVIL_STRUCTURE = [
+  'PROEMIO',
+  'RUBRO / AUTORIDAD',
+  'IDENTIFICACIÓN DEL ASUNTO',
+  'COMPARECENCIA Y PERSONALIDAD',
+  'OBJETO: INTERPOSICIÓN DEL RECURSO',
+  'PROCEDENCIA Y OPORTUNIDAD',
+  'RESOLUCIÓN RECURRIDA',
+  'RESOLUCIÓN IMPUGNADA',
+  'ANTECEDENTES PROCESALES',
+  'CONSIDERACIONES COMBATIDAS',
+  'AGRAVIOS',
+  'FUNDAMENTACIÓN / CRITERIOS VERIFICADOS',
+  'EFECTOS SOLICITADOS A LA ALZADA',
+  'PUNTOS PETITORIOS',
+  'PROTESTO',
+  'LUGAR / FECHA',
+  'FIRMA',
+] as const;
+
+/**
  * FASE 12 — Herencia sobre documento existente: por título normalizado se
  * conserva el ID previo (estabilidad de referencias) y el contenido editado
  * manualmente por el abogado. Las secciones generadas se regeneran bajo el
@@ -346,7 +371,47 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
     && template.tipo !== 'demanda_ejecutiva_mercantil'
     && !isCivilMercantileResponseDocumentType(template.tipo)
     && !isCivilMercantileEvidenceArgumentDocumentType(template.tipo);
-  if (isContestacionRevisionAmparoDirectoType(template.tipo, doc.documentTypeLabel)) {
+  if (template.tipo === 'apelacion_civil') {
+    const canonicalTemplate = { ...template, estructura: [...CANONICAL_APPEAL_CIVIL_STRUCTURE] };
+    sections = buildTemplateSkeleton(canonicalTemplate, doc).map((section) => ({
+      ...section,
+      _provenance: 'CANONICAL_GENERATED' as const,
+    }));
+    const agraviosSection = sections.find((section) => normalizeTitleKey(section.title) === 'agravios');
+    const appealAxes = caseAnalysis?.argumentAxes || [];
+    if (agraviosSection && appealAxes.length > 0) {
+      agraviosSection.children = appealAxes.map((axis, index) => ({
+        ...createDocumentNode({
+          id: `sec-apelacion_civil-agravio-${axis.id || index + 1}`,
+          type: 'argument',
+          title: `AGRAVIO ${index + 1 === 1 ? 'PRIMERO' : index + 1 === 2 ? 'SEGUNDO' : `${index + 1}°`}`,
+          order: index * 10,
+          isRepeatable: true,
+          generationInstruction: `Desarrollar el agravio con base exclusiva en el Issue/AgravioPlan "${axis.title}" y sus sourceRefs.`,
+          generation: {
+            provider: null,
+            model: null,
+            fallbackUsed: false,
+            generationReason: 'ISSUE_SCOPED_APPEAL_GRIEVANCE',
+            status: 'pending',
+          },
+          content: [{
+            id: `blk-apelacion_civil-agravio-${axis.id || index + 1}`,
+            layer: 'USER_POSITION' as const,
+            trustLevel: 'VERIFIED' as const,
+            text: '',
+            isManuallyEdited: false,
+            generationRequirement: 'AI_REQUIRED' as const,
+            generationStatus: 'pending' as const,
+          }],
+          _templateId: template.tipo,
+          _provenance: 'CANONICAL_GENERATED' as const,
+        }),
+        _provenance: 'CANONICAL_GENERATED' as const,
+      }));
+    }
+    planSource = 'CANONICAL_GENERATED';
+  } else if (isContestacionRevisionAmparoDirectoType(template.tipo, doc.documentTypeLabel)) {
     sections = buildRevisionAmparoDirectoSkeleton(doc, caseAnalysis, template.tipo);
     planSource = 'GENERATED';
   } else if (hasUsableMachote && previous.length === 0 && allowsReferenceStructure) {

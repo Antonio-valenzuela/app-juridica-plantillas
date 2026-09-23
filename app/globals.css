@@ -4309,3 +4309,68 @@ textarea:disabled {
   backdrop-filter: blur(3px);
   z-index: 1140;
 }
+
+/* Desktop Windows shell: preserve the workspace while the window resizes. */
+:root {
+  --lex-sidebar-width: clamp(220px, 16vw, 258px);
+  --lex-header-height: clamp(60px, 4.2vw, 68px);
+}
+
+@media (min-width: 1181px) {
+  .lex-header {
+    left: var(--lex-sidebar-width) !important;
+    width: calc(100% - var(--lex-sidebar-width)) !important;
+    padding-inline: clamp(16px, 1.6vw, 28px) !important;
+  }
+
+  .lex-content {
+    padding-left: var(--lex-sidebar-width) !important;
+  }
+
+  .lex-sidebar {
+    transform: translateX(0);
+    box-shadow: none;
+  }
+
+  .lex-mobile-menu,
+  .lex-sidebar-backdrop {
+    display: none !important;
+  }
+
+  .machotes-shell {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .lex-header {
+    left: 0 !important;
+    width: 100% !important;
+  }
+
+  .lex-content {
+    padding-left: 0 !important;
+  }
+
+  .lex-sidebar {
+    transform: translateX(-100%);
+    box-shadow: 16px 0 40px rgba(8, 25, 43, 0.22);
+  }
+
+  .lex-mobile-menu {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 760px) {
+  .lex-header-search kbd,
+  .lex-build-status {
+    display: none;
+  }
+
+  .lex-header-right {
+    gap: 8px;
+  }
+}

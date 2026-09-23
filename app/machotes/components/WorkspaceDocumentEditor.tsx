@@ -10,8 +10,8 @@ interface WorkspaceDocumentEditorProps {
   document: UniversalLegalDocument | null;
   onUpdateDocument: (updated: UniversalLegalDocument) => void;
   onRegenerateSection?: (sectionId: string, instruction?: string) => Promise<void>;
-  onExportDocx?: () => void;
-  onExportPdf?: () => void;
+  onExportDocx?: (force?: boolean) => void;
+  onExportPdf?: (force?: boolean) => void;
   onSaveDraft?: () => Promise<boolean>;
   onReopenDraft?: () => Promise<boolean>;
   onSaveAsTemplate?: (doc: UniversalLegalDocument) => Promise<void>;
@@ -1340,7 +1340,7 @@ export function WorkspaceDocumentEditor({
                 Continuar editando
               </button>
 
-              {pendingCount === 0 && (
+              {pendingCount === 0 ? (
                 <button
                   onClick={() => {
                     handlePromoteToReady();
@@ -1350,6 +1350,18 @@ export function WorkspaceDocumentEditor({
                 >
                   <span>✓</span>
                   <span>Marcar listo para exportar</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (onExportPdf) onExportPdf(true);
+                    setShowPendingModal(false);
+                  }}
+                  className="py-2 px-4 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs transition flex items-center gap-1.5"
+                  title="Exportar documento asumiendo la responsabilidad de las omisiones"
+                >
+                  <span>🖨️</span>
+                  <span>Exportar PDF de todos modos</span>
                 </button>
               )}
             </div>

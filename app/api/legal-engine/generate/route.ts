@@ -182,6 +182,7 @@ export async function POST(req: NextRequest) {
         'DOCUMENT_TYPE_NOT_IMPLEMENTED',
         'UNKNOWN_DOCUMENT_TYPE',
         'INCOMPATIBLE_DOCUMENT_ROUTE',
+        'NEEDS_SOURCE_REVIEW',
       ].includes(err?.code)) {
         return NextResponse.json({ ok: false, error: err.message, errorCode: err.code, errorMetadata: err.metadata }, { status: 422 });
       }

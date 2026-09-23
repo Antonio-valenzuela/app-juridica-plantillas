@@ -3245,6 +3245,19 @@ export async function runGenerationPipeline(
       if (preflightSourceOutputCompatibility.status !== 'NOT_APPLICABLE') {
         console.log('[SourceOutputCompatibility]', JSON.stringify(preflightSourceOutputCompatibility));
       }
+      if (
+        input.workflow?.flow === 'DOCUMENT_ANALYSIS'
+        && sources.length > 0
+        && preflightSourceOutputCompatibility.status === 'NEEDS_INPUT'
+        && preflightSourceOutputCompatibility.code === 'SOURCE_TYPE_UNKNOWN'
+      ) {
+        const reviewError = new Error(
+          `NEEDS_SOURCE_REVIEW: la fuente no pudo clasificarse con evidencia suficiente (${preflightSourceOutputCompatibility.missingRequirements.join(', ')}).`,
+        ) as Error & { code?: string; metadata?: unknown };
+        reviewError.code = 'NEEDS_SOURCE_REVIEW';
+        reviewError.metadata = preflightSourceOutputCompatibility;
+        throw reviewError;
+      }
     } catch (error: any) {
       console.error('[DocumentRouting]', JSON.stringify({
         selectedType: explicitSelectedDocumentType,
@@ -3646,12 +3659,15 @@ export async function runGenerationPipeline(
       outputFilename: routing.outputFilename,
     };
     console.log('[DocumentRouting]', JSON.stringify({
+      requestedType: explicitSelectedDocumentType || null,
       selectedType: routing.selectedDocumentType || null,
       sourceDetectedType: routing.sourceDocumentType,
       resolvedStrategy: routing.resolvedStrategy,
+      resolvedType: routing.resolvedTemplate,
       resolvedTemplate: routing.resolvedTemplate,
       templateSource: routing.templateSource,
       fallbackUsed: routing.fallbackUsed,
+      reason: routing.fallbackUsed ? 'SAFE_FALLBACK' : 'EXPLICIT_OR_CANONICAL_ROUTE',
       outputFilename: routing.outputFilename,
     }));
     const preflight = routing.templateSource !== 'SAFE_FALLBACK'

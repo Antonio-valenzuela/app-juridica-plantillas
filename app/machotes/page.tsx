@@ -52,8 +52,10 @@ import {
 } from '@/lib/templates/customTemplateStore';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { createGenerationIdentityFactory } from '@/lib/legal-engine/generationIdentity';
+import { WorkspaceModulesView, type WorkspaceModule } from './components/WorkspaceModulesView';
 
 export type LegalWorkspaceMode =
+  | WorkspaceModule
   | 'universal'
   | 'initial_writings'
   | 'responses_resources'
@@ -188,10 +190,10 @@ export default function MachotesPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const initialTab = (searchParams.get('tab') as LegalWorkspaceMode) || 'universal';
-  const validTabs: LegalWorkspaceMode[] = ['universal', 'initial_writings', 'responses_resources', 'my-templates'];
+  const initialTab = (searchParams.get('tab') as LegalWorkspaceMode) || 'inicio';
+  const validTabs: LegalWorkspaceMode[] = ['inicio', 'universal', 'initial_writings', 'responses_resources', 'my-templates', 'expedientes', 'terminos', 'jurisprudencia', 'biblioteca', 'alertas', 'configuracion', 'ayuda'];
   const [activeNavTab, setActiveNavTab] = useState<LegalWorkspaceMode>(
-    validTabs.includes(initialTab) ? initialTab : 'universal'
+    validTabs.includes(initialTab) ? initialTab : 'inicio'
   );
   // Sincroniza ?tab= de la URL con la pestaña activa (navegación lateral global).
   // Solo acepta modos válidos; ignora valores desconocidos sin alterar el estado.
@@ -2119,6 +2121,9 @@ export default function MachotesPage() {
         .machotes-analysis-grid > .lg\:col-span-3 { grid-column:auto !important; }
         .machotes-analysis-grid > .lg\:col-span-6 { grid-column:auto !important; }
         .machotes-analysis-card, .machotes-context-card, .machotes-source-card { background:#fff; border:1px solid #d7dce2; border-radius:12px; box-shadow:0 1px 4px rgba(15,23,42,.04); }
+        .universal-analysis-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,340px); gap:20px; align-items:start; }
+        .universal-analysis-form { min-width:0; }
+        .universal-analysis-inspector { min-width:0; display:grid; grid-template-rows:repeat(2,minmax(0,1fr)); gap:16px; }
         .machotes-context-card, .machotes-analysis-card { padding:16px; }
         .machotes-source-card { padding:14px; }
         .machotes-empty { border:1px dashed #c7cfd7; border-radius:10px; background:#fafbfc; padding:16px; color:#75808d; font-size:12px; line-height:1.5; }
@@ -2145,6 +2150,8 @@ export default function MachotesPage() {
         @media (max-width: 1100px) {
           .machotes-shell .contestaciones-summary-fields { grid-template-columns:1fr; }
           .machotes-analysis-grid { grid-template-columns:1fr !important; }
+          .universal-analysis-layout { grid-template-columns:1fr; }
+          .universal-analysis-inspector { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:none; }
           .machotes-side { width:72px; min-width:72px; padding:16px 8px; }
           .machotes-side-brand span, .machotes-side-btn span:last-child { display:none; }
           .machotes-side-btn { justify-content:center; padding:0; }
@@ -2153,6 +2160,7 @@ export default function MachotesPage() {
         @media (max-width: 700px) {
           .machotes-side { display:none; }
           .machotes-main-scroll { padding:12px; }
+          .universal-analysis-inspector { grid-template-columns:1fr; }
         }
         .machotes-shell .templates-page { color:#1E293B; }
         .machotes-shell .templates-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:4px 2px 2px; }
@@ -2289,7 +2297,11 @@ export default function MachotesPage() {
 
       {/* ── CUERPO PRINCIPAL DEL WORKSPACE ─── */}
       <div className="machotes-workspace-content w-full min-h-0 min-w-0 overflow-hidden">
-        {activeNavTab === 'my-templates' ? (
+        {activeNavTab === 'inicio' || activeNavTab === 'expedientes' || activeNavTab === 'terminos' || activeNavTab === 'jurisprudencia' || activeNavTab === 'biblioteca' || activeNavTab === 'alertas' || activeNavTab === 'configuracion' || activeNavTab === 'ayuda' ? (
+          <div className="h-full min-h-0 w-full overflow-y-auto bg-[#f4f7f9]">
+            <WorkspaceModulesView mode={activeNavTab} onNavigate={(mode) => handleSwitchMode(mode)} />
+          </div>
+        ) : activeNavTab === 'my-templates' ? (
           /* TAB 4: MIS PLANTILLAS */
           <div className="w-full min-h-0 overflow-y-auto font-sans">
             <div className="templates-workspace w-full mx-auto px-5 md:px-7 py-5 md:py-6">
@@ -2856,9 +2868,9 @@ export default function MachotesPage() {
               </div>
 
               {/* Cuerpo: formulario + inspector */}
-              <div className="mt-4 flex flex-col xl:flex-row gap-5 items-start">
+              <div className="universal-analysis-layout mt-4">
                 {/* ── FORMULARIO PRINCIPAL ── */}
-                <div className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="universal-analysis-form bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
                   {/* ¿Qué necesitas hacer? */}
                   <div className="space-y-2">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -3091,7 +3103,7 @@ export default function MachotesPage() {
                 </div>
 
                 {/* ── INSPECTOR DERECHO (solo datos reales del sistema) ── */}
-                <aside className="w-full xl:w-[340px] shrink-0 space-y-4" aria-label="Contexto del expediente">
+                <aside className="universal-analysis-inspector" aria-label="Contexto del expediente">
                   <section className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
                     <h2 className="text-[14px] font-semibold text-slate-900">Contexto del expediente</h2>
                     {selectedFicha ? (
@@ -3271,7 +3283,7 @@ export default function MachotesPage() {
             setSelectedTemplateRefText('');
             setGenerationMode('automatic');
           }}
-          tabMode={activeNavTab === 'my-templates' ? 'universal' : activeNavTab}
+          tabMode={activeNavTab === 'initial_writings' ? 'initial_writings' : activeNavTab === 'responses_resources' ? 'responses_resources' : 'universal'}
           onGenerate={handleRunPipeline}
           templates={customTemplates}
           uploadedSources={uploadedSourceDocs}

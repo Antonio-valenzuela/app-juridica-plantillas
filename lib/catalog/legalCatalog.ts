@@ -109,10 +109,10 @@ const PROPOSED_GROUPS: readonly CatalogGroup[] = [
     document('solicitud_embargo_precautorio', { sourceRequired: true, acceptedSourceTypes: ['DEMANDA_CIVIL', 'ESCRITO_INICIAL_CIVIL', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
   ]),
   group('civil', 'civil_recurso', 'Recursos civiles', 'civil_recursos', 'Recursos civiles', [
-    document('apelacion_civil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
-    document('revocacion_civil', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_O_RESOLUCION'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
+    document('apelacion_civil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'LAUDO', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
+    document('revocacion_civil', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
     'queja_civil',
-    document('aclaracion_sentencia_civil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
+    document('aclaracion_sentencia_civil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
   ]),
   group('civil', 'civil_ejecucion', 'Ejecución civil', 'civil_ejecucion', 'Ejecución civil', [
     document('solicitud_ejecucion_sentencia_civil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
@@ -127,9 +127,9 @@ const PROPOSED_GROUPS: readonly CatalogGroup[] = [
     document('alegatos_mercantil', { sourceRequired: true, acceptedSourceTypes: ['DEMANDA_MERCANTIL', 'ESCRITO_INICIAL_MERCANTIL', 'DOCUMENTO_MERCANTIL_BASE', 'DOCUMENTO_MERCANTIL_AUXILIAR', 'ACUERDO'], incompatibleMatterIds: ['civil', 'laboral'] }),
   ]),
   group('mercantil', 'mercantil_recurso', 'Recursos mercantiles', 'mercantil_recursos', 'Recursos mercantiles', [
-    document('apelacion_mercantil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'ACUERDO'], incompatibleMatterIds: ['civil', 'laboral'] }),
-    document('revocacion_mercantil', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_O_RESOLUCION'], incompatibleMatterIds: ['civil', 'laboral'] }),
-    document('aclaracion_sentencia_mercantil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'ACUERDO'], incompatibleMatterIds: ['civil', 'laboral'] }),
+    document('apelacion_mercantil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'LAUDO', 'ACUERDO'], incompatibleMatterIds: ['civil', 'laboral'] }),
+    document('revocacion_mercantil', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO'], incompatibleMatterIds: ['civil', 'laboral'] }),
+    document('aclaracion_sentencia_mercantil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'ACUERDO'], incompatibleMatterIds: ['civil', 'laboral'] }),
   ]),
   group('mercantil', 'mercantil_ejecucion', 'Ejecución mercantil', 'mercantil_ejecucion', 'Ejecución mercantil', [
     document('ejecucion_sentencia_mercantil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'ACUERDO'], incompatibleMatterIds: ['civil', 'laboral'] }),
@@ -219,10 +219,10 @@ const PROPOSED_GROUPS: readonly CatalogGroup[] = [
     document('alegatos_amparo', { sourceRequired: false, acceptedSourceTypes: ['ACUERDO', 'INFORME_JUSTIFICADO', 'DEMANDA_AMPARO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
   ]),
   group('constitucional_amparo', 'amparo_recurso', 'Recursos de amparo', 'amparo_recursos', 'Recursos de amparo', [
-    document('recurso_revision_amparo', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'ACUERDO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
-    document('recurso_queja_amparo', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'ACTO_DE_AUTORIDAD'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
-    document('recurso_reclamacion_amparo', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
-    document('recurso_inconformidad_amparo', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_AMPARO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
+    document('recurso_revision_amparo', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'ACUERDO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
+    document('recurso_queja_amparo', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'ACTO_DE_AUTORIDAD', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
+    document('recurso_reclamacion_amparo', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
+    document('recurso_inconformidad_amparo', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
   ]),
   group('constitucional_amparo', 'amparo_cumplimiento', 'Cumplimiento de ejecutoria', 'amparo_cumplimiento', 'Cumplimiento de amparo', [
     document('cumplimiento_ejecutoria_amparo', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'ACUERDO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] }),
@@ -467,7 +467,7 @@ const LEGACY_ONLY_GROUPS: readonly CatalogGroup[] = [
   group('escritos_generales', 'tramite_promocion', 'Promociones y solicitudes', 'promocion', 'Promociones', ['promocion', 'solicitud']),
   group('escritos_generales', 'tramite_recurso', 'Recursos', 'recurso', 'Recursos', [document('recurso_queja', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_O_RESOLUCION'] }), document('recurso_reclamacion', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO'] })]),
   group('administrativo', 'administrativo_recurso', 'Recursos administrativos', 'administrativo_recursos', 'Recursos administrativos', ['recurso_administrativo']),
-  group('constitucional_amparo', 'amparo_recurso', 'Recursos de amparo', 'amparo_recursos', 'Recursos de amparo', [document('recurso_revision_amparo_directo', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_AMPARO_DIRECTO'], incompatibleMatterIds: ['civil', 'mercantil', 'familiar', 'laboral'] })]),
+  group('constitucional_amparo', 'amparo_recurso', 'Recursos de amparo', 'amparo_recursos', 'Recursos de amparo', [document('recurso_revision_amparo_directo', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_AMPARO_DIRECTO', 'SENTENCIA_AMPARO', 'SENTENCIA_O_RESOLUCION', 'LAUDO'], incompatibleMatterIds: [] })]),
   group('constitucional_amparo', 'amparo_demanda', 'Demandas de amparo', 'amparo_demandas', 'Demandas de amparo', ['demanda_amparo_indirecto', 'demanda_amparo_directo']),
   group('laboral', 'laboral_litigio', 'Litigio laboral', 'laboral_demanda', 'Demandas laborales', ['contestacion_demanda_laboral']),
   group('civil', 'civil_declarativo', 'Juicios declarativos', 'civil_demandas', 'Demandas civiles', ['contestacion_demanda_civil']),

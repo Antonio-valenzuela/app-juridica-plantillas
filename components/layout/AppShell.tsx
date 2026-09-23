@@ -13,21 +13,21 @@ type SidebarItem = {
 };
 
 const MAIN_ITEMS: SidebarItem[] = [
-  { href: '/', label: 'Inicio', icon: '⌂' },
+  { href: '/machotes?tab=inicio', label: 'Inicio', icon: '⌂', tab: 'inicio' },
   { href: '/machotes?tab=universal', label: 'Motor Jurídico', icon: '▣', tab: 'universal' },
   { href: '/machotes?tab=initial_writings', label: 'Escritos Iniciales', icon: '▤', tab: 'initial_writings' },
   { href: '/machotes?tab=responses_resources', label: 'Contestaciones', icon: '⚖', tab: 'responses_resources' },
   { href: '/machotes?tab=my-templates', label: 'Mis Plantillas', icon: '□', tab: 'my-templates' },
-  { href: '/machotes?tab=universal', label: 'Expedientes', icon: '▱' },
-  { href: '/machotes?tab=universal', label: 'Cómputo de Términos', icon: '◷' },
-  { href: '/machotes?tab=universal', label: 'Jurisprudencia SCJN', icon: '♜' },
-  { href: '/machotes?tab=universal', label: 'Biblioteca', icon: '▥' },
-  { href: '/machotes?tab=universal', label: 'Alertas DOF y Boletín', icon: '♧' },
+  { href: '/machotes?tab=expedientes', label: 'Expedientes', icon: '▱', tab: 'expedientes' },
+  { href: '/machotes?tab=terminos', label: 'Cómputo de Términos', icon: '◷', tab: 'terminos' },
+  { href: '/machotes?tab=jurisprudencia', label: 'Jurisprudencia SCJN', icon: '♜', tab: 'jurisprudencia' },
+  { href: '/machotes?tab=biblioteca', label: 'Biblioteca', icon: '▥', tab: 'biblioteca' },
+  { href: '/machotes?tab=alertas', label: 'Alertas DOF y Boletín', icon: '♧', tab: 'alertas' },
 ];
 
 const BOTTOM_ITEMS: SidebarItem[] = [
-  { href: '/machotes?tab=universal', label: 'Configuración', icon: '⚙' },
-  { href: '/machotes?tab=universal', label: 'Ayuda', icon: '?' },
+  { href: '/machotes?tab=configuracion', label: 'Configuración', icon: '⚙', tab: 'configuracion' },
+  { href: '/machotes?tab=ayuda', label: 'Ayuda', icon: '?', tab: 'ayuda' },
 ];
 
 export default function AppShell({
@@ -66,7 +66,7 @@ export default function AppShell({
 
   const isActive = (item: SidebarItem) => {
     if (item.tab) {
-      return pathname === '/machotes' && currentTab === item.tab;
+      return (pathname === '/machotes' || pathname === '/') && currentTab === item.tab;
     }
 
     return pathname === item.href;
