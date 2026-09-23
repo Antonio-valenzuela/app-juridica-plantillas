@@ -71,6 +71,7 @@ import { assembleSectionContextPacket } from './sectionContextAssembly';
 import { generateSectionDraft, sectionDraftToContentBlock } from './sectionGeneration';
 import { projectSectionPlanFromTasks } from './sectionPlanning';
 import type { SectionDraft } from './sectionDraft';
+import { advanceDocumentState, createDocumentState, type DocumentState } from './documentState';
 
 export interface LegalResearchOnlyInput {
   caseAnalysis: CaseAnalysis;
@@ -2690,6 +2691,7 @@ export async function generateSection(
   derivedReadinessByIssueId?: ReadonlyMap<string, DerivedIssueReadiness>,
   sectionGenerationMode: 'legacy' | 'section' = 'legacy',
   generationExtension?: GenerationExtensionContract,
+  documentState?: DocumentState,
 ): Promise<{
   text: string;
   blocks?: ContentBlock[];
@@ -2939,6 +2941,7 @@ export async function generateSection(
             issueOutcomes: allOutcomes,
             researchBundlesByIssueId,
             derivedReadinessByIssueId,
+            documentState,
           });
           const sectionDraft = await generateSectionDraft(sectionPacket, {
             invokeProvider: issueProviderInvoker || runFastMode,
@@ -3812,6 +3815,7 @@ export async function runGenerationPipeline(
     let assemblyParagraphIndex = 0;
     const accumulatedGenerationTasks: GenerationTask[] = [];
     const taskAccountingFindings: DocumentAssemblyFinding[] = [];
+    let documentState: DocumentState = createDocumentState(caseAnalysis, doc.legalIssueMatrix);
 
     console.log(`[pipeline] Generando ${doc.sections.length} secciones bajo el plan ${doc.templateId} (${plan.planSource})...`);
     let completedBlocks = 0;
@@ -3852,6 +3856,7 @@ export async function runGenerationPipeline(
         input.derivedReadinessByIssueId,
         input.sectionGenerationMode || 'legacy',
         generationExtension,
+        documentState,
       );
       if (generatedRaw.sectionDraft) {
         (section as DocumentNode & { sectionDraft?: SectionDraft }).sectionDraft = generatedRaw.sectionDraft;
@@ -3890,6 +3895,13 @@ export async function runGenerationPipeline(
           }
         : generatedRaw;
       const effectiveAiUsed = generated.aiUsed ?? true;
+      documentState = advanceDocumentState(documentState, {
+        sectionId: section.id,
+        title: section.title,
+        order: section.order,
+        text: generated.text,
+        draft: generated.sectionDraft,
+      });
 
       const sectionMs = Date.now() - sectionStart;
       console.log(`[pipeline] Sección ${i + 1}/${doc.sections.length} "${section.title}" completada en ${sectionMs}ms (aiUsed: ${generated.aiUsed}, provider: ${generated.aiProvider || 'none'})`);

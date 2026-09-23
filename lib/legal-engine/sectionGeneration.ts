@@ -419,7 +419,7 @@ export function buildSectionPrompt(packet: SectionContextPacket): Pick<AIRequest
     verifiedAuthorities: packet.verifiedAuthorities.map((authority) => ({ id: authority.id, citationText: authority.citationText, proposition: authority.proposition, verificationStatus: authority.verificationStatus })),
     research: packet.research.map((item) => ({ legalIssueId: item.legalIssueId, status: item.status })),
     clientPosition: packet.clientPosition ? { status: packet.clientPosition.status } : undefined,
-    previousSectionSummaries: [],
+    previousSectionSummaries: packet.previousSectionSummaries,
     sourceManifest: { accepted: packet.sourceManifest.accepted },
     limits: packet.limits,
   });

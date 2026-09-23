@@ -18,6 +18,7 @@ import {
   type SectionResearchMaterial,
   type SectionSourceManifest,
 } from './sectionContextPacket';
+import type { DocumentState } from './documentState';
 
 const DEFAULT_LIMITS: SectionContextLimits = {
   maxContextCharacters: 24000,
@@ -157,6 +158,7 @@ export function assembleSectionContextPacket(input: {
   issueOutcomes: IssueGenerationOutcome[];
   researchBundlesByIssueId?: ReadonlyMap<string, LegalResearchBundle>;
   derivedReadinessByIssueId?: ReadonlyMap<string, DerivedIssueReadiness>;
+  documentState?: DocumentState;
   limits?: Partial<SectionContextLimits>;
 }): SectionContextPacket {
   const limits: SectionContextLimits = { ...DEFAULT_LIMITS, ...(input.limits || {}) };
@@ -398,7 +400,7 @@ export function assembleSectionContextPacket(input: {
     verifiedAuthorities,
     research,
     clientPosition,
-    previousSectionSummaries: [],
+    previousSectionSummaries: input.documentState?.previousConclusions || [],
     blockers,
     sourceManifest: manifest,
     limits,

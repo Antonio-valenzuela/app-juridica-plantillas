@@ -1,6 +1,7 @@
 import type { SourceProvenance, FactItem, EvidenceMention, EvidenceOffer, SourceAuthorityMention, ClientPosition } from './case-extraction/types';
 import type { LegalResearchBundle, VerifiedAuthority } from './legal-research/types';
 import type { IssueDraftResult, IssueGenerationOutcome } from './issueDraftResult';
+import type { SectionSummary } from './documentState';
 
 export type SectionContextStatus = 'READY' | 'BLOCKED';
 
@@ -103,7 +104,7 @@ export interface SectionContextPacket {
   verifiedAuthorities: SectionAuthorityMaterial[];
   research: SectionResearchMaterial[];
   clientPosition?: Pick<ClientPosition, 'status' | 'source' | 'propositionIds' | 'provenance'>;
-  previousSectionSummaries: [];
+  previousSectionSummaries: SectionSummary[];
   blockers: string[];
   sourceManifest: SectionSourceManifest;
   limits: SectionContextLimits;
