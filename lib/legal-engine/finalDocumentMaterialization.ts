@@ -1,5 +1,6 @@
 import { stableResearchId } from './legal-research/canonical';
 import type { ContentBlock, DocumentNode, SourceReference } from './types';
+import { DRAFT_EXPORT_NOTICE } from './exportModes';
 import type {
   ExportRenderModel,
   RenderParagraph,
@@ -163,6 +164,29 @@ export function materializePreparedFinalDocument(
 
   visit(input.document.sections, undefined, 0, [], 'BODY');
 
+  if (input.document.generationMetadata.exportMode === 'DRAFT') {
+    header.unshift({
+      id: `draft-export-notice-${input.document.id}`,
+      text: input.document.generationMetadata.exportNotice || DRAFT_EXPORT_NOTICE,
+      runs: [{ text: input.document.generationMetadata.exportNotice || DRAFT_EXPORT_NOTICE, bold: true }],
+      role: 'HEADER',
+      style: { fontWeight: 'bold', textAlign: 'center' },
+      orderPath: [-1],
+      keepNext: true,
+      keepTogether: true,
+      pageBreakBefore: false,
+      provenance: {
+        documentId: input.document.id,
+        verificationMode: input.verificationMode,
+        coverageItemIds: [],
+        legalIssueIds: [],
+        sourceDocumentIds: [],
+        sourceRefs: [],
+        manualEdit: false,
+      },
+    });
+  }
+
   const semanticPayload = {
     documentId: input.document.id,
     documentType: input.document.documentType,
@@ -222,6 +246,7 @@ export function renderableBodyParagraphs(model: ExportRenderModel): readonly Ren
       text: section.title,
       runs: [{ text: section.title, bold: true }],
       role: 'TITLE',
+      headingLevel: section.depth === 0 ? 1 : 2,
       style: { fontWeight: 'bold' },
       orderPath: [...section.orderPath, -1],
       keepNext: true,

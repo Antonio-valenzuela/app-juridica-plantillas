@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCaseWorkflow } from '@/lib/legal-engine/caseWorkflow';
 import { buildCoverageMatrix } from '@/lib/legal-engine/coverageMatrix';
-import { reconstructCaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
+import { applyInstructionSupportedRichFields, reconstructCaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 import { createSourceDocument } from '@/lib/legal-engine/context';
 import { evaluateSourceOutputCompatibility } from '@/lib/legal-engine/sourceOutputCompatibility';
 import { createEmptyDocument } from '@/lib/legal-engine/types';
@@ -36,6 +36,43 @@ describe('legacy consumer regressions after rich extraction', () => {
     expect(analysis.claims).toEqual(expect.any(Array));
     expect(analysis.facts).toEqual(expect.any(Array));
     expect(analysis.evidence).toEqual(expect.any(Array));
+  });
+
+  it('projects an explicit challenge instruction and a standalone sentence heading', () => {
+    const sentence = createSourceDocument({
+      id: 'regression-sentence', filename: 'sentencia.txt', type: 'txt', sourceValidated: true,
+      content: 'SENTENCIA DEFINITIVA\nEl juzgado dicta sentencia definitiva dentro del expediente 12/2026.',
+    });
+    const analysis = reconstructCaseAnalysis(
+      [sentence],
+      'Genera una apelación combatiendo esa sentencia.',
+      '',
+      { includeReferenceInAnalysis: false },
+    );
+    expect(analysis.challengedActs[0]?.actDescription).toMatch(/SENTENCIA DEFINITIVA/i);
+    expect(analysis.richCaseAnalysis?.clientPosition.status).toBe('CONFIRMED');
+    expect(analysis.richCaseAnalysis?.missingData.some((item) => item.field === 'clientPosition')).toBe(false);
+  });
+
+  it('reapplies instruction-supported posture when the caller supplies a rich snapshot', () => {
+    const analysis = reconstructCaseAnalysis(
+      [source],
+      'Genera una apelación combatiendo esa sentencia.',
+      '',
+      { includeReferenceInAnalysis: false },
+    );
+    const supplied = structuredClone(analysis.richCaseAnalysis!);
+    supplied.clientPosition = { status: 'UNKNOWN', source: 'SOURCE_POSITION', propositionIds: [], provenance: [] };
+    supplied.missingData = [{
+      field: 'clientPosition', reason: 'missing', importance: 'HIGH', blocking: true,
+      sourceSearched: ['source'], requiresClientInput: true,
+    }];
+    const projected = applyInstructionSupportedRichFields(supplied, 'Genera una apelación combatiendo esa sentencia.');
+    expect(projected.clientPosition.status).toBe('CONFIRMED');
+    expect(projected.clientPosition.propositionIds).toEqual(expect.arrayContaining(
+      projected.arguments.map((item) => item.id),
+    ));
+    expect(projected.missingData.some((item) => item.field === 'clientPosition')).toBe(false);
   });
 
   it('resets section context between source documents', () => {

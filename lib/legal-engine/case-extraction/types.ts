@@ -15,6 +15,7 @@ export type ExtractionMethod =
   | 'TABLE'
   | 'PARAGRAPH'
   | 'PATTERN'
+  | 'OCR'
   | 'NORMALIZATION'
   | 'MANUAL_INPUT';
 

@@ -248,7 +248,7 @@ function buildArgumentCoverageItems(rich: RichCaseAnalysis, sections: DocumentNo
     rich.facts.filter((f) => f.assertionStatus === 'ESTABLISHED_FACT').map((f) => f.id),
   );
   return rich.arguments
-    .filter((argument) => Boolean(argument.id && argument.proposition.trim()))
+    .filter((argument) => Boolean(argument.id && isMaterialSourceArgument(argument)))
     .map((argument): DocumentCoverageItem => {
       // STEP 1 FIX (CR-1):
       // An argument with supportingFactIds has documentary backing.
@@ -295,32 +295,66 @@ function buildArgumentCoverageItems(rich: RichCaseAnalysis, sections: DocumentNo
     });
 }
 
+/**
+ * Candidate segmentation can leave page headers, isolated OCR tokens and
+ * line fragments classified as arguments.  Those fragments remain in the
+ * rich extraction for traceability, but they must not become mandatory legal
+ * coverage requirements.  Explicit entity links keep short, source-backed
+ * propositions eligible; otherwise a proposition must have enough lexical
+ * substance to represent an argument rather than a layout fragment.
+ */
+function isMaterialSourceArgument(argument: RichCaseAnalysis['arguments'][number]): boolean {
+  const proposition = argument.proposition.replace(/\s+/g, ' ').trim();
+  if (!proposition) return false;
+  const sourceSections = argument.provenance.map((entry) => entry.section || '').join(' ');
+  const comesFromCourtDecisionSection = /razones\s+y\s+fundamentos\s+de\s+la\s+decisi[oó]n|antecedentes\s+al\s+tr[aá]mite/i.test(sourceSections);
+  const hasExplicitLink = argument.supportingFactIds.length > 0
+    || argument.citedAuthorityIds.length > 0
+    || (argument.challengedReasoningIds || []).length > 0;
+  // A judgment's narrated reasoning is source context, not an argument
+  // supplied by the current lawyer.  Keep it traceable in rich extraction;
+  // only an explicit challenge can turn it into response coverage.
+  if (comesFromCourtDecisionSection && (argument.challengedReasoningIds || []).length === 0) return false;
+  if (hasExplicitLink) return proposition.length >= 24;
+  if (proposition.length < 48) return false;
+  const words = proposition.match(/[\p{L}\p{N}]{2,}/gu) || [];
+  if (words.length < 8) return false;
+  const lettersAndNumbers = (proposition.match(/[\p{L}\p{N}]/gu) || []).length;
+  const visibleCharacters = proposition.replace(/\s/g, '').length;
+  return visibleCharacters > 0 && lettersAndNumbers / visibleCharacters >= 0.62;
+}
+
 function buildAuthorityCoverageItems(rich: RichCaseAnalysis, sections: DocumentNode[]): DocumentCoverageItem[] {
   const targetSectionIds = findArgumentSections(sections);
   return rich.authorities
     .filter((authority) => Boolean(authority.id && authority.citationText.trim()))
-    .map((authority): DocumentCoverageItem => ({
-      id: `cov-authority-mention-${authority.id}`,
-      category: 'AUTHORITY_MENTION',
-      description: `Autoridad citada en la fuente: ${authority.citationText.trim()}`,
-      required: targetSectionIds.length > 0,
-      status: targetSectionIds.length > 0 ? 'pending' : 'not_applicable',
-      targetSectionIds,
-      sourceEntityType: 'AUTHORITY_MENTION',
-      sourceEntityIds: [authority.id],
-      authorityMentionIds: [authority.id],
-      scope: targetSectionIds.length > 0 ? 'SUBSTANTIVE' : undefined,
-      satisfactionPolicy: targetSectionIds.length > 0 ? 'REQUIRES_SEMANTIC_RESPONSE' : 'REFERENCE_ONLY',
-      blocking: false,
-      requiresClientPosition: false,
-      statusReason: 'SOURCE_CITED_NOT_VERIFIED',
-      relationStatus: 'EXPLICIT',
-      provenance: [...authority.provenance],
-      metadata: {
-        authorityType: authority.authorityType,
-        verificationStatus: authority.verificationStatus,
-      },
-    }));
+    .map((authority): DocumentCoverageItem => {
+      const sourceSections = authority.provenance.map((entry) => entry.section || '').join(' ');
+      const courtDecisionSource = /razones\s+y\s+fundamentos\s+de\s+la\s+decisi[oó]n|antecedentes\s+al\s+tr[aá]mite/i.test(sourceSections);
+      const required = targetSectionIds.length > 0 && !courtDecisionSource;
+      return {
+        id: `cov-authority-mention-${authority.id}`,
+        category: 'AUTHORITY_MENTION',
+        description: `Autoridad citada en la fuente: ${authority.citationText.trim()}`,
+        required,
+        status: required ? 'pending' : 'not_applicable',
+        targetSectionIds: required ? targetSectionIds : [],
+        sourceEntityType: 'AUTHORITY_MENTION',
+        sourceEntityIds: [authority.id],
+        authorityMentionIds: [authority.id],
+        scope: required ? 'SUBSTANTIVE' : undefined,
+        satisfactionPolicy: required ? 'REQUIRES_SEMANTIC_RESPONSE' : 'REFERENCE_ONLY',
+        blocking: false,
+        requiresClientPosition: false,
+        statusReason: courtDecisionSource ? 'COURT_DECISION_REFERENCE_ONLY' : 'SOURCE_CITED_NOT_VERIFIED',
+        relationStatus: 'EXPLICIT',
+        provenance: [...authority.provenance],
+        metadata: {
+          authorityType: authority.authorityType,
+          verificationStatus: authority.verificationStatus,
+        },
+      };
+    });
 }
 
 function buildPetitionSupportCoverageItems(rich: RichCaseAnalysis, sections: DocumentNode[]): DocumentCoverageItem[] {

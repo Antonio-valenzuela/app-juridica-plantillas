@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { requireCaseAccess } from '@/lib/cases/access';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,18 @@ export async function GET(
 
     // Contención estricta: el archivo resuelto debe vivir dentro del directorio de uploads.
     if (filePath !== UPLOADS_BASE && !filePath.startsWith(UPLOADS_BASE + path.sep)) {
+      return NextResponse.json({ ok: false, error: 'Archivo no encontrado.' }, { status: 404 });
+    }
+
+    const template = await prisma.legalTemplate.findFirst({
+      where: {
+        organizationId: access.context.organizationId,
+        createdBy: access.context.userId,
+        structureJson: { path: ['storage', 'savedFileName'], equals: sanitized },
+      },
+      select: { id: true },
+    });
+    if (!template) {
       return NextResponse.json({ ok: false, error: 'Archivo no encontrado.' }, { status: 404 });
     }
 

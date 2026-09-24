@@ -1,4 +1,5 @@
 import { readDocumentExportReadiness } from './documentLifecycle';
+import { resolveExportMode } from './exportModes';
 import type {
   DocumentAssemblyQualityGateResult,
   DocumentAssemblyResult,
@@ -19,6 +20,10 @@ type AssemblyAttachedDocument = UniversalLegalDocument & {
 };
 
 type CompatibilityMetadata = NonNullable<UniversalLegalDocument['generationMetadata']['sourceOutputCompatibility']>;
+
+function allowsDraftExport(options: { allowReviewOverride?: boolean; exportMode?: unknown }): boolean {
+  return options.allowReviewOverride === true || resolveExportMode(options.exportMode) === 'DRAFT';
+}
 
 export class FinalDocumentMaterializationGateError extends Error {
   readonly code = 'FINAL_DOCUMENT_MATERIALIZATION_NOT_VERIFIED';
@@ -130,7 +135,7 @@ function invalidEvidenceFindings(
 export function verifyFinalDocumentExportability(input: {
   document: UniversalLegalDocument;
   exportValidation: ExportValidationResult;
-}): RichVerifiedInput {
+}, options: { allowReviewOverride?: boolean; exportMode?: unknown } = {}): RichVerifiedInput {
   const reasons: string[] = [];
   const document = input?.document as AssemblyAttachedDocument | undefined;
   const assembly = document?.documentAssemblyResult;
@@ -158,10 +163,10 @@ export function verifyFinalDocumentExportability(input: {
     if (assemblyGate.readiness !== 'READY') reasons.push(`assembly QualityGate readiness is ${assemblyGate.readiness}`);
     if (assembly) reasons.push(...invalidEvidenceFindings(assembly, assemblyGate));
   }
-  if (!exportValidation || exportValidation.ok !== true) reasons.push('export guard did not pass');
+  if (!allowsDraftExport(options) && (!exportValidation || exportValidation.ok !== true)) reasons.push('export guard did not pass');
 
   const lifecycleReadiness = readDocumentExportReadiness(document);
-  if (lifecycleReadiness !== 'READY_TO_EXPORT' && lifecycleReadiness !== 'FINAL_DOCUMENT') {
+  if (!allowsDraftExport(options) && lifecycleReadiness !== 'READY_TO_EXPORT' && lifecycleReadiness !== 'FINAL_DOCUMENT') {
     reasons.push(`document lifecycle is not exportable: ${lifecycleReadiness || 'UNKNOWN'}`);
   }
 
@@ -187,7 +192,7 @@ export function verifyFinalDocumentExportability(input: {
 export function verifyCompatibilityMaterialization(input: {
   document: UniversalLegalDocument;
   exportValidation: ExportValidationResult;
-}): VerifiedCompatibilityInput {
+}, options: { allowReviewOverride?: boolean; exportMode?: unknown } = {}): VerifiedCompatibilityInput {
   const reasons: string[] = [];
   const document = input?.document as AssemblyAttachedDocument | undefined;
   const exportValidation = input?.exportValidation;
@@ -216,11 +221,11 @@ export function verifyCompatibilityMaterialization(input: {
   }
 
   if (document) reasons.push(...compatibilityEvidenceReasons(document));
-  if (!exportValidation || exportValidation.ok !== true) reasons.push('export guard did not pass');
+  if (!allowsDraftExport(options) && (!exportValidation || exportValidation.ok !== true)) reasons.push('export guard did not pass');
   if (document && !structuralChecksPass(document)) reasons.push('required compatibility structural checks did not pass');
 
   const lifecycleReadiness = document ? readDocumentExportReadiness(document) : undefined;
-  if (lifecycleReadiness !== 'READY_TO_EXPORT' && lifecycleReadiness !== 'FINAL_DOCUMENT') {
+  if (!allowsDraftExport(options) && lifecycleReadiness !== 'READY_TO_EXPORT' && lifecycleReadiness !== 'FINAL_DOCUMENT') {
     reasons.push(`document lifecycle is not exportable: ${lifecycleReadiness || 'UNKNOWN'}`);
   }
 

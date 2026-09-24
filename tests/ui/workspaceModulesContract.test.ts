@@ -18,13 +18,13 @@ describe('Workspace visual modules contract', () => {
     }
   });
 
-  it('conserva una composición de tres torres para Inicio y módulos de biblioteca', () => {
+  it('conserva los módulos activos y no reintroduce vistas ficticias', () => {
     const modules = fs.readFileSync(modulesPath, 'utf8');
-    expect(modules).toContain('workspace-home-towers');
-    expect(modules).toContain('Mis Plantillas');
+    expect(modules).toContain('Métricas y actividad derivadas de datos persistidos');
     expect(modules).toContain('Cómputo de Términos');
     expect(modules).toContain('Jurisprudencia SCJN');
     expect(modules).toContain('Alertas DOF y Boletín');
+    expect(modules).not.toMatch(/function (HomeView|ExpedientesView|TermsView|ResearchView|LibraryView|AlertsView|SettingsView|HelpView)\s*\(/);
   });
 
   it('declara la composición vertical + dos paneles simétricos del Motor Jurídico', () => {
@@ -33,8 +33,10 @@ describe('Workspace visual modules contract', () => {
     expect(page).toContain('universal-analysis-inspector');
   });
 
-  it('usa claves únicas para los encabezados repetidos del calendario', () => {
+  it('mantiene estados explícitos para los módulos sin persistencia o fuente', () => {
     const modules = fs.readFileSync(modulesPath, 'utf8');
-    expect(modules).toContain("map((day, index) => <span key={`${day}-${index}`}");
+    expect(modules).toContain('No se muestran expedientes de demostración');
+    expect(modules).toContain('resultado PROVISIONAL');
+    expect(modules).toContain('Fechas excluidas configuradas');
   });
 });

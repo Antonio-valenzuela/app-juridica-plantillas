@@ -374,7 +374,12 @@ function enrichIssueDependencies(
     })
     .flatMap((item) => item.missingDataIds || []);
   const conflictIds = sortedUnique([...issue.conflictIds, ...attachedConflictIds]);
-  const positionIds = [...issue.claimIds, ...issue.factIds];
+  const positionIds = [
+    ...issue.claimIds,
+    ...issue.factIds,
+    ...issue.argumentIds,
+    ...(issue.challengedReasoningIds || []),
+  ];
   const requiresClientPosition = coverageItem?.requiresClientPosition === true;
   const clientPositionStatus: ClientPositionStatus = !requiresClientPosition
     ? 'NOT_REQUIRED'

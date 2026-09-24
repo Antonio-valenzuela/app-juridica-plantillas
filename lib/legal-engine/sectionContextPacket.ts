@@ -2,6 +2,7 @@ import type { SourceProvenance, FactItem, EvidenceMention, EvidenceOffer, Source
 import type { LegalResearchBundle, VerifiedAuthority } from './legal-research/types';
 import type { IssueDraftResult, IssueGenerationOutcome } from './issueDraftResult';
 import type { SectionSummary } from './documentState';
+import type { ArgumentSupport } from './matterKnowledgeBase';
 
 export type SectionContextStatus = 'READY' | 'BLOCKED';
 
@@ -103,6 +104,7 @@ export interface SectionContextPacket {
   evidence: SectionEvidenceMaterial[];
   verifiedAuthorities: SectionAuthorityMaterial[];
   research: SectionResearchMaterial[];
+  argumentSupports?: ArgumentSupport[];
   clientPosition?: Pick<ClientPosition, 'status' | 'source' | 'propositionIds' | 'provenance'>;
   previousSectionSummaries: SectionSummary[];
   blockers: string[];

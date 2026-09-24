@@ -135,6 +135,20 @@ export interface AuthorityCandidate {
   evidenceExcerptHash?: string;
   metadataStatus: 'COMPLETE' | 'PARTIAL' | 'INSUFFICIENT';
   candidateStatus: 'DISCOVERED' | 'RETRIEVED' | 'REJECTED';
+  normalizedAuthority?: LegalAuthority;
+}
+
+export interface LegalAuthority {
+  id: string;
+  title: string;
+  type: AuthorityType;
+  reference: string;
+  bindingStatus: 'BINDING' | 'PERSUASIVE' | 'NON_BINDING' | 'UNKNOWN';
+  validityStatus: 'CURRENT' | 'STALE' | 'UNKNOWN';
+  sourceUrl: string;
+  officialSourceUrl?: string;
+  provider: AuthorityCandidate['provider'] | 'LLM';
+  verificationStatus: 'VERIFIED' | 'UNVERIFIED' | 'STALE' | 'REQUIRES_OFFICIAL_CONFIRMATION' | 'AUTHORITY_NOT_FOUND';
 }
 
 export interface OfficialSourceEvidence {

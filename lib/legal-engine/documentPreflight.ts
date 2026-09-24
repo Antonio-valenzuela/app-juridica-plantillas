@@ -518,6 +518,8 @@ function requiredFieldId(label: string): string {
   if (/quejoso|promovente|recurrente|incidentista|parte interesada/.test(value)) return 'represented_party';
   if (/autoridad|juzgado|tribunal|junta|scjn|destinatari|organo/.test(value)) return 'competent_authority';
   if (/personalidad|representacion/.test(value)) return 'personality';
+  if (/resolucion\s+recurrida|sentencia\s+recurrida|acto\s+impugnado/.test(value)) return 'challenged_resolution';
+  if (/antecedente/.test(value)) return 'procedural_background';
   if (/hecho/.test(value)) return 'facts';
   if (/prestacion|pretension|accion/.test(value)) return 'claims';
   if (/excepcion|defensa/.test(value)) return 'defenses';
@@ -550,6 +552,9 @@ function reusableFieldValue(subject: ReusablePreflightSubject, id: string): stri
   if (id === 'claims') return (subject.analysis.claimResponses?.length || subject.analysis.claims?.length) ? 'present' : undefined;
   if (id === 'evidence') return subject.analysis.evidence?.length ? 'present' : undefined;
   if (id === 'grounds') return (subject.legalBasis.length || subject.analysis.arguments?.length || subject.analysis.citations?.length) ? 'present' : undefined;
+  if (id === 'challenged_resolution') return subject.analysis.challengedActs?.length || subject.analysis.rulings?.length ? 'present' : undefined;
+  if (id === 'procedural_background') return subject.analysis.proceduralTimeline?.length || subject.analysis.facts?.length ? 'present' : undefined;
+  if (id === 'petition') return subject.analysis.argumentAxes?.some((axis) => Boolean(axis.requestedConsequence?.trim())) ? 'present' : undefined;
   return undefined;
 }
 

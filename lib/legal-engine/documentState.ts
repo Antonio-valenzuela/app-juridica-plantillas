@@ -21,6 +21,7 @@ export interface DocumentState {
   claimIds: string[];
   evidenceIdsUsed: string[];
   authorityIdsUsed: string[];
+  argumentsAlreadyUsed: string[];
   previousConclusions: SectionSummary[];
   unresolvedIssueIds: string[];
   matterKnowledgeBase: MatterKnowledgeBase;
@@ -39,6 +40,7 @@ export function createDocumentState(caseAnalysis: CaseAnalysis, issueMatrix?: Le
     claimIds: unique((rich?.claims || []).map((claim) => claim.id)),
     evidenceIdsUsed: [],
     authorityIdsUsed: [],
+    argumentsAlreadyUsed: [],
     previousConclusions: [],
     unresolvedIssueIds: [...matterKnowledgeBase.unresolvedIssueIds],
     matterKnowledgeBase,
@@ -60,6 +62,12 @@ export function advanceDocumentState(state: DocumentState, input: { sectionId: s
     ...state,
     evidenceIdsUsed: unique([...state.evidenceIdsUsed, ...summary.usedEvidenceIds]),
     authorityIdsUsed: unique([...state.authorityIdsUsed, ...summary.usedAuthorityIds]),
+    argumentsAlreadyUsed: unique([
+      ...state.argumentsAlreadyUsed,
+      ...state.matterKnowledgeBase.argumentSupports
+        .filter((support) => support.proposition && input.text.toLocaleLowerCase().includes(support.proposition.toLocaleLowerCase().slice(0, 80)))
+        .map((support) => support.argumentId),
+    ]),
     previousConclusions: [...state.previousConclusions.filter((item) => item.sectionId !== summary.sectionId), summary].sort((left, right) => left.order - right.order),
   };
 }

@@ -17,7 +17,10 @@ const MONTHS: Record<string, string> = {
 };
 
 function provenanceOf(candidate: ExtractionCandidate): SourceProvenance[] {
-  return candidate.provenance.map((item) => ({ ...item, extractionMethod: 'NORMALIZATION', inferenceLevel: 'NORMALIZED' }));
+  // Normalization changes the representation, not the source of the fact.
+  // Preserve OCR/native/structural provenance so a normalized date remains
+  // traceable to the page that actually contained it.
+  return candidate.provenance.map((item) => ({ ...item, inferenceLevel: 'NORMALIZED' }));
 }
 
 function monthNumber(value: string): string | undefined {

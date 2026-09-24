@@ -14,7 +14,13 @@
     "test": "vitest run",
     "release-gate": "node scripts/release-gate.mjs",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "db:backup": "node scripts/db-backup.mjs",
+    "db:restore": "node scripts/db-restore.mjs",
+    "db:validate-backup": "node scripts/db-validate-backup.mjs",
+    "db:backup-restore-smoke": "node scripts/db-backup-restore-smoke.mjs",
+    "distribution:validate": "node scripts/validate-distribution.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",

@@ -14,6 +14,21 @@ function candidate(rawText: string): ExtractionCandidate {
 }
 
 describe('case extraction normalization', () => {
+  it('preserves OCR provenance when a date is normalized', () => {
+    const source = createSourceProvenance({
+      sourceId: 'src-ocr',
+      page: 7,
+      excerpt: '3 de enero de 2026',
+      extractionMethod: 'OCR',
+      confidence: 0.94,
+      inferenceLevel: 'LITERAL',
+    });
+    const date = normalizeDateCandidate({ ...candidate('3 de enero de 2026'), provenance: [source] });
+
+    expect(date.normalizedValue).toBe('2026-01-03');
+    expect(date.provenance[0]).toMatchObject({ sourceId: 'src-ocr', page: 7, extractionMethod: 'OCR', inferenceLevel: 'NORMALIZED' });
+  });
+
   it('normalizes a complete date while preserving raw text', () => {
     const date = normalizeDateCandidate(candidate('3 de enero de 2026'));
 

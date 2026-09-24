@@ -37,10 +37,24 @@ export async function checkRateLimitDistributed(
   key: string,
   limit = MAX_REQUESTS
 ): Promise<{ ok: boolean; headers: Record<string, string> }> {
+  // Single-node controlled-pilot implementation. This name remains for API
+  // compatibility, but it must not be described as distributed persistence.
   return checkRateLimit(key, limit);
 }
 
 export function extractIp(req: Request): string {
+  const trustProxy = process.env.TRUST_PROXY?.trim().toLowerCase() === 'true';
+  if (!trustProxy) return 'direct-client';
   const forwarded = req.headers.get("x-forwarded-for");
   return forwarded ? forwarded.split(",")[0].trim() : "unknown-ip";
+}
+
+export function checkRequestRateLimit(
+  request: Request,
+  scope: string,
+  limit: number,
+  subject?: string,
+): { ok: boolean; headers: Record<string, string> } {
+  const identity = subject?.trim() || extractIp(request);
+  return checkRateLimit(`${scope}:${identity}`, limit);
 }

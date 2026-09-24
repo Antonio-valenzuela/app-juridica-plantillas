@@ -34,6 +34,9 @@ export const DOF_OFFICIAL_DOMAINS = [
 export interface DofAdapterConfig {
   sidofBaseUrl?: string;
   dofWebBaseUrl?: string;
+  alertsUrl?: string;
+  /** Compatibility-only path for existing callers that explicitly need the historical date contract. */
+  legacyNotesByDate?: boolean;
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   timeoutMs?: number;
   clock?: ResearchClock;
@@ -41,6 +44,7 @@ export interface DofAdapterConfig {
 
 const DEFAULT_SIDOF_BASE = 'https://sidof.segob.gob.mx/dof/sidof';
 const DEFAULT_DOFWEB_BASE = 'https://dof.gob.mx'; // NUNCA www.dof.gob.mx (SSL hostname mismatch documentado en LegalIA)
+const DEFAULT_ALERTS_PATH = '/alertas/obtieneAlertasPublicas';
 const USER_AGENT = 'Mozilla/5.0 (compatible; DOF-JSON-Client/1.0)';
 
 interface SidofNota {
@@ -52,6 +56,12 @@ interface SidofNota {
   pagina?: number;
   url?: string;
   cadenaContenido?: string;
+  id?: number | string;
+  tipoAlerta?: string;
+  textoBusqueda?: string;
+  descripcion?: string;
+  codEstatus?: number;
+  buscarEn?: string;
 }
 
 function formatDate(d: Date): string {
@@ -67,6 +77,7 @@ export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchPr
   const timeoutMs = config.timeoutMs || 15000;
   const sidofBase = (config.sidofBaseUrl || DEFAULT_SIDOF_BASE).replace(/\/+$/, '');
   const dofWebBase = (config.dofWebBaseUrl || DEFAULT_DOFWEB_BASE).replace(/\/+$/, '');
+  const alertsUrl = config.alertsUrl || `${sidofBase}${DEFAULT_ALERTS_PATH}`;
   const byCandidateId = new Map<string, { candidate: AuthorityCandidate; nota: SidofNota }>();
 
   const getJson = async (url: string): Promise<unknown> => {
@@ -78,6 +89,27 @@ export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchPr
           'User-Agent': USER_AGENT,
           Accept: 'application/json',
         },
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`DOF_HTTP_${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const postJson = async (url: string, body: unknown): Promise<unknown> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetcher(url, {
+        method: 'POST',
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
       if (!res.ok) throw new Error(`DOF_HTTP_${res.status}`);
@@ -110,6 +142,40 @@ export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchPr
       const candidates: AuthorityCandidate[] = [];
 
       try {
+        if (!config.legacyNotesByDate) {
+          const payload = await postJson(alertsUrl, {}) as Record<string, unknown>;
+          const alerts = Array.isArray(payload?.alertas) ? payload.alertas : [];
+          for (const raw of alerts as SidofNota[]) {
+            const title = raw.descripcion || raw.textoBusqueda || '';
+            const identifier = raw.id ? String(raw.id) : title;
+            const candidate: AuthorityCandidate = {
+              id: stableResearchId('candidate', { adapterId: 'DOF_ALERTS', requestId: input.request.id, identifier }),
+              requestId: input.request.id,
+              provider: 'DOF',
+              identifier,
+              title,
+              authorityType: 'OFFICIAL_AGREEMENT',
+              observedCitation: `Alerta pública DOF: ${title}`,
+              canonicalCitationCandidate: `SIDOF alerta pública - ${title}`,
+              sourceUrl: alertsUrl,
+              sourceDomain: 'sidof.segob.gob.mx',
+              sourceTier: 'OFFICIAL_PRIMARY',
+              issuingAuthority: 'Diario Oficial de la Federación',
+              jurisdiction: 'FEDERAL',
+              retrievedAt: clock().toISOString(),
+              metadataStatus: title ? 'COMPLETE' : 'PARTIAL',
+              candidateStatus: 'DISCOVERED',
+            };
+            byCandidateId.set(candidate.id, { candidate, nota: raw });
+            candidates.push(candidate);
+          }
+          return {
+            status: candidates.length > 0 ? 'PASS' : 'PARTIAL',
+            candidates,
+            reasons: candidates.length > 0 ? [] : ['DOF_NO_PUBLIC_ALERTS_MATCHES'],
+          };
+        }
+
         const payload = await getJson(`${sidofBase}/notas/${dateStr}`) as Record<string, unknown>;
         const notasRaw = Array.isArray(payload?.Notas) ? payload.Notas : Array.isArray(payload) ? payload : [];
         const queryTerms = input.query.explicitTerms.map((t) => t.toLowerCase());

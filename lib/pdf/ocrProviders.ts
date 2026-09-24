@@ -9,6 +9,15 @@
  * in getOCRProvider() below.
  */
 
+import { execFile } from 'child_process';
+import { existsSync } from 'fs';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises';
+import { homedir, tmpdir } from 'os';
+import { dirname, join } from 'path';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface OCRPageResult {
@@ -371,13 +380,85 @@ export function extractImagesFromPdfBuffer(pdfBuffer: Buffer): Buffer[] {
   return images;
 }
 
+let resolvedPdfRenderer: string | null | undefined;
+
+function resolveTesseractWorkerPath(): string | undefined {
+  const configured = process.env.TESSERACT_WORKER_PATH?.trim();
+  const packageWorker = join(process.cwd(), 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
+  const workerPath = configured || packageWorker;
+  return existsSync(workerPath) ? workerPath : undefined;
+}
+
+async function resolvePdfRenderer(): Promise<string | null> {
+  if (resolvedPdfRenderer !== undefined) return resolvedPdfRenderer;
+
+  const configured = process.env.PDF_TO_IMAGE_COMMAND?.trim();
+  const candidates = [
+    configured,
+    'pdftoppm',
+    join(process.cwd(), 'vendor', 'poppler', 'Library', 'bin', 'pdftoppm.exe'),
+    join(homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'native', 'poppler', 'Library', 'bin', 'pdftoppm.exe'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    try {
+      await execFileAsync(candidate, ['-h'], { windowsHide: true, maxBuffer: 1024 * 1024 });
+      resolvedPdfRenderer = candidate;
+      return candidate;
+    } catch (error: any) {
+      // pdftoppm returns a non-zero exit code for -h on some builds, but that
+      // still proves the executable was found. Continue only when it is absent.
+      if (!['ENOENT', 'ENOTFOUND'].includes(error?.code)) {
+        resolvedPdfRenderer = candidate;
+        return candidate;
+      }
+    }
+  }
+
+  resolvedPdfRenderer = null;
+  return null;
+}
+
+/** Probe used by the operational readiness report without processing a document. */
+export async function resolvePdfRendererForReadiness(): Promise<string | null> {
+  return resolvePdfRenderer();
+}
+
+async function renderPdfToImages(pdfBuffer: Buffer, command: string): Promise<Buffer[]> {
+  const workDir = await mkdtemp(join(tmpdir(), 'app-plantillas-ocr-'));
+  const pdfPath = join(workDir, 'document.pdf');
+  const outputPrefix = join(workDir, 'page');
+
+  try {
+    await writeFile(pdfPath, pdfBuffer);
+    await execFileAsync(
+      command,
+      ['-jpeg', '-jpegopt', 'quality=85', '-r', '120', pdfPath, outputPrefix],
+      { windowsHide: true, maxBuffer: 2 * 1024 * 1024 }
+    );
+
+    const renderedFiles = (await readdir(dirname(outputPrefix)))
+      .filter((name) => /^page-\d+\.jpe?g$/i.test(name))
+      .sort((a, b) => {
+        const pageA = Number(a.match(/(\d+)/)?.[1] || 0);
+        const pageB = Number(b.match(/(\d+)/)?.[1] || 0);
+        return pageA - pageB;
+      });
+
+    return Promise.all(renderedFiles.map((fileName) => readFile(join(workDir, fileName))));
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 // ── Tesseract Local OCR Provider ───────────────────────────────────────────────
 
 /**
  * Local Tesseract.js provider for image files and scanned image-only PDFs.
  * Set OCR_PROVIDER=tesseract.
  * Works completely offline without external API calls.
- * Supports image formats (PNG/JPEG) and scanned PDFs by extracting embedded page images.
+ * Supports image formats (PNG/JPEG) and scanned PDFs by rendering every page
+ * locally with pdftoppm before sending each image to Tesseract.js.
  */
 export class TesseractOCRProvider implements DocumentOCRProvider {
   readonly name = 'tesseract';
@@ -389,9 +470,23 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
   async process(input: OCRInput): Promise<OCRResult> {
     const start = Date.now();
     let imageBuffers: Buffer[] = [];
+    let warningsFromRenderError = '';
 
     if (input.mimeType === 'application/pdf') {
-      imageBuffers = extractImagesFromPdfBuffer(input.buffer);
+      const pdfRenderer = await resolvePdfRenderer();
+      if (pdfRenderer) {
+        try {
+          imageBuffers = await renderPdfToImages(input.buffer, pdfRenderer);
+        } catch (error: any) {
+          warningsFromRenderError = `Renderizado PDF local falló: ${error?.message || 'error desconocido'}`;
+        }
+      }
+
+      // Keep the embedded-JPEG path as a lightweight fallback for PDFs whose
+      // native renderer is unavailable or cannot decode a particular file.
+      if (imageBuffers.length === 0) {
+        imageBuffers = extractImagesFromPdfBuffer(input.buffer);
+      }
       if (imageBuffers.length === 0) {
         return {
           text: '',
@@ -400,7 +495,10 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
           provider: this.name,
           pageCount: 0,
           durationMs: Date.now() - start,
-          warnings: ['No se detectaron imágenes embebidas en el PDF para procesar con Tesseract local.'],
+          warnings: [
+            ...(warningsFromRenderError ? [warningsFromRenderError] : []),
+            'No se pudieron preparar páginas del PDF para Tesseract local.',
+          ],
         };
       }
     } else {
@@ -408,34 +506,44 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
     }
 
     const Tesseract = await import('tesseract.js');
-    const worker = await Tesseract.default.createWorker(input.language || 'spa');
-    const pages: OCRPageResult[] = [];
-    const textParts: string[] = [];
-    let totalConfidence = 0;
-    const warnings: string[] = [];
+    const workerCount = Math.min(2, imageBuffers.length);
+    const workerPath = resolveTesseractWorkerPath();
+    const workers = await Promise.all(
+      Array.from(
+        { length: workerCount },
+        () => Tesseract.default.createWorker(input.language || 'spa', 1, workerPath ? { workerPath } : {})
+      )
+    );
+    const pageResults: Array<OCRPageResult & { confidence: number }> = [];
+    const warnings: string[] = warningsFromRenderError ? [warningsFromRenderError] : [];
 
     try {
-      for (let idx = 0; idx < imageBuffers.length; idx++) {
-        const imgBuf = imageBuffers[idx];
-        const result = await worker.recognize(imgBuf);
-        const pageText = (result.data.text || '').trim();
-        const conf = Math.round(result.data.confidence || 0);
-        textParts.push(pageText);
-        totalConfidence += conf;
-        pages.push({
-          page: idx + 1,
-          text: pageText,
-          chars: pageText.length,
-        });
-      }
+      let nextPage = 0;
+      await Promise.all(workers.map(async (worker) => {
+        while (true) {
+          const idx = nextPage++;
+          if (idx >= imageBuffers.length) return;
+          const result = await worker.recognize(imageBuffers[idx]);
+          const pageText = (result.data.text || '').trim();
+          pageResults[idx] = {
+            page: idx + 1,
+            text: pageText,
+            chars: pageText.length,
+            confidence: Math.round(result.data.confidence || 0),
+          };
+        }
+      }));
     } catch (err: any) {
       warnings.push(`Tesseract error: ${err.message}`);
     } finally {
-      await worker.terminate().catch(() => {});
+      await Promise.all(workers.map((worker) => worker.terminate().catch(() => {})));
     }
 
+    const pages: OCRPageResult[] = pageResults.filter(Boolean).map(({ confidence: _confidence, ...page }) => page);
+    const textParts = pages.map((page) => page.text);
+    const totalConfidence = pageResults.reduce((sum, page) => sum + (page?.confidence || 0), 0);
     const fullText = textParts.join('\n\n').trim();
-    const avgConfidence = imageBuffers.length > 0 ? Math.round(totalConfidence / imageBuffers.length) : 0;
+    const avgConfidence = pageResults.length > 0 ? Math.round(totalConfidence / pageResults.length) : 0;
 
     return {
       text: fullText,
@@ -473,9 +581,10 @@ export class DisabledOCRProvider implements DocumentOCRProvider {
  *
  * Supported values:
  *   ilovepdf  → ILovePDFOCRProvider (production, requires API keys)
- *   tesseract → TesseractOCRProvider (local, images only)
+ *   tesseract → TesseractOCRProvider (local, images and rendered PDFs)
  *   mock      → MockOCRProvider (SOLO pruebas/CI, debe pedirse explícitamente)
- *   (sin valor) → DisabledOCRProvider: sin OCR; la fuente queda sin validar
+ *   auto / (sin valor) → TesseractOCRProvider when local PDF rendering is available
+ *   off / none → DisabledOCRProvider: sin OCR; la fuente queda sin validar
  *
  * Production deployments should set OCR_PROVIDER=ilovepdf plus the
  * ILOVEPDF_PUBLIC_KEY and ILOVEPDF_SECRET_KEY env vars.
@@ -492,8 +601,11 @@ export function getOCRProvider(): DocumentOCRProvider {
       // Requiere opt-in explícito: el mock genera texto jurídico ficticio y jamás
       // debe aplicarse por accidente a un expediente real.
       return new MockOCRProvider();
-    case 'none':
+    case 'auto':
     case '':
+      return new TesseractOCRProvider();
+    case 'off':
+    case 'none':
     default:
       return new DisabledOCRProvider();
   }

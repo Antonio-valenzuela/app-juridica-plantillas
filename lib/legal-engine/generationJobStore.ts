@@ -1,8 +1,9 @@
 /**
  * lib/legal-engine/generationJobStore.ts
  * P5 — Capa abstracta para persistencia de jobs.
- * Estado actual: InMemory (globalThis) — suficiente para single-node / dev.
- * Arquitectura preparada para Redis/BullMQ sin cambiar UI.
+ * Cache de ejecución en memoria con espejo durable en GenerationJob/Prisma.
+ * La memoria acelera el pipeline; la persistencia permite recuperar status,
+ * ownership, idempotencia y estado terminal después de un reinicio.
  *
  * Estados: created → queued → processing → completed
  *                               → failed
@@ -59,16 +60,12 @@ class InMemoryJobStore implements GenerationJobStore {
   }
 }
 
-// Instancia global — cambiar aquí a RedisJobStore cuando exista REDIS_URL / BullMQ
+// Instancia global: el cache local se acompaña de persistencia durable en producción.
 export const generationJobStore: GenerationJobStore = new InMemoryJobStore();
 
-const _impl = process.env.REDIS_URL && process.env.USE_REDIS_JOBSTORE === 'true' ? 'RedisJobStore' : 'InMemoryJobStore';
+const _impl = process.env.REDIS_URL && process.env.USE_REDIS_JOBSTORE === 'true' ? 'RedisJobStore' : 'InMemoryCacheWithPrismaPersistence';
 if (typeof console !== 'undefined') {
-  if (_impl === 'InMemoryJobStore' && process.env.NODE_ENV === 'production') {
-    console.warn('[JobStore] ATENCIÓN: InMemoryJobStore en producción — los jobs se perderán al reiniciar. Configure REDIS_URL y USE_REDIS_JOBSTORE=true para persistencia real.');
-  } else {
-    console.log(`[JobStore] Implementación activa: ${_impl}${_impl === 'InMemoryJobStore' ? ' (single-node, globalThis, TTL 30m)' : ' (Redis/BullMQ)'}`);
-  }
+  console.log(`[JobStore] Implementación activa: ${_impl}`);
 }
 
 // Helper para migrar a Redis/BullMQ en el futuro:

@@ -6,6 +6,8 @@ import { LIFECYCLE_METADATA_KEY, readDocumentLifecycle } from '@/lib/legal-engin
 import { filterVisibleTemplates, markTemplateAsUserOwned } from '@/lib/templates/templateOrigin';
 import { sanitizeTemplateContent } from '@/lib/templates/templateSanitizer';
 import { analyzePersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
+import path from 'node:path';
+import { deleteOwnedTemplateFile } from '@/lib/security/templateFileCleanup';
 
 export const dynamic = 'force-dynamic';
 
@@ -300,6 +302,48 @@ export async function DELETE(
     if (!access.ok) return access.response;
     // Mutaciones: scope ESTRICTO al organizationId autenticado. Nunca al tenant compartido 'demo-legal'.
     const orgId = access.context.organizationId;
+
+    const existing = await prisma.legalTemplate.findFirst({
+      where: { id, organizationId: orgId },
+      select: { id: true, structureJson: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ ok: false, error: 'Plantilla no encontrada.' }, { status: 404 });
+    }
+
+    const structure = isRecord(existing.structureJson)
+      ? existing.structureJson as Record<string, unknown>
+      : null;
+    const storage = structure && isRecord(structure.storage) ? structure.storage : null;
+    const savedFileName = storage?.savedFileName;
+    if (savedFileName !== undefined && typeof savedFileName !== 'string') {
+      return NextResponse.json(
+        { ok: false, errorCode: 'TEMPLATE_FILE_CLEANUP_FAILED', error: 'No fue posible validar el archivo asociado.' },
+        { status: 409 },
+      );
+    }
+
+    if (typeof savedFileName === 'string') {
+      let cleanupResult: Awaited<ReturnType<typeof deleteOwnedTemplateFile>>;
+      try {
+        cleanupResult = await deleteOwnedTemplateFile({
+          storageRoot: path.join(process.cwd(), 'data', 'uploads', 'templates'),
+          savedFileName,
+        });
+      } catch (error) {
+        console.error('[templates/custom/[id]] DELETE file cleanup failed:', error);
+        return NextResponse.json(
+          { ok: false, errorCode: 'TEMPLATE_FILE_CLEANUP_FAILED', error: 'No fue posible limpiar el archivo asociado.' },
+          { status: 500 },
+        );
+      }
+      if (cleanupResult === 'SKIPPED_INVALID') {
+        return NextResponse.json(
+          { ok: false, errorCode: 'TEMPLATE_FILE_CLEANUP_FAILED', error: 'La ruta del archivo asociado no es segura.' },
+          { status: 409 },
+        );
+      }
+    }
 
     const deleted = await prisma.legalTemplate.deleteMany({
       where: {

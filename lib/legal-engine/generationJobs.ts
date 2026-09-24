@@ -7,6 +7,7 @@
  */
 
 import type { UniversalLegalDocument } from './types';
+import { enqueueGenerationJobPersistence } from './generationJobPersistence';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -14,10 +15,15 @@ type CompletionDocument = UniversalLegalDocument & {
 };
 
 export type GenerationJobStatus = 'processing' | 'completed' | 'failed' | 'cancelled';
+export type GenerationTerminalStatus = 'COMPLETED' | 'COMPLETED_WITH_WARNINGS' | 'FAILED' | 'NEEDS_REVIEW' | 'CANCELLED';
 
 export interface GenerationJob {
   jobId: string;
+  organizationId: string;
+  userId: string;
   status: GenerationJobStatus;
+  /** Compatibilidad legacy: status conserva completed/failed/cancelled. */
+  terminalStatus?: GenerationTerminalStatus;
   total: number;            // total bloques jurídicos
   completed: number;        // bloques terminados (preservados + IA con éxito/fallback)
   percentage: number;       // Math.round(completed/total*100)
@@ -41,6 +47,9 @@ export interface GenerationJob {
   expansionTotal?: number;
   expansionCompleted?: number;
   phase?: string;
+  warnings: string[];
+  checkpointDocument?: UniversalLegalDocument | null;
+  cancelRequested: boolean;
 }
 
 const JOB_TTL_MS = 30 * 60 * 1000; // 30 min retención
@@ -72,14 +81,17 @@ import { randomUUID as nodeRandomUUID } from 'crypto';
 function genId(): string {
   try { return (globalThis as any).crypto?.randomUUID?.() || nodeRandomUUID(); } catch { return `${Date.now()}-${Math.random().toString(36).slice(2,8)}`; }
 }
-export function createGenerationJob(input: { fingerprint?: string | null; idempotencyKey?: string | null; total?: number; stage?: string }): GenerationJob {
+export function createGenerationJob(input: { organizationId?: string; userId?: string; fingerprint?: string | null; idempotencyKey?: string | null; total?: number; stage?: string }): GenerationJob {
   cleanup();
   const jobId = genId();
   const now = Date.now();
   const total = input.total ?? 0;
   const job: GenerationJob = {
     jobId,
+    organizationId: input.organizationId || 'unknown-organization',
+    userId: input.userId || 'unknown-user',
     status: 'processing',
+    terminalStatus: undefined,
     total,
     completed: 0,
     percentage: 0,
@@ -100,8 +112,12 @@ export function createGenerationJob(input: { fingerprint?: string | null; idempo
     updatedAt: new Date().toISOString(),
     startedAt: now,
     log: [`[pipeline:job] Job ${jobId} creado`],
+    warnings: [],
+    checkpointDocument: null,
+    cancelRequested: false,
   };
   JOBS.set(jobId, job);
+  enqueueGenerationJobPersistence(job);
   return job;
 }
 
@@ -110,10 +126,25 @@ export function getGenerationJob(jobId: string): GenerationJob | undefined {
   return JOBS.get(jobId);
 }
 
-export function findActiveJobByFingerprint(fingerprint: string | null, idempotencyKey: string | null): GenerationJob | undefined {
+export function evictGenerationJob(jobId: string): void {
+  JOBS.delete(jobId);
+}
+
+export function restoreGenerationJob(job: GenerationJob): GenerationJob {
+  cleanup();
+  JOBS.set(job.jobId, job);
+  return job;
+}
+
+export function findActiveJobByFingerprint(
+  fingerprint: string | null,
+  idempotencyKey: string | null,
+  owner?: { organizationId: string; userId: string },
+): GenerationJob | undefined {
   cleanup();
   for (const j of JOBS.values()) {
     if (j.status !== 'processing') continue;
+    if (owner && (j.organizationId !== owner.organizationId || j.userId !== owner.userId)) continue;
     if (idempotencyKey && j.idempotencyKey === idempotencyKey) return j;
     if (fingerprint && j.fingerprint === fingerprint) return j;
   }
@@ -122,7 +153,7 @@ export function findActiveJobByFingerprint(fingerprint: string | null, idempoten
 
 export function updateJobProgress(
   jobId: string,
-  patch: Partial<Pick<GenerationJob, 'total' | 'completed' | 'currentBlock' | 'currentBlockIndex' | 'aiProvider' | 'stage' | 'percentage' | 'expansionTotal' | 'expansionCompleted' | 'phase'>> & { logLine?: string },
+  patch: Partial<Pick<GenerationJob, 'total' | 'completed' | 'currentBlock' | 'currentBlockIndex' | 'aiProvider' | 'stage' | 'percentage' | 'expansionTotal' | 'expansionCompleted' | 'phase' | 'checkpointDocument'>> & { logLine?: string },
 ): GenerationJob | undefined {
   const job = JOBS.get(jobId);
   if (!job) return undefined;
@@ -132,6 +163,7 @@ export function updateJobProgress(
   if (patch.expansionTotal !== undefined) job.expansionTotal = patch.expansionTotal;
   if (patch.expansionCompleted !== undefined) job.expansionCompleted = patch.expansionCompleted;
   if (patch.phase !== undefined) job.phase = patch.phase;
+  if (patch.checkpointDocument !== undefined) job.checkpointDocument = patch.checkpointDocument;
   if (patch.total !== undefined) job.total = Math.max(0, Math.floor(patch.total));
   if (job.total > 0) job.completed = Math.min(job.completed, job.total);
   if (patch.completed !== undefined) {
@@ -162,20 +194,21 @@ export function updateJobProgress(
     if (job.expansionTotal && job.expansionTotal > 0 && (job.expansionCompleted === undefined || job.expansionCompleted < job.expansionTotal)) {
       rawPct = Math.min(95, rawPct);
     }
-    job.percentage = Math.min(100, rawPct);
+    job.percentage = Math.min(99, rawPct);
   } else {
     job.percentage = 0;
   }
-  if (patch.percentage !== undefined) job.percentage = patch.percentage;
+  if (patch.percentage !== undefined) job.percentage = Math.min(99, Math.max(0, Math.floor(patch.percentage)));
   if (patch.logLine) job.log.push(patch.logLine);
   job.updatedAt = new Date().toISOString();
+  enqueueGenerationJobPersistence(job);
   return job;
 }
 
 export function completeJob(
   jobId: string,
   doc: UniversalLegalDocument,
-  options?: { documentReadiness?: string },
+  options?: { documentReadiness?: string; terminalStatus?: GenerationTerminalStatus; warnings?: string[] },
 ): GenerationJob | undefined {
   const job = JOBS.get(jobId);
   if (!job) return undefined;
@@ -188,12 +221,15 @@ export function completeJob(
     || (doc.status === 'draft' || !doc.generationMetadata?.pipelineState?.isComplete ? 'REQUIRES_REVIEW' : 'READY');
 
   job.status = 'completed';
+  job.terminalStatus = options?.terminalStatus || (derivedReadiness === 'READY' ? 'COMPLETED' : 'NEEDS_REVIEW');
   job.document = doc;
+  job.checkpointDocument = doc;
   job.documentId = doc.id;
   job.documentReadiness = derivedReadiness;
   job.redirectUrl = null; // el editor reutiliza doc.id en memoria; no hay ruta nueva
   job.completed = job.total > 0 ? job.total : job.completed;
   job.percentage = 100;
+  job.warnings = Array.from(new Set([...(job.warnings || []), ...(options?.warnings || [])]));
 
   if (derivedReadiness === 'READY') {
     job.stage = 'Documento generado y listo para revisión final';
@@ -206,6 +242,8 @@ export function completeJob(
   job.updatedAt = new Date().toISOString();
   job.log.push(`[pipeline:job] ${job.completed}/${job.total} completado (readiness: ${derivedReadiness})`);
   job.log.push(`[pipeline:job] Documento generado: ${doc.id}`);
+  job.log.push(`[GenerationLifecycle:TERMINAL] jobId=${job.jobId} terminalStatus=${job.terminalStatus} documentId=${job.documentId} progress=100 warningsCount=${job.warnings.length} errorCode=${job.errorCode || ''}`);
+  enqueueGenerationJobPersistence(job);
   return job;
 }
 
@@ -219,12 +257,16 @@ export function failJob(
   if (!job) return undefined;
   if (job.status !== 'processing') return job;
   job.status = 'failed';
+  job.terminalStatus = 'FAILED';
   job.error = error;
-  job.errorCode = errorCode || null;
+  job.errorCode = errorCode || 'GENERATION_FAILED';
   job.errorMetadata = errorMetadata || null;
   job.stage = 'Error';
   job.updatedAt = new Date().toISOString();
-  job.log.push(`[pipeline:job] Fallido: ${error}`);
+  job.percentage = 100;
+  job.log.push(`[pipeline:job] Fallido: ${job.errorCode}`);
+  job.log.push(`[GenerationLifecycle:TERMINAL] jobId=${job.jobId} terminalStatus=FAILED documentId=${job.documentId || ''} progress=100 warningsCount=${job.warnings.length} errorCode=${job.errorCode}`);
+  enqueueGenerationJobPersistence(job);
   return job;
 }
 
@@ -233,11 +275,81 @@ export function cancelJob(jobId: string): GenerationJob | undefined {
   if (!job) return undefined;
   if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') return job;
   job.status = 'cancelled';
+  job.terminalStatus = 'CANCELLED';
+  job.cancelRequested = true;
   job.stage = 'Cancelado por el usuario';
   job.error = 'CANCELLED';
   job.updatedAt = new Date().toISOString();
   job.log.push(`[pipeline:job] Cancelado`);
+  job.percentage = 100;
+  job.log.push(`[GenerationLifecycle:TERMINAL] jobId=${job.jobId} terminalStatus=CANCELLED documentId=${job.documentId || ''} progress=100 warningsCount=${job.warnings.length} errorCode=CANCELLED`);
+  enqueueGenerationJobPersistence(job);
   return job;
+}
+
+export interface TerminalJobGuardOptions {
+  document?: UniversalLegalDocument | null;
+  error?: string;
+  errorCode?: string;
+  errorMetadata?: Record<string, unknown>;
+  warnings?: string[];
+  terminalStatus?: GenerationTerminalStatus;
+}
+
+function isMaterializableDocument(doc: UniversalLegalDocument | null | undefined): doc is UniversalLegalDocument {
+  return Boolean(doc && typeof doc.id === 'string' && doc.id.trim());
+}
+
+function documentRequiresReview(doc: UniversalLegalDocument): boolean {
+  const documentWithLifecycle = doc as UniversalLegalDocument & {
+    qualityGate?: { passed?: boolean; canMarkAsFinal?: boolean };
+    documentAssemblyResult?: { readiness?: string };
+    generationMetadata: UniversalLegalDocument['generationMetadata'] & { readiness?: string };
+  };
+  const pipelineState = doc.generationMetadata?.pipelineState;
+  const readiness = documentWithLifecycle.documentAssemblyResult?.readiness
+    || documentWithLifecycle.generationMetadata?.readiness;
+
+  return doc.status === 'draft'
+    || pipelineState?.isComplete === false
+    || doc.validation?.isValid === false
+    || documentWithLifecycle.qualityGate?.passed === false
+    || documentWithLifecycle.qualityGate?.canMarkAsFinal === false
+    || Boolean(readiness && !['READY', 'READY_TO_EXPORT', 'FINAL_DOCUMENT'].includes(readiness));
+}
+
+/** Único guard final: todo job abandona la ejecución en un estado terminal. */
+export function ensureTerminalJobState(jobId: string, options: TerminalJobGuardOptions = {}): GenerationJob | undefined {
+  const job = JOBS.get(jobId);
+  if (!job || job.status !== 'processing') return job;
+
+  const document = options.document || job.checkpointDocument || null;
+  const warnings = Array.from(new Set([...(job.warnings || []), ...(options.warnings || [])]));
+  if (isMaterializableDocument(document)) {
+    const reviewRequired = documentRequiresReview(document);
+    const terminalStatus = options.terminalStatus === 'COMPLETED'
+      && reviewRequired
+      ? 'NEEDS_REVIEW' as const
+      : options.terminalStatus
+        || (reviewRequired ? 'NEEDS_REVIEW' as const : warnings.length ? 'COMPLETED_WITH_WARNINGS' as const : 'COMPLETED' as const);
+    const finalWarnings = reviewRequired && terminalStatus === 'NEEDS_REVIEW'
+      ? Array.from(new Set([...warnings, 'DOCUMENT_REQUIRES_REVIEW']))
+      : warnings;
+    return completeJob(jobId, document, {
+      documentReadiness: terminalStatus === 'COMPLETED_WITH_WARNINGS' || terminalStatus === 'NEEDS_REVIEW' ? 'REQUIRES_REVIEW' : undefined,
+      terminalStatus,
+      warnings: finalWarnings,
+    });
+  }
+
+  const failed = failJob(
+    jobId,
+    options.error || 'La ejecución terminó sin un documento materializable.',
+    options.errorCode || 'NO_MATERIALIZABLE_DOCUMENT',
+    options.errorMetadata,
+  );
+  if (failed) failed.warnings = warnings;
+  return failed;
 }
 
 export function getAllJobs(): GenerationJob[] {

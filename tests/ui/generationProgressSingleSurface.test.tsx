@@ -25,7 +25,7 @@ describe('Generation progress — single visible surface', () => {
     expect(countStatusBarMounts(reader)).toBe(0);
     expect(countStatusBarMounts(modal)).toBe(0);
     expect(checklist).not.toContain("from './GenerationStatusBar'");
-    expect(page).toContain('onCancel={handleCancelGeneration}');
+    expect(page).toContain('onCancel={isUniversalGenerating ? handleCancelGeneration : undefined}');
 
     expect(page).not.toContain('/* Barra determinada */');
     expect(page).not.toContain('mach-progress-indeterminate');
@@ -58,11 +58,37 @@ describe('Generation progress — single visible surface', () => {
     expect(markup.match(/Cancelar/g)).toHaveLength(1);
   });
 
+  it('muestra actividad indeterminada mientras el servidor aún no reporta total', () => {
+    const markup = renderToStaticMarkup(React.createElement(GenerationStatusBar, {
+      job: {
+        status: 'processing',
+        total: 0,
+        completed: 0,
+        percentage: 0,
+        stage: 'Preparando documento…',
+      },
+    }));
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('data-progress-mode="indeterminate"');
+    expect(markup).toContain('Preparando documento…');
+  });
+
+  it('activa la misma superficie global durante el análisis OCR del archivo', () => {
+    const page = fs.readFileSync(pagePath, 'utf8');
+
+    expect(page).toContain('uploadProgress');
+    expect(page).toContain('setUploadProgress');
+    expect(page).toContain('Procesando documento fuente…');
+    expect(page).toContain("title={isUniversalGenerating ? 'Generando escrito jurídico…' : 'Procesando documento fuente…'}");
+  });
+
   it('retira del Motor Jurídico el panel de análisis duplicado', () => {
     const page = fs.readFileSync(pagePath, 'utf8');
 
     expect(page).not.toContain('COLUMNA 2: ANÁLISIS JURÍDICO');
     expect(page).not.toContain('Estado del asunto:');
-    expect(page).toContain('className="lg:col-span-12 bg-white border border-slate-200');
+    expect(page).toContain("hasInitialContext ? 'lg:col-span-7' : 'lg:col-span-12'");
+    expect(page).toContain('bg-white border border-slate-200');
   });
 });

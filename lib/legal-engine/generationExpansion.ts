@@ -175,6 +175,12 @@ export async function expandDocumentToPageTarget(
       contract.metrics.expansionCalls += 1;
       contract.metrics.providerCalls[response.provider] = (contract.metrics.providerCalls[response.provider] || 0) + 1;
 
+      if (response.provider === 'local' || response.origin === 'LOCAL_PLACEHOLDER' || response.isLegalAiContent === false) {
+        warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:LOCAL_FALLBACK`);
+        contract.extensionTargetUnmet = true;
+        return { metrics, expansionPasses, calls, warnings };
+      }
+
       if (!isUsableLegalResponse(response)) {
         warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:${response.errorCode || response.fallbackReason || 'NO_LEGAL_CONTENT'}`);
         continue;

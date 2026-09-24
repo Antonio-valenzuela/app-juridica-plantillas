@@ -525,6 +525,7 @@ function buildDocumentIdentifier(id: string): CatalogDocumentIdentifier {
 
 const aliasIdentifiers: readonly LegacyAlias[] = [
   { kind: 'LEGACY_ALIAS', id: 'demanda-ordinaria-civil', label: 'Demanda Ordinaria Civil (alias)', targetId: 'demanda_ordinaria_civil', reason: 'Alias histórico de entrada; nunca es un output documental separado.', uiVisibility: 'LEGACY_ONLY', status: 'NOT_APPLICABLE' },
+  { kind: 'LEGACY_ALIAS', id: 'recurso_apelacion_civil', label: 'Recurso de apelación civil (alias)', targetId: 'apelacion_civil', reason: 'Alias de entrada para el tipo canónico de apelación civil; nunca es un output documental separado.', uiVisibility: 'LEGACY_ONLY', status: 'NOT_APPLICABLE' },
   { kind: 'LEGACY_ALIAS', id: 'otro', label: 'Otro', targetId: 'escrito_libre', reason: 'Sentinel UI legacy; solo activa el fallback seguro cuando no existe selectedDocumentType explícito.', uiVisibility: 'LEGACY_ONLY', status: 'NOT_APPLICABLE' },
 ];
 const aliasIds = new Set(aliasIdentifiers.map((alias) => alias.id));

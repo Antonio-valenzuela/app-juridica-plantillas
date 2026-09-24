@@ -4,13 +4,21 @@ import { UniversalLegalDocument } from '@/lib/legal-engine/types';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { isExportGuardError, prepareUniversalDocumentForExport } from '@/lib/legal-engine/exportGuards';
 import { resolveDocumentOutputFilename } from '@/lib/legal-engine/outputFilename';
+import { documentBelongsToPrincipal } from '@/lib/legal-engine/documentOwnership';
+import { checkRequestRateLimit } from '@/lib/security/rateLimit';
+import { apiErrorResponse } from '@/lib/security/apiErrors';
+import { generateRequestId } from '@/lib/logger';
+import { resolveExportMode } from '@/lib/legal-engine/exportModes';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
+  const requestId = req.headers.get('x-request-id')?.trim() || generateRequestId();
   const auth = await requireLawyerAccess(req);
   if (!auth.ok) return auth.response;
+  const rateLimit = checkRequestRateLimit(req, 'export:docx', 20, `${auth.context.organizationId}:${auth.context.userId}`);
+  if (!rateLimit.ok) return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas exportaciones. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
 
   try {
     const body = await req.json();
@@ -21,11 +29,24 @@ export async function POST(req: NextRequest) {
     }
 
     const doc = document as UniversalLegalDocument;
+    const exportMode = body.exportMode === undefined
+      ? (body.allowReviewOverride === true ? 'DRAFT' : 'FINAL')
+      : resolveExportMode(body.exportMode);
+    if (!exportMode) {
+      return NextResponse.json({ ok: false, errorCode: 'INVALID_EXPORT_MODE', message: 'El modo de exportación debe ser DRAFT o FINAL.' }, { status: 400 });
+    }
+    if (typeof doc.id !== 'string' || !await documentBelongsToPrincipal({
+      organizationId: auth.context.organizationId,
+      userId: auth.context.userId,
+      documentId: doc.id,
+    })) {
+      return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
+    }
 
     let sanitized: UniversalLegalDocument;
     let report: Awaited<ReturnType<typeof prepareUniversalDocumentForExport>>['report'];
     try {
-      const prepared = await prepareUniversalDocumentForExport(doc);
+      const prepared = await prepareUniversalDocumentForExport(doc, { exportMode });
       sanitized = prepared.document;
       report = prepared.report;
     } catch (error) {
@@ -41,7 +62,7 @@ export async function POST(req: NextRequest) {
       throw error;
     }
 
-    const buffer = await exportUniversalToDocx(sanitized, undefined, sanitized.generationMetadata.auditTrace);
+    const buffer = await exportUniversalToDocx(sanitized, undefined, sanitized.generationMetadata.auditTrace, { exportMode });
 
     // Validación de archivo REAL
     if (!buffer || buffer.length < 500) {
@@ -58,11 +79,12 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
          'Content-Disposition': `attachment; filename="${fileName}.docx"`,
         'Content-Length': String(buffer.length),
+        'X-Export-Mode': exportMode,
         'X-Sanitize-Report': JSON.stringify({ removedPrompts: report.removedPrompts, removedCrypto: report.removedCrypto, placeholders: report.placeholdersFound.length }),
+        ...(exportMode === 'DRAFT' ? { 'X-Export-Review-Override': 'true' } : {}),
       },
     });
   } catch (error: any) {
-    console.error('Error exporting DOCX:', error);
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return apiErrorResponse({ requestId, status: 500, errorCode: 'DOCX_EXPORT_FAILED', message: 'No se pudo crear el archivo DOCX. El documento puede conservarse como borrador, pero la serialización falló.', internalError: error });
   }
 }

@@ -105,7 +105,9 @@ export function prepareExplicitTemplate(
 }
 
 export function requiresValidatedSources(sources: UploadedSourceDocument[]): boolean {
-  return sources.some((source) => source.sourceValidated === false);
+  // Fail closed: legacy/persisted sources without an explicit validation
+  // result must not enter legal generation as if they were ready.
+  return sources.some((source) => source.sourceValidated !== true || source.sourceQualityStatus === 'NEEDS_SOURCE_REVIEW');
 }
 
 function headingForPage(page: DocumentPage): string {

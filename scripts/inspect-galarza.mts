@@ -5,7 +5,8 @@ import { reconstructCaseAnalysis } from '../lib/legal-engine/caseAnalysis';
 import type { UploadedSourceDocument } from '../lib/legal-engine/context';
 
 async function main() {
-  const f = 'C:/Users/yahir/Desktop/BECA/DEMANDA DE LA FAMILIA GALARZA/NULIDAD DE TESTAMENTO/DEMANDA DE NULIDAD DEL TESTAMENTO.docx';
+  const f = process.argv[2];
+  if (!f) throw new Error('Uso: npx tsx scripts/inspect-galarza.mts <ruta-docx>');
   const buffer = fs.readFileSync(f);
   const extracted = await extractDocument({ buffer, fileName: path.basename(f), mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 

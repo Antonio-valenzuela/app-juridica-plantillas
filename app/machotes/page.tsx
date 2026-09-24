@@ -41,6 +41,8 @@ import {
 import { normalizeLegalDocumentText } from '@/lib/text/normalizeLegalDisplayText';
 import { formatExportIssues } from '@/lib/legal-engine/exportErrors';
 import { extractDownloadFilename, resolveDocumentOutputFilename } from '@/lib/legal-engine/outputFilename';
+import { persistDocumentBeforeExport } from '@/lib/legal-engine/exportPersistence';
+import type { ExportMode } from '@/lib/legal-engine/exportModes';
 import { analyzePersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
 import { markTemplateAsUserOwned } from '@/lib/templates/templateOrigin';
 import type { ProfessionalTemplate } from '@/lib/templates/templateTypes';
@@ -53,6 +55,11 @@ import {
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { createGenerationIdentityFactory } from '@/lib/legal-engine/generationIdentity';
 import { WorkspaceModulesView, type WorkspaceModule } from './components/WorkspaceModulesView';
+import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
+import { compactSourceDocumentsForGeneration, buildContestacionesWorkflowPayload } from '@/lib/legal-engine/generationRequest';
+import { getCachedUploadAnalysis, rememberUploadAnalysis } from '@/lib/uploadAnalysisCache';
+import { toActiveCaseContext } from '@/lib/workspace/activeCaseContext';
+import { canSwitchWorkspaceMode, deriveGenerationDisplayPercentage } from '@/lib/legal-engine/generationUi';
 
 export type LegalWorkspaceMode =
   | WorkspaceModule
@@ -227,6 +234,8 @@ export default function MachotesPage() {
   const fileInputHiddenRef = useRef<HTMLInputElement>(null);
   const [isDraggingDocs, setIsDraggingDocs] = useState(false);
   const [docsUploadError, setDocsUploadError] = useState<string | null>(null);
+  const uploadAnalysisCacheRef = useRef<Map<string, any>>(new Map());
+  const [uploadProgress, setUploadProgress] = useState<GenerationStatusData | null>(null);
   // Job asíncrono real X/Y
   const [activeGenJob, setActiveGenJob] = useState<{ jobId: string; total: number; completed: number; percentage: number; currentBlock: string | null; status: string; stage?: string; aiProvider?: string | null; error?: string; errorCode?: string | null; errorMetadata?: Record<string, unknown> | null } | null>(null);
   const [universalViewMode, setUniversalViewMode] = useState<'analysis' | 'editor'>('analysis');
@@ -235,6 +244,7 @@ export default function MachotesPage() {
   const genStatusFailureRef = useRef<number>(0);
   const genPollInFlightRef = useRef(false);
   const genIsGeneratingRef = useRef<boolean>(false);
+  const generationOriginTabRef = useRef<LegalWorkspaceMode | null>(null);
   // Deduplicación del flujo de upload: evita doble GET cuando el efecto de caseKey
   // y el sync post-detección apuntan al mismo expediente.
   const syncedCaseKeyRef = useRef<string>('');
@@ -419,6 +429,7 @@ export default function MachotesPage() {
       clearStoredGeneration();
       setIsUniversalGenerating(false);
       genIsGeneratingRef.current = false;
+      generationOriginTabRef.current = null;
       setActiveGenJob({
         jobId,
         total: 0,
@@ -457,7 +468,7 @@ export default function MachotesPage() {
 
         genStatusFailureRef.current = 0;
         const j = result.data;
-        const pct = j.total > 0 ? Math.round((j.completed / j.total) * 100) : 0;
+        const pct = deriveGenerationDisplayPercentage(j);
         const next = { 
           jobId: j.jobId, 
           total: j.total, 
@@ -491,6 +502,7 @@ export default function MachotesPage() {
               clearStoredGeneration();
               setIsUniversalGenerating(false);
               genIsGeneratingRef.current = false;
+              generationOriginTabRef.current = null;
               setActiveGenJob(null);
               if (j.documentReadiness === 'READY') {
                 notify('success', '✓ Documento generado y listo para revisión final');
@@ -505,6 +517,7 @@ export default function MachotesPage() {
             clearStoredGeneration();
             setIsUniversalGenerating(false);
             genIsGeneratingRef.current = false;
+            generationOriginTabRef.current = null;
             setActiveGenJob(null);
             notify('error', '⚠️ Documento vacío');
           }
@@ -514,6 +527,7 @@ export default function MachotesPage() {
           clearStoredGeneration();
           setIsUniversalGenerating(false);
           genIsGeneratingRef.current = false;
+          generationOriginTabRef.current = null;
           const message = j.error || 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.';
           setActiveGenJob({ ...next, status: 'failed', error: message });
           notify('error', message);
@@ -523,6 +537,7 @@ export default function MachotesPage() {
           clearStoredGeneration();
           setIsUniversalGenerating(false);
           genIsGeneratingRef.current = false;
+          generationOriginTabRef.current = null;
           setActiveGenJob({ ...next, status: 'cancelled' } as any);
           // Mostrar cancelled brevemente luego limpiar
           window.setTimeout(() => {
@@ -599,6 +614,7 @@ export default function MachotesPage() {
         const parsed = JSON.parse(saved);
         if (!parsed?.jobId || parsed?.status !== 'processing') return;
         genIsGeneratingRef.current = true;
+        generationOriginTabRef.current = activeNavTab;
         // Verificar con backend que el Job sigue accesible (evita 404 inmediato tras recarga)
         try {
           const r = await fetch(`/api/legal-engine/generate/status?jobId=${encodeURIComponent(parsed.jobId)}`);
@@ -609,6 +625,7 @@ export default function MachotesPage() {
             try { localStorage.removeItem('jr_active_gen_job'); localStorage.removeItem('jr_active_gen_flow'); } catch {}
             genIsGeneratingRef.current = false;
             setIsUniversalGenerating(false);
+            generationOriginTabRef.current = null;
             setActiveGenJob({ ...parsed, status: 'failed', error: statusResult.message });
             notify('error', statusResult.message);
             return;
@@ -616,7 +633,7 @@ export default function MachotesPage() {
           if (statusResult.kind === 'retry') {
             // La primera consulta puede coincidir con una recompilación; se
             // conserva el estado local y el polling posterior queda acotado.
-            setActiveGenJob(parsed);
+            setActiveGenJob({ ...parsed, percentage: deriveGenerationDisplayPercentage(parsed) });
             genJobIdRef.current = parsed.jobId;
             setIsUniversalGenerating(true);
             startGenPolling(parsed.jobId);
@@ -628,6 +645,7 @@ export default function MachotesPage() {
             try { localStorage.removeItem('jr_active_gen_job'); localStorage.removeItem('jr_active_gen_flow'); } catch {}
             genIsGeneratingRef.current = false;
             setIsUniversalGenerating(false);
+            generationOriginTabRef.current = null;
             return;
           }
           // Si ya completó mientras estábamos fuera, cargar documento directamente (BUG16)
@@ -645,6 +663,7 @@ export default function MachotesPage() {
               try { localStorage.removeItem('jr_active_gen_job'); localStorage.removeItem('jr_active_gen_flow'); } catch {}
               setIsUniversalGenerating(false);
               genIsGeneratingRef.current = false;
+              generationOriginTabRef.current = null;
               setActiveGenJob(null);
             }, 800);
             return;
@@ -653,13 +672,14 @@ export default function MachotesPage() {
             try { localStorage.removeItem('jr_active_gen_job'); localStorage.removeItem('jr_active_gen_flow'); } catch {}
             genIsGeneratingRef.current = false;
             setIsUniversalGenerating(false);
+            generationOriginTabRef.current = null;
             const message = d.error || 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.';
             setActiveGenJob({ ...parsed, status: 'failed', error: message, errorCode: d.errorCode || null, errorMetadata: d.errorMetadata || null });
             notify('error', message);
             return;
           }
           // Job sigue en processing — reanudar polling
-          const pct = d.total > 0 ? Math.round((d.completed / d.total) * 100) : 0;
+          const pct = deriveGenerationDisplayPercentage(d);
           const next = { jobId: d.jobId, total: d.total, completed: d.completed, percentage: pct, currentBlock: d.currentBlock, status: d.status, stage: d.stage, aiProvider: d.aiProvider, errorCode: d.errorCode || null, errorMetadata: d.errorMetadata || null };
           setActiveGenJob(next);
           genJobIdRef.current = d.jobId;
@@ -735,6 +755,14 @@ export default function MachotesPage() {
   }, [initialForm.expediente, initialForm.materia, initialForm.tipoEscrito, initialWritingsSessionDocIds.size]);
 
   const handleSwitchMode = (mode: LegalWorkspaceMode) => {
+    if (!canSwitchWorkspaceMode(
+      isUniversalGenerating || genIsGeneratingRef.current,
+      generationOriginTabRef.current,
+      mode,
+    )) {
+      notify('warning', 'La generación sigue en curso. Espera a que termine o cancélala antes de cambiar de panel.');
+      return;
+    }
     setActiveNavTab(mode);
     // Persistir tab en URL (§24)
     try {
@@ -881,6 +909,14 @@ export default function MachotesPage() {
     const uploadStampMs = newUploadStampMs();
     if (allowed.length === 1) notify('warning', `Cargando "${allowed[0].name}"...`);
     else notify('warning', `Cargando ${allowed.length} documentos...`);
+    setUploadProgress({
+      status: 'processing',
+      total: allowed.length,
+      completed: 0,
+      percentage: 0,
+      currentBlock: allowed[0]?.name || null,
+      stage: 'Procesando documento fuente…',
+    });
 
     const sources: UploadedSourceDocument[] = [];
     const caseDocs: CaseDocument[] = [];
@@ -894,17 +930,22 @@ export default function MachotesPage() {
       formData.append('file', file);
 
       try {
-        const res = await fetch('/api/templates/analyze-upload', {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await res.json();
+        const cachedAnalysis = getCachedUploadAnalysis(uploadAnalysisCacheRef.current, file);
+        let data = cachedAnalysis;
+        if (!data) {
+          const res = await fetch('/api/templates/analyze-upload', {
+            method: 'POST',
+            body: formData,
+          });
+          data = await res.json();
+          if (data?.ok) rememberUploadAnalysis(uploadAnalysisCacheRef.current, file, data);
+        }
 
         if (!data.ok) {
           throw new Error(data.error || 'No se pudo procesar el archivo.');
         }
 
-        const sourceValidated = data.sourceValidated !== false;
+        const sourceValidated = data.sourceValidated === true;
         if (i === 0 && data.analysis) setCaseAnalysis(data.analysis as CaseAnalysis);
         const pages: DocumentPage[] = data.pages?.length
           ? data.pages.map((p: any) => ({
@@ -923,7 +964,9 @@ export default function MachotesPage() {
           extractedText: sanitizeClean(data.extractedText || ''),
           pages,
           sourceValidated,
+          sourceQualityStatus: data.sourceQualityStatus,
           sourceValidationMethod: data.sourceValidationMethod,
+          sourceQuality: data.sourceQuality,
           qualityScore: data.qualityScore,
           warnings: data.warnings,
           fileSizeBytes: file.size,
@@ -953,6 +996,13 @@ export default function MachotesPage() {
 
         sources.push(newSource);
         caseDocs.push(newCaseDoc);
+        setUploadProgress((previous) => previous ? {
+          ...previous,
+          completed: i + 1,
+          percentage: Math.round(((i + 1) / allowed.length) * 100),
+          currentBlock: allowed[i + 1]?.name || file.name,
+          stage: i + 1 < allowed.length ? 'Procesando documento fuente…' : 'Documento fuente listo',
+        } : previous);
 
         if (i === 0) {
           const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
@@ -1065,11 +1115,20 @@ export default function MachotesPage() {
           setSelectedTemplateRefText(sanitizeClean(data.extractedText || ''));
         }
       } catch (err: any) {
+        setUploadProgress((previous) => previous ? {
+          ...previous,
+          completed: i + 1,
+          percentage: Math.round(((i + 1) / allowed.length) * 100),
+          currentBlock: allowed[i + 1]?.name || file.name,
+          stage: i + 1 < allowed.length ? 'Procesando documento fuente…' : 'Procesamiento finalizado con incidencias',
+        } : previous);
         const msg = `Error en "${file.name}": ${err.message}`;
         setDocsUploadError(msg);
         notify('error', msg);
       }
     }
+
+    setUploadProgress(null);
 
     if (sources.length > 0) {
       setUploadedSourceDocs((prev) => [...prev, ...sources]);
@@ -1274,6 +1333,7 @@ export default function MachotesPage() {
       return;
     }
     genIsGeneratingRef.current = true;
+    generationOriginTabRef.current = activeNavTab;
     // BUG1+2: Determinar etiqueta dinámica para overlay global
     const flow: GenerationFlowLabel = payload.flowLabel || (payload.intentLabel?.toLowerCase().includes('contest') ? 'contestacion' : payload.intentLabel?.toLowerCase().includes('recurso') ? 'recurso' : payload.intentLabel?.toLowerCase().includes('inicial') || payload.intentLabel?.toLowerCase().includes('demanda') ? 'escrito_inicial' : 'universal');
     // BUG1: Asegurar que barra global sea visible sin importar tab actual
@@ -1307,6 +1367,7 @@ export default function MachotesPage() {
     if (writingIntake && writingIntake.readiness.status === 'BLOCKED' && !payload.selectedTemplate) {
       genIsGeneratingRef.current = false;
       setIsUniversalGenerating(false);
+      generationOriginTabRef.current = null;
       setActiveGenJob(null);
       notify('warning', `Faltan datos esenciales para generar: ${writingIntake.readiness.missingEssential.join(', ')}.`);
       return;
@@ -1357,7 +1418,7 @@ export default function MachotesPage() {
           notify('warning', 'Generación ya en curso — continuando progreso…');
           return;
         }
-        throw new Error(data?.error || 'Error al iniciar generación');
+        throw new Error(getSafeApiErrorMessage(data, 'Error al iniciar generación'));
       }
 
       const jobId = data.jobId as string;
@@ -1371,6 +1432,7 @@ export default function MachotesPage() {
       notify('error', `Fallo al iniciar generación: ${err.message}`);
       setIsUniversalGenerating(false);
       genIsGeneratingRef.current = false;
+      generationOriginTabRef.current = null;
       setActiveGenJob(null);
       stopGenPolling();
       try { localStorage.removeItem('jr_active_gen_job'); localStorage.removeItem('jr_active_gen_flow'); } catch {}
@@ -1559,13 +1621,8 @@ export default function MachotesPage() {
       return;
     }
     genIsGeneratingRef.current = true;
-    // BUG1+9: Barra GLOBAL + mantener análisis visible (fix solicitado: barra no debe desaparecer)
-    // Motor Jurídico muestra barra en universal/analysis y permanece 13/40; Contestaciones debe hacer lo mismo
-    // NO cerrar panel de Contestaciones prematuramente — ir a Motor Jurídico/analysis para mostrar progreso estable
-    // (antes: solo global overlay; ahora también inner bar de universal como en Image 4)
-    setActiveNavTab('universal');
-    setUniversalViewMode('analysis');
-    // NO onClose() ni setIsDraftGeneratorOpen(false) prematuro para Contestaciones (no hay modal que cerrar)
+    generationOriginTabRef.current = activeNavTab;
+    // La barra de progreso es global; el panel de origen permanece visible.
     setIsUniversalGenerating(true);
     setActiveGenJob({ jobId: '', total: 0, completed: 0, percentage: 0, currentBlock: null, status: 'processing', stage: 'Preparando contestación…' } as any);
     notify('warning', 'Generando contestación…');
@@ -1613,25 +1670,25 @@ export default function MachotesPage() {
       : (referenceDocumentTextFromUi !== undefined ? referenceDocumentTextFromUi : selectedTemplateRefText);
 
     try {
+      const generationSourceDocuments = compactSourceDocumentsForGeneration(uploadedSourceDocs);
       const res = await fetch('/api/legal-engine/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Idempotency-Key': genId2 },
         body: JSON.stringify({
           userInstruction: userInstructions || 'Redactar contestación de demanda formal y exhaustiva',
-          sourceDocuments: uploadedSourceDocs,
+          sourceDocuments: generationSourceDocuments,
           allowUnvalidatedSource: false,
           referenceDocumentId: effectiveRefId,
           referenceDocumentText: effectiveRefText,
           workflow: {
-            sourceDocuments: uploadedSourceDocs,
-            analysis: matterAnalysis || caseAnalysis || { facts: [], missingData: [] },
-            selection: effectiveGenMode === 'personal_template' && effectiveRefId
-              ? { mode: 'personal_template', templateId: effectiveRefId }
-              : effectiveGenMode === 'reference_document'
-                ? { mode: 'reference_document', referenceDocumentId: effectiveRefId || 'machote-contestacion-amparo' }
-                : { mode: 'automatic' },
-            flow: 'DOCUMENT_ANALYSIS',
-            updatedAt: new Date().toISOString(),
+            ...buildContestacionesWorkflowPayload(
+              effectiveGenMode === 'personal_template' && effectiveRefId
+                ? { mode: 'personal_template', templateId: effectiveRefId }
+                : effectiveGenMode === 'reference_document'
+                  ? { mode: 'reference_document', referenceDocumentId: effectiveRefId || 'machote-contestacion-amparo' }
+                  : { mode: 'automatic' },
+              new Date().toISOString(),
+            ),
           },
           documentTypeLabel: requestedDocumentLabel,
           selectedDocumentType: requestedDocumentType,
@@ -1653,7 +1710,7 @@ export default function MachotesPage() {
           notify('warning', 'Generación ya en curso — continuando…');
           return;
         }
-        throw new Error(data?.error || 'Error al iniciar generación');
+        throw new Error(getSafeApiErrorMessage(data, 'Error al iniciar generación'));
       }
       const jobId = data.jobId as string;
       if (!jobId) throw new Error('JobId no recibido del servidor');
@@ -1666,6 +1723,7 @@ export default function MachotesPage() {
       notify('error', `Fallo en la generación: ${error.message}`);
       setIsUniversalGenerating(false);
       genIsGeneratingRef.current = false;
+      generationOriginTabRef.current = null;
       setActiveGenJob(null);
       try { localStorage.removeItem('jr_active_gen_job'); localStorage.removeItem('jr_active_gen_flow'); } catch {}
     }
@@ -1828,7 +1886,7 @@ export default function MachotesPage() {
      1) Snapshot estructurado del documento real hacia el contexto de la burbuja.
      2) Registro del ejecutor REAL de ediciones: operaciones tipadas → estado del
         editor → persistencia por la ÚNICA ruta existente (handleSaveDraft).   */
-  const { syncActiveDocument, clearActiveDocument, registerDocumentMutator } = useLegalWorkspaceContext();
+  const { syncActiveDocument, clearActiveDocument, registerDocumentMutator, setActiveCase } = useLegalWorkspaceContext();
 
   useEffect(() => {
     if (!universalDoc) return;
@@ -1888,14 +1946,14 @@ export default function MachotesPage() {
     }
   };
 
-  const handleExportDocx = async () => {
+  const handleExportDocx = async (exportMode: ExportMode = 'FINAL') => {
     if (!universalDoc) return;
     try {
-      const res = await fetch('/api/legal-engine/export/docx', {
+      const res = await persistDocumentBeforeExport(universalDoc, handleSaveDraft, (document) => fetch('/api/legal-engine/export/docx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document: universalDoc }),
-      });
+          body: JSON.stringify({ document, exportMode }),
+      }));
       const ct = res.headers.get('Content-Type') || '';
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -1903,7 +1961,7 @@ export default function MachotesPage() {
           notify('warning', `El documento requiere revisión antes de exportarse: ${formatExportIssues(err.details) || formatExportIssues(err.error) || formatExportIssues(err.friendlyMessage)}`);
           return;
         }
-        throw new Error(err.error || 'Error al generar DOCX en servidor.');
+        throw new Error(getSafeApiErrorMessage(err, 'No se pudo crear el archivo DOCX.'));
       }
       if (!ct.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
         const err = await res.json().catch(() => null);
@@ -1924,14 +1982,14 @@ export default function MachotesPage() {
     }
   };
 
-  const handleExportPdf = async () => {
+  const handleExportPdf = async (exportMode: ExportMode = 'FINAL') => {
     if (!universalDoc) return;
     try {
-      const res = await fetch('/api/legal-engine/export/pdf', {
+      const res = await persistDocumentBeforeExport(universalDoc, handleSaveDraft, (document) => fetch('/api/legal-engine/export/pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document: universalDoc }),
-      });
+          body: JSON.stringify({ document, exportMode }),
+      }));
       const ct = res.headers.get('Content-Type') || '';
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -1939,7 +1997,7 @@ export default function MachotesPage() {
           notify('warning', `El documento requiere revisión antes de exportarse: ${formatExportIssues(err.details) || formatExportIssues(err.error) || formatExportIssues(err.friendlyMessage)}`);
           return;
         }
-        throw new Error(err.error || 'Error al exportar PDF.');
+        throw new Error(getSafeApiErrorMessage(err, 'No se pudo crear el archivo PDF.'));
       }
       if (!ct.includes('application/pdf')) {
         const err = await res.json().catch(() => null);
@@ -1983,6 +2041,12 @@ export default function MachotesPage() {
     if (selectedSourceForFicha) return detectCaseFicha([selectedSourceForFicha.extractedText || '']);
     return caseFicha || liveCaseFicha;
   }, [selectedSourceForFicha, caseFicha, liveCaseFicha]);
+
+  useEffect(() => {
+    setActiveCase(toActiveCaseContext(selectedFicha));
+    return () => setActiveCase(null);
+  }, [selectedFicha, setActiveCase]);
+
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- reconstructCaseAnalysis es costosa y determinista, se memoiza por uploadedSourceDocs
   const matterAnalysis = React.useMemo(() => reconstructCaseAnalysis(uploadedSourceDocs, ''), [uploadedSourceDocs]);
 
@@ -2289,9 +2353,14 @@ export default function MachotesPage() {
       )}
 
       {/* BARRA GLOBAL DE GENERACIÓN — persiste al cambiar de pestaña (P6) */}
-      {isUniversalGenerating && (
-        <div className="mx-4 mt-2">
-          <GenerationStatusBar job={activeGenJob} onCancel={handleCancelGeneration} cancelling={isCancelling} />
+      {(isUniversalGenerating || uploadProgress) && (
+        <div className="sticky top-2 z-30 mx-4 mt-2">
+          <GenerationStatusBar
+            job={isUniversalGenerating ? activeGenJob : uploadProgress}
+            title={isUniversalGenerating ? 'Generando escrito jurídico…' : 'Procesando documento fuente…'}
+            onCancel={isUniversalGenerating ? handleCancelGeneration : undefined}
+            cancelling={isCancelling}
+          />
         </div>
       )}
 
@@ -2335,8 +2404,16 @@ export default function MachotesPage() {
                  handleGenerateContestacion(request || '');
               }}
               onOpenEditor={() => {
+                if (!canSwitchWorkspaceMode(
+                  isUniversalGenerating || genIsGeneratingRef.current,
+                  generationOriginTabRef.current,
+                  'universal',
+                )) {
+                  notify('warning', 'La generación sigue en curso. Espera a que termine o cancélala antes de abrir otro panel.');
+                  return;
+                }
                 setUniversalViewMode('editor');
-                setActiveNavTab('universal');
+                handleSwitchMode('universal');
               }}
               isGenerating={isUniversalGenerating}
               generationJob={activeGenJob}

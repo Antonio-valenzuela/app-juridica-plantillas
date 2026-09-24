@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { loadLawyerProfile, saveLawyerProfile } from '@/lib/workspace/lawyerProfileStore';
+import { getProviderDisclosure } from '@/lib/ai/providerDisclosure';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
       auth.context.organizationId,
       auth.context.lawyerId
     );
-    return NextResponse.json({ ok: true, profile, isDefault: fromDefault });
+    return NextResponse.json({ ok: true, profile, isDefault: fromDefault, aiDisclosure: getProviderDisclosure() });
   } catch (err: any) {
     console.error('[lawyer-profile:GET] Error:', err?.message);
     return NextResponse.json({ ok: false, error: 'PROFILE_LOAD_FAILED' }, { status: 500 });

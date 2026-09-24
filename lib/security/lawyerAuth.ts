@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { getCaseAccessIdentity } from '@/lib/cases/access';
+import { readSessionToken, verifySessionToken } from './session';
 
 export interface LawyerAccessContext {
   organizationId: string;
@@ -59,6 +60,26 @@ export async function requireLawyerAccess(
   request: Request
 ): Promise<{ ok: true; context: LawyerAccessContext } | { ok: false; response: Response }> {
   try {
+    const sessionToken = readSessionToken(request);
+    if (sessionToken) {
+      const session = verifySessionToken(sessionToken);
+      if (!session) return { ok: false, response: unauthorizedResponse() };
+      const [org, user] = await Promise.all([
+        prisma.organization.findUnique({ where: { id: session.organizationId }, select: { id: true } }),
+        prisma.user.findUnique({ where: { id: session.userId }, select: { id: true } }),
+      ]);
+      if (!org || !user) return { ok: false, response: unauthorizedResponse() };
+      return {
+        ok: true,
+        context: {
+          organizationId: org.id,
+          userId: user.id,
+          lawyerId: user.id,
+          role: 'lawyer',
+        },
+      };
+    }
+
     // 1. Check custom user identity headers ONLY if trusted proxy
     const headerUserId = request.headers.get('x-user-id')?.trim();
     const headerOrgId = request.headers.get('x-org-id')?.trim();

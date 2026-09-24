@@ -5,13 +5,15 @@ import type { UniversalLegalDocument, DocumentNode, ContentBlock, BlockStyle } f
 import { runQualityGateCheck, QualityGateResult } from '@/lib/legal-engine/qualityGate';
 import { normalizeUnresolvedFieldMarkers, extractUnresolvedFieldMarkers } from '@/lib/legal-engine/pendingFields';
 import { readDocumentExportReadiness, markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
+import { buildWorkspacePageModel } from '@/lib/legal-engine/generationUi';
+import type { ExportMode } from '@/lib/legal-engine/exportModes';
 
 interface WorkspaceDocumentEditorProps {
   document: UniversalLegalDocument | null;
   onUpdateDocument: (updated: UniversalLegalDocument) => void;
   onRegenerateSection?: (sectionId: string, instruction?: string) => Promise<void>;
-  onExportDocx?: (force?: boolean) => void;
-  onExportPdf?: (force?: boolean) => void;
+  onExportDocx?: (mode?: ExportMode) => void;
+  onExportPdf?: (mode?: ExportMode) => void;
   onSaveDraft?: () => Promise<boolean>;
   onReopenDraft?: () => Promise<boolean>;
   onSaveAsTemplate?: (doc: UniversalLegalDocument) => Promise<void>;
@@ -133,6 +135,10 @@ export function WorkspaceDocumentEditor({
 
   const isReadyToExport = exportReadiness === 'READY_TO_EXPORT' || exportReadiness === 'FINAL_DOCUMENT';
 
+  const hasExportableContent = useMemo(() => {
+    return Boolean(document?.sections.some((section) => section.content.some((block) => block.text.trim().length > 0)));
+  }, [document]);
+
   const pendingIssues = useMemo(() => {
     if (!document) return [];
     const issues: string[] = [];
@@ -203,70 +209,15 @@ export function WorkspaceDocumentEditor({
     [document, activeSectionId]
   );
 
-  // Caracteres estimados por página Carta
-  const CHARS_PER_PAGE = 1750;
-
-  // Breakdown de páginas
-  const pageBreakdown = useMemo(() => {
-    if (!document) {
-      return [{ pageNumber: 1, sections: [] as Array<{ section: DocumentNode; text: string }> }];
-    }
-
-    // Si el documento tiene secciones por página física (PDF de 27 páginas cargado)
-    const hasExplicitPages = document.sections.some((s) => s.id.startsWith('sec-page-'));
-    if (hasExplicitPages) {
-      return document.sections.map((sec, idx) => ({
-        pageNumber: idx + 1,
-        sections: [{ section: sec, text: sec.content.map((b) => b.text).join('\n\n') }],
-      }));
-    }
-
-    // Si tiene conteo explícito de páginas originales
-    if (document.originalPageCount && document.originalPageCount > 1) {
-      const pagesArr: Array<{ pageNumber: number; sections: Array<{ section: DocumentNode; text: string }> }> = [];
-      for (let i = 1; i <= document.originalPageCount; i++) {
-        const matchingSec = document.sections.find((s) => s.id === `sec-page-${i}`) || document.sections[i - 1];
-        pagesArr.push({
-          pageNumber: i,
-          sections: matchingSec ? [{ section: matchingSec, text: matchingSec.content.map((b) => b.text).join('\n\n') }] : [],
-        });
-      }
-      return pagesArr;
-    }
-
-    // De lo contrario paginar por apartados / caracteres
-    const pages: Array<{ pageNumber: number; sections: Array<{ section: DocumentNode; text: string }> }> = [];
-    let currentPageNum = 1;
-    let currentChars = 0;
-    let currentSections: Array<{ section: DocumentNode; text: string }> = [];
-
-    document.sections.forEach((sec) => {
-      const secText = sec.content.map((b) => b.text).join('\n\n');
-      const secLength = Math.max(secText.length, 220);
-
-      if (currentChars + secLength > CHARS_PER_PAGE && currentSections.length > 0) {
-        pages.push({ pageNumber: currentPageNum, sections: currentSections });
-        currentPageNum++;
-        currentChars = 0;
-        currentSections = [];
-      }
-
-      currentSections.push({ section: sec, text: secText });
-      currentChars += secLength;
-    });
-
-    if (currentSections.length > 0) {
-      pages.push({ pageNumber: currentPageNum, sections: currentSections });
-    }
-
-    return pages.length > 0 ? pages : [{ pageNumber: 1, sections: [] }];
-  }, [document]);
+  // El editor y el buscador comparten una única topología física de páginas.
+  const pageModel = useMemo(() => buildWorkspacePageModel(document), [document]);
+  const pageBreakdown = pageModel.pages;
 
   // Coincidencias derivadas (puro): mismos deps que el efecto original, sin estado intermedio.
   const searchMatches = useMemo(() => computeSearchMatches(searchQuery, pageBreakdown), [searchQuery, pageBreakdown]);
   const safeActiveMatch = searchMatches.length > 0 ? Math.min(activeMatch, searchMatches.length - 1) : 0;
 
-  const totalPages = document?.originalPageCount || pageBreakdown.length || 1;
+  const totalPages = pageModel.totalPages;
 
   // Lectura siempre dentro del rango válido: sustituye al efecto de clamp.
   // Los writes siguen sobre currentPage; ninguna lectura ve un valor fuera de rango.
@@ -482,7 +433,8 @@ export function WorkspaceDocumentEditor({
       {/* ── BARRA SUPERIOR CONSOLIDADA POR ZONAS (sin posicionamiento absoluto):
              A Identificación · B Edición global · C Formato · D Navegación ·
              E Vista · F Documento · G IA/Calidad/Exportación · Volver ── */}
-      <div className="shrink-0 bg-[#fbf9f5] border-b border-[#ded8c9] px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-2 shadow-xs font-sans">
+      <div data-testid="editor-toolbar" className="sticky top-0 z-40 shrink-0 bg-[#fbf9f5] border-b border-[#ded8c9] px-3 py-2 shadow-xs font-sans">
+        <div data-testid="editor-toolbar-row-primary" className="flex min-w-max flex-nowrap items-center gap-x-2 overflow-x-auto pb-1">
         {/* ── ZONA A · IDENTIFICACIÓN (título truncable, nunca empuja botones) ── */}
         <div className="flex items-center gap-1.5 min-w-[140px] max-w-[240px] xl:max-w-[340px] min-w-0 grow shrink basis-[160px]">
           {document ? (
@@ -645,7 +597,7 @@ export function WorkspaceDocumentEditor({
                 ←
               </button>
 
-              <span className="font-semibold text-slate-700 px-2 font-mono text-xs select-none">
+              <span className="inline-block min-w-[9rem] text-center font-semibold text-slate-700 px-2 font-mono text-xs tabular-nums select-none">
                 Pág. <span className="text-[#0B2545] font-extrabold text-sm">{viewPage}</span> / {totalPages}
               </span>
 
@@ -727,8 +679,10 @@ export function WorkspaceDocumentEditor({
           </div>
         )}
 
-        {/* ── ZONA F/G · DOCUMENTO + IA/CALIDAD/EXPORTACIÓN (+ Volver) ── */}
-        <div className="flex items-center gap-1.5 font-sans shrink-0 whitespace-nowrap pl-2 border-l border-[#ded8c9] ml-auto">
+        </div>
+
+        {/* ── FILA 2 · DOCUMENTO + IA/CALIDAD/EXPORTACIÓN (+ Volver) ── */}
+        <div data-testid="editor-toolbar-row-secondary" className="flex min-w-max flex-nowrap items-center gap-1.5 overflow-x-auto pt-1 font-sans whitespace-nowrap">
           {/* Botón Subir Machote */}
           <button
             onClick={onTriggerUpload}
@@ -837,48 +791,73 @@ export function WorkspaceDocumentEditor({
               {/* Menú Exportar */}
               <div className="relative">
                 <button
-                  onClick={() => {
-                    if (!isReadyToExport) {
-                      setShowPendingModal(true);
-                    } else {
-                      setShowExportMenu(!showExportMenu);
-                    }
-                  }}
-                  className={`py-1.5 px-3 rounded-xl border text-xs font-bold shadow-xs transition flex items-center gap-1.5 ${
-                    isReadyToExport
-                      ? 'bg-[#0B2545] hover:bg-[#081d39] text-white border-transparent'
-                      : 'bg-white border-[#ded8c9] hover:bg-[#ede8dd] text-[#0B2545]'
-                  }`}
-                  title={isReadyToExport ? 'Exportar documento en formato final' : 'Ver pendientes para habilitar exportación'}
+                  onClick={() => setShowExportMenu((open) => !open)}
+                  className="py-1.5 px-3 rounded-xl border text-xs font-bold shadow-xs transition flex items-center gap-1.5 bg-[#0B2545] hover:bg-[#081d39] text-white border-transparent"
+                  title="Elegir exportación de borrador o final"
                 >
                   <span>📄</span>
                   <span>Exportar</span>
-                  <span className="text-[9px]">{isReadyToExport ? '▼' : '🔒'}</span>
+                  <span className="text-[9px]">▼</span>
                 </button>
 
-                {showExportMenu && isReadyToExport && (
-                  <div className="absolute right-0 top-9 w-44 bg-white border border-[#ded8c9] rounded-xl shadow-xl z-50 py-1.5 text-xs text-slate-800 font-semibold animate-in fade-in zoom-in-95">
+                {showExportMenu && (
+                  <div className="absolute right-0 top-9 w-64 bg-white border border-[#ded8c9] rounded-xl shadow-xl z-50 py-1.5 text-xs text-slate-800 font-semibold animate-in fade-in zoom-in-95">
+                    <div className="px-3.5 pt-2 pb-1 text-[10px] uppercase tracking-wide text-amber-800">Exportar borrador</div>
                     {onExportDocx && (
                       <button
                         onClick={() => {
-                          onExportDocx();
+                          onExportDocx('DRAFT');
                           setShowExportMenu(false);
                         }}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-800"
+                        disabled={!hasExportableContent}
+                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 text-slate-800"
                       >
-                        <span>📄</span> Exportar DOCX Word
+                        <span>📄</span> DOCX borrador
                       </button>
                     )}
                     {onExportPdf && (
                       <button
                         onClick={() => {
-                          onExportPdf();
+                          onExportPdf('DRAFT');
                           setShowExportMenu(false);
                         }}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-800"
+                        disabled={!hasExportableContent}
+                        className="w-full text-left px-3.5 py-2 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 text-slate-800"
                       >
-                        <span>🖨️</span> Exportar PDF Real
+                        <span>🖨️</span> PDF borrador
                       </button>
+                    )}
+                    <div className="my-1 border-t border-slate-100" />
+                    <div className="px-3.5 pt-1 pb-1 text-[10px] uppercase tracking-wide text-slate-600">Exportar final</div>
+                    {isReadyToExport ? (
+                      <>
+                        {onExportDocx && (
+                          <button
+                            onClick={() => {
+                              onExportDocx('FINAL');
+                              setShowExportMenu(false);
+                            }}
+                            className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-800"
+                          >
+                            <span>📄</span> DOCX final
+                          </button>
+                        )}
+                        {onExportPdf && (
+                          <button
+                            onClick={() => {
+                              onExportPdf('FINAL');
+                              setShowExportMenu(false);
+                            }}
+                            className="w-full text-left px-3.5 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-800"
+                          >
+                            <span>🖨️</span> PDF final
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <div className="px-3.5 py-2 text-[11px] leading-snug text-slate-500">
+                        Disponible cuando se resuelvan los pendientes de revisión.
+                      </div>
                     )}
                   </div>
                 )}
@@ -1352,17 +1331,34 @@ export function WorkspaceDocumentEditor({
                   <span>Marcar listo para exportar</span>
                 </button>
               ) : (
-                <button
-                  onClick={() => {
-                    if (onExportPdf) onExportPdf(true);
-                    setShowPendingModal(false);
-                  }}
-                  className="py-2 px-4 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs transition flex items-center gap-1.5"
-                  title="Exportar documento asumiendo la responsabilidad de las omisiones"
-                >
-                  <span>🖨️</span>
-                  <span>Exportar PDF de todos modos</span>
-                </button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {onExportDocx && (
+                    <button
+                      onClick={() => {
+                        onExportDocx('DRAFT');
+                        setShowPendingModal(false);
+                      }}
+                      className="py-2 px-3 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs transition flex items-center gap-1.5"
+                        title="Exportar DOCX como borrador para revisión"
+                    >
+                      <span>📄</span>
+                      <span>DOCX borrador</span>
+                    </button>
+                  )}
+                  {onExportPdf && (
+                    <button
+                      onClick={() => {
+                        onExportPdf('DRAFT');
+                        setShowPendingModal(false);
+                      }}
+                      className="py-2 px-3 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs transition flex items-center gap-1.5"
+                        title="Exportar PDF como borrador para revisión"
+                    >
+                      <span>🖨️</span>
+                      <span>PDF borrador</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>

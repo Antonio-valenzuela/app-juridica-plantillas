@@ -2826,6 +2826,12 @@ textarea:disabled {
   font-weight: 700;
 }
 
+.lex-build-status.is-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .lex-status-dot {
   width: 9px;
   height: 9px;
@@ -2833,6 +2839,11 @@ textarea:disabled {
   background: var(--lex-green);
 
   box-shadow: 0 0 0 3px rgba(57, 188, 105, 0.12);
+}
+
+.lex-build-status.is-error .lex-status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
 }
 
 .lex-header-case {

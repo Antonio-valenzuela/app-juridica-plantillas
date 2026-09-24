@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { getGenerationJob } from '@/lib/legal-engine/generationJobs';
+import { recoverGenerationJob } from '@/lib/legal-engine/generationJobPersistence';
 import type { UniversalLegalDocument } from '@/lib/legal-engine/types';
 
 type CompletionDocument = UniversalLegalDocument & {
@@ -22,8 +23,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'MISSING_JOBID' }, { status: 400 });
   }
 
-  const job = getGenerationJob(jobId);
-  if (!job) {
+  const job = getGenerationJob(jobId) || await recoverGenerationJob(jobId);
+  if (!job || job.organizationId !== auth.context.organizationId || job.userId !== auth.context.userId) {
     return NextResponse.json({ ok: false, error: 'JOB_NOT_FOUND' }, { status: 404 });
   }
 
@@ -33,6 +34,7 @@ export async function GET(req: NextRequest) {
     ok: true,
     jobId: job.jobId,
     status: job.status,
+    terminalStatus: job.terminalStatus || null,
     total: job.total,
     completed: job.completed,
     percentage: job.percentage,
@@ -44,7 +46,9 @@ export async function GET(req: NextRequest) {
     errorCode: job.errorCode,
     errorMetadata: job.errorMetadata,
     documentId: job.documentId,
-    documentReadiness: job.documentReadiness || completionDoc?.documentAssemblyResult?.readiness || completionDoc?.generationMetadata.readiness || (job.document?.status === 'draft' ? 'REQUIRES_REVIEW' : 'READY'),
+    warnings: job.warnings || [],
+    phase: job.phase || null,
+    documentReadiness: job.documentReadiness || completionDoc?.documentAssemblyResult?.readiness || completionDoc?.generationMetadata.readiness || (job.status === 'failed' ? 'FAILED' : job.document?.status === 'draft' ? 'REQUIRES_REVIEW' : 'READY'),
     redirectUrl: job.redirectUrl,
     // Compat: si completado, incluye documento (sin exponer log interno completo al cliente)
     document: job.status === 'completed' ? job.document : null,

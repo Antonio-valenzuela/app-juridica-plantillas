@@ -84,6 +84,8 @@ export function WorkspaceDraftGeneratorModal({
   const [templateRefText, setTemplateRefText] = useState<string>('');
   const [activeStep, setActiveStep] = useState<1 | 2 | 3 | 4>(1);
   const [writingMode, setWritingMode] = useState<'analyze' | 'new' | 'template' | 'continue'>('analyze');
+  const [aiDisclosure, setAiDisclosure] = useState<{ externalTransfer: boolean; contentNotice: string; retentionNotice: string; providers: Array<{ provider: string; mode: string; configured: boolean; active: boolean; functions: string[] }> } | null>(null);
+  const [disclosureAcknowledged, setDisclosureAcknowledged] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !initialTemplate) return;
@@ -97,6 +99,20 @@ export function WorkspaceDraftGeneratorModal({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [isOpen, initialTemplate, initialTemplateText]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetch('/api/workspace/lawyer-profile', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (cancelled || !payload?.ok) return;
+        setAiDisclosure(payload.aiDisclosure || null);
+        setDisclosureAcknowledged(Boolean(payload.profile?.aiDisclosureAcknowledgedAt));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -114,6 +130,17 @@ export function WorkspaceDraftGeneratorModal({
     writingPreview?.matter,
     writingPreview?.documentType
   );
+  const requiresDisclosure = aiDisclosure?.externalTransfer === true && !disclosureAcknowledged;
+  const generationDisabled = isGenerating || requiresDisclosure || (uploadedSources.length === 0 && !selectedTpl && !userPrompt);
+
+  const acknowledgeDisclosure = async () => {
+    const response = await fetch('/api/workspace/lawyer-profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aiDisclosureAcknowledged: true }),
+    });
+    if (response.ok) setDisclosureAcknowledged(true);
+  };
 
   const handleSelectPreset = (p: { label: string; prompt: string; documentType?: string }) => {
     setSelectedPreset(p.label);
@@ -136,6 +163,7 @@ export function WorkspaceDraftGeneratorModal({
   };
 
   const handleStartGeneration = async () => {
+    if (requiresDisclosure) return;
     try {
       const result = await onGenerate({
         userInstruction: userPrompt || 'Redactar escrito jurídico formal con fundamentación y apartados completos.',
@@ -185,6 +213,21 @@ export function WorkspaceDraftGeneratorModal({
 
         {/* Cuerpo del Modal */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
+          {aiDisclosure?.externalTransfer && (
+            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950">
+              <p className="font-extrabold">Aviso operativo sobre proveedores de IA</p>
+              <p className="mt-2 leading-relaxed">{aiDisclosure.contentNotice}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {aiDisclosure.providers.filter((provider) => provider.active).map((provider) => (
+                  <span key={provider.provider} className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold">{provider.provider} · {provider.mode}</span>
+                ))}
+              </div>
+              <p className="mt-3 leading-relaxed text-[11px]">{aiDisclosure.retentionNotice}</p>
+              {!disclosureAcknowledged && (
+                <button type="button" onClick={() => void acknowledgeDisclosure()} className="mt-3 rounded-xl bg-[#0B2545] px-3 py-2 text-[11px] font-bold text-white">Entiendo y continuar</button>
+              )}
+            </section>
+          )}
           {/* PASO 1: Expediente / Fuentes */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -394,9 +437,9 @@ export function WorkspaceDraftGeneratorModal({
 
           <button
             onClick={handleStartGeneration}
-            disabled={isGenerating || (uploadedSources.length === 0 && !selectedTpl && !userPrompt)}
+            disabled={generationDisabled}
             className={`py-2.5 px-6 rounded-xl text-white text-xs font-bold shadow-md transition flex items-center gap-2 ${
-              isGenerating || (uploadedSources.length === 0 && !selectedTpl && !userPrompt)
+              generationDisabled
                 ? 'bg-slate-300 cursor-not-allowed opacity-60'
                 : 'bg-[#0B2545] hover:bg-[#081d39]'
             }`}

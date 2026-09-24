@@ -78,6 +78,7 @@ function mapElement(
 ): SourceUnit {
   const kind = sourceUnitKind(element.type);
   const excerpt = element.text.trim();
+  const extraction = source.sourceQuality?.ocrUsed ? 'OCR' as const : extractionMethod(element.type);
   return {
     unitId: `${source.id}:element:${element.order}`,
     sourceId: source.id,
@@ -99,7 +100,7 @@ function mapElement(
       paragraphIndex: kind === 'PARAGRAPH' ? paragraphIndex : undefined,
       elementIndex: element.order,
       excerpt,
-      extractionMethod: extractionMethod(element.type),
+      extractionMethod: extraction,
       confidence: confidenceFromElement(element, sourceIndexConfidence),
       inferenceLevel: 'LITERAL',
     }),
@@ -124,7 +125,7 @@ function fallbackPageUnit(source: UploadedSourceDocument, order: number): Source
       sourceName: source.filename || source.name,
       page: source.pages?.[0]?.page ?? 1,
       excerpt: text,
-      extractionMethod: 'PARAGRAPH',
+      extractionMethod: source.sourceQuality?.ocrUsed ? 'OCR' : 'PARAGRAPH',
       confidence: 0.3,
       inferenceLevel: 'LITERAL',
     }),

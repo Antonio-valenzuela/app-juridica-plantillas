@@ -15,7 +15,7 @@ export async function POST(
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };
 
     const draft = await prisma.legalDraft.findFirst({
-      where: { id, organizationId: identity.organizationId },
+      where: { id, organizationId: identity.organizationId, userId: identity.userId },
     });
 
     if (!draft) {

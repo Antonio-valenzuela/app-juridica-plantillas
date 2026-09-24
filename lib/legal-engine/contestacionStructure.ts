@@ -493,6 +493,20 @@ function revisionCaseNumber(doc: UniversalLegalDocument, caseAnalysis?: CaseAnal
   return doc.caseRefs.expediente || caseAnalysis?.caseNumbers?.principal || '[DATO PENDIENTE DE EXPEDIENTE: Número de expediente o amparo directo]';
 }
 
+function safeRequestedEffects(caseAnalysis?: CaseAnalysis): string[] {
+  return Array.from(new Set((caseAnalysis?.argumentAxes || [])
+    .filter((axis) => (axis.requestedEffectProvenance || []).length > 0)
+    .map((axis) => axis.requestedConsequence?.trim() || '')
+    .filter((effect) => effect.length > 0)
+    .filter((effect) => !/^revocar o dejar insubsistente .* conforme a derecho\.?$/i.test(effect))));
+}
+
+function buildSafePetitions(caseAnalysis?: CaseAnalysis): string {
+  const effects = safeRequestedEffects(caseAnalysis);
+  if (!effects.length) return '[REQUIERE CONFIRMACIÓN DEL ABOGADO: efecto procesal solicitado]';
+  return effects.map((effect, index) => `${ORDINALS[index] || `${index + 1}.`} ${effect}`).join('\n');
+}
+
 const ORDINALS = [
   'PRIMERO', 'SEGUNDO', 'TERCERO', 'CUARTO', 'QUINTO',
   'SEXTO', 'SÉPTIMO', 'OCTAVO', 'NOVENO', 'DÉCIMO',
@@ -613,13 +627,18 @@ export function buildVerifiedLegalGroundsText(
   const sections: string[] = [];
 
   // 1. Criterios jurisprudenciales verificados (con rubro, registro y texto)
-  const citations = caseAnalysis?.citations || [];
+  const citations = (caseAnalysis?.verifiedAuthorities || []).filter((authority) =>
+    authority.verificationStatus === 'VERIFIED'
+    && authority.source.sourceTier === 'OFFICIAL_PRIMARY'
+    && authority.proposition.supportLevel === 'DIRECT'
+  );
   if (citations.length > 0) {
-    const citsText = citations.map((c) => {
+    const citsText = citations.map((authority) => {
       const parts: string[] = [];
-      if (c.rubro) parts.push(`RUBRO: ${c.rubro}`);
-      if (c.registro) parts.push(`REGISTRO DIGITAL: ${c.registro}`);
-      if (c.texto) parts.push(`TEXTO: ${c.texto}`);
+      parts.push(`REFERENCIA: ${authority.identity.canonicalCitation}`);
+      if (authority.identifier) parts.push(`IDENTIFICADOR: ${authority.identifier}`);
+      parts.push(`PROPOSICIÓN VERIFICADA: ${authority.proposition.text}`);
+      parts.push(`FUENTE OFICIAL: ${authority.officialUrl || authority.source.sourceUrl}`);
       return parts.join('\n');
     }).join('\n\n');
     sections.push(`CRITERIOS JURISPRUDENCIALES VERIFICADOS:\n${citsText}`);
@@ -672,13 +691,13 @@ export function buildRevisionAmparoDirectoSkeleton(
 
   return [
     mkSection(templateId, 'sec-crad-asunto', 'header', 'IDENTIFICACIÓN DEL ASUNTO', 1, `TIPO DE ESCRITO: contestación / revisión extraordinaria frente a sentencia de amparo directo\nEXPEDIENTE O AMPARO DIRECTO: ${caseNumber}\nAUTORIDAD O ÓRGANO IDENTIFICADO: ${authority}`),
-    mkSection(templateId, 'sec-crad-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2, `${party}, por mi propio derecho y en carácter de parte recurrente, comparezco respetuosamente ante esta H. Suprema Corte de Justicia de la Nación para interponer el presente recurso de revisión, señalando domicilio y autorizados en términos de la Ley de Amparo.`),
+    mkSection(templateId, 'sec-crad-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2, `${party}\nPERSONALIDAD: [REQUIERE CONFIRMACIÓN DEL ABOGADO: carácter con el que comparece, representación, domicilio y autorizados]`),
     mkSection(templateId, 'sec-crad-sentencia', 'background', 'SENTENCIA DE AMPARO DIRECTO IMPUGNADA', 3, `EXPEDIENTE: ${caseNumber}\n${resolution}`),
     mkSection(templateId, 'sec-crad-antecedentes', 'background', 'ANTECEDENTES PROCESALES', 4, antecedents),
     mkSection(templateId, 'sec-crad-cuestion', 'legal_grounds', 'CUESTIÓN CONSTITUCIONAL Y/O PLANTEAMIENTO EXTRAORDINARIO', 5, sourceBackedIssueText(caseAnalysis)),
     mkSection(templateId, 'sec-crad-agravios', 'argument', 'AGRAVIOS / ARGUMENTOS', 6, sourceBackedArguments(caseAnalysis)),
     mkSection(templateId, 'sec-crad-fundamentos', 'legal_grounds', 'FUNDAMENTOS SUSTENTADOS', 7, grounds),
-    mkSection(templateId, 'sec-crad-petitorios', 'petition', 'PETITORIOS', 8, `PRIMERO. Tener por presentado el presente escrito de revisión extraordinaria y por hechas valer las manifestaciones que en él se contienen.\nSEGUNDO. Admitir a trámite el recurso de revisión interpuesto contra la sentencia de amparo directo ${caseNumber}.\nTERCERO. Declarar fundados los agravios expuestos y, en consecuencia, dejar insubsistente la ejecutoria recurrida.\nCUARTO. En su caso, devolver los autos al tribunal de origen para que, purgando los vicios señalados, dicte nueva resolución conforme a los lineamientos que se establezcan.\nQUINTO. Lo demás que en derecho proceda.`),
+    mkSection(templateId, 'sec-crad-petitorios', 'petition', 'PETITORIOS', 8, buildSafePetitions(caseAnalysis)),
     mkSection(templateId, 'sec-crad-cierre', 'signature', 'CIERRE Y FIRMA', 9, `PROTESTO LO NECESARIO.\nCiudad de México, a la fecha de su presentación.\n\n_________________________________________\n${party}`),
   ];
 }
@@ -703,7 +722,7 @@ export function getRevisionAmparoDirectoSectionText(
     if (issueText && !issueText.includes('DATO PENDIENTE DE EXPEDIENTE')) {
       return `INTERÉS EXCEPCIONAL EN MATERIA CONSTITUCIONAL:\n\n${issueText}`;
     }
-    return `INTERÉS EXCEPCIONAL EN MATERIA CONSTITUCIONAL:\nEl presente recurso reviste un interés excepcional en materia constitucional y de derechos humanos en términos de los artículos 107, fracción IX, de la Constitución Política de los Estados Unidos Mexicanos y 81, fracción II, de la Ley de Amparo, toda vez que entraña la fijación de un criterio de trascendencia para el orden jurídico nacional respecto a la interpretación directa de normas fundamentales.\n\n[PENDIENTE DE REVISIÓN: detallar el impacto jurídico y social del criterio propuesto con el abogado]`;
+    return 'INTERÉS EXCEPCIONAL EN MATERIA CONSTITUCIONAL:\n[REQUIERE CONFIRMACIÓN DEL ABOGADO: interés excepcional y trascendencia constitucional]';
   }
 
   if (/bloque\s+de\s+constitucionali/i.test(tKey)) {
@@ -715,7 +734,7 @@ export function getRevisionAmparoDirectoSectionText(
     if (issueText && !issueText.includes('DATO PENDIENTE DE EXPEDIENTE')) {
       return `BLOQUE DE CONSTITUCIONALIDAD Y PARÁMETRO DE CONTROL:\n\n${issueText}`;
     }
-    return `BLOQUE DE CONSTITUCIONALIDAD Y PARÁMETRO DE CONTROL:\nEl presente recurso se funda en el parámetro de regularidad constitucional integrado por los artículos 1o., 14, 16 y 17 de la Constitución Política de los Estados Unidos Mexicanos, así como en los tratados internacionales en materia de derechos humanos aplicables al acto reclamado.\n\n[PENDIENTE DE REVISIÓN: confirmar las normas constitucionales y convencionales específicas con el abogado]`;
+    return 'BLOQUE DE CONSTITUCIONALIDAD Y PARÁMETRO DE CONTROL:\n[REQUIERE CONFIRMACIÓN DEL ABOGADO: normas constitucionales y convencionales aplicables]';
   }
 
   if (/^prueba/i.test(tKey)) {

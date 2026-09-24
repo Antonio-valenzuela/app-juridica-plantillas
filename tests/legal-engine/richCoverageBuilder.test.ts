@@ -230,6 +230,54 @@ describe('Coverage builder dispatch', () => {
     expect(authority.metadata?.verificationStatus).not.toBe('LEGALLY_VERIFIED');
   });
 
+  it('does not turn OCR line fragments into mandatory argument coverage', () => {
+    const analysis = makeFixtureFCaseAnalysis();
+    analysis.richCaseAnalysis!.arguments = [
+      {
+        id: 'fixture-noise',
+        proposition: 'a',
+        supportingFactIds: [],
+        citedAuthorityIds: [],
+        provenance: [],
+      },
+      {
+        id: 'fixture-material',
+        proposition: 'La parte actora sostiene una interpretación que debe confrontarse con las constancias del expediente.',
+        supportingFactIds: [],
+        citedAuthorityIds: [],
+        provenance: [],
+      },
+    ];
+
+    const matrix = buildCoverageMatrix(analysis, makeFixtureDocument(), makeFixtureDocument().sections);
+    const argumentsInCoverage = matrix.items.filter((item) => item.category === 'SOURCE_ARGUMENT_RESPONSE');
+    expect(argumentsInCoverage.map((item) => item.argumentIds?.[0])).toEqual(['fixture-material']);
+  });
+
+  it('keeps judgment reasoning and citations reference-only unless explicitly challenged', () => {
+    const analysis = makeFixtureFCaseAnalysis();
+    analysis.richCaseAnalysis!.arguments = [{
+      id: 'fixture-court-argument',
+      proposition: 'El juzgador considera infundada la pretensión por falta de prueba suficiente.',
+      supportingFactIds: [],
+      citedAuthorityIds: ['fixture-court-authority'],
+      provenance: [{ ...analysis.richCaseAnalysis!.arguments[0].provenance[0], section: 'RAZONES Y FUNDAMENTOS DE LA DECISIÓN' }],
+    }];
+    analysis.richCaseAnalysis!.authorities = [{
+      id: 'fixture-court-authority',
+      authorityType: 'ARTICLE',
+      citationText: 'Artículo 14 constitucional',
+      verificationStatus: 'SOURCE_CITED',
+      provenance: [{ ...analysis.richCaseAnalysis!.arguments[0].provenance[0], section: 'RAZONES Y FUNDAMENTOS DE LA DECISIÓN' }],
+    }];
+
+    const matrix = buildCoverageMatrix(analysis, makeFixtureDocument(), makeFixtureDocument().sections);
+    expect(matrix.items.some((item) => item.argumentIds?.includes('fixture-court-argument'))).toBe(false);
+    const authority = matrix.items.find((item) => item.authorityMentionIds?.includes('fixture-court-authority'))!;
+    expect(authority.required).toBe(false);
+    expect(authority.satisfactionPolicy).toBe('REFERENCE_ONLY');
+  });
+
   it('creates petition support only when a petition requirement has explicit supporting links', () => {
     const analysis = makeFixtureFCaseAnalysis();
     analysis.richCaseAnalysis!.arguments = [{

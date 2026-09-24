@@ -9,6 +9,7 @@ import { CIVIL_DEMAND_REQUIRED_SECTION_IDS, COMMERCIAL_ENFORCEMENT_REQUIRED_SECT
 import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { hasSeedMarkers, hasUnresolvedFactualDependencies } from './seedMarkers';
+import { DRAFT_EXPORT_NOTICE, resolveExportMode, type ExportMode } from './exportModes';
 
 /**
  * exportGuards.ts
@@ -882,6 +883,47 @@ export interface PreparedExportDocument {
   report: SanitizeReport;
   qualityGate: QualityGateResult;
   validation: ValidationResult;
+  reviewOverrideApplied: boolean;
+  reviewOverrideWarnings: string[];
+}
+
+export interface PrepareUniversalDocumentForExportOptions {
+  /** Explicit export contract. DRAFT permits a review artifact; FINAL keeps all final gates. */
+  exportMode?: ExportMode;
+  /** Backward-compatible alias for older callers; true maps only to DRAFT. */
+  allowReviewOverride?: boolean;
+}
+
+const REVIEW_OVERRIDE_ERROR_PATTERNS = [
+  /^LIFECYCLE_NOT_EXPORTABLE:/,
+  /^QUALITY_GATE_FAILED:/,
+  /^INCOMPLETE_DOCUMENT:/,
+  /^PREFLIGHT_NOT_READY:/,
+  /^COMMERCIAL_PREFLIGHT_NOT_READY:/,
+  /^COMMERCIAL_QUALITY_GATE_NOT_READY:/,
+  /^RESPONSE_PREFLIGHT_NOT_READY:/,
+  /^RESPONSE_QUALITY_GATE_NOT_READY:/,
+];
+
+function isReviewOverrideError(error: string): boolean {
+  return REVIEW_OVERRIDE_ERROR_PATTERNS.some((pattern) => pattern.test(error));
+}
+
+function collectReviewOverrideErrors(
+  errors: string[],
+  warnings: string[],
+  allowReviewOverride: boolean,
+): string[] {
+  if (!allowReviewOverride) {
+    if (errors.length > 0) guardFailure(errors, warnings);
+    return [];
+  }
+
+  const hardErrors = errors.filter((error) => !isReviewOverrideError(error));
+  if (hardErrors.length > 0) guardFailure(hardErrors, warnings);
+  return errors.length > 0
+    ? ['REVIEW_EXPORT_OVERRIDE: exportación explícita de un borrador con pendientes: ' + errors.join(' | ')]
+    : [];
 }
 
 function guardFailure(
@@ -897,9 +939,14 @@ function guardFailure(
  */
 export async function prepareUniversalDocumentForExport(
   doc: UniversalLegalDocument,
+  options: PrepareUniversalDocumentForExportOptions = {},
 ): Promise<PreparedExportDocument> {
+  const exportMode = resolveExportMode(options.exportMode)
+    || (options.allowReviewOverride === true ? 'DRAFT' : 'FINAL');
+  const allowReviewOverride = exportMode === 'DRAFT';
+  const reviewOverrideWarnings: string[] = [];
   const initial = validateForExport(doc);
-  if (!initial.ok) guardFailure(initial.errors, initial.warnings);
+  reviewOverrideWarnings.push(...collectReviewOverrideErrors(initial.errors, initial.warnings, allowReviewOverride));
 
   const auditTrace = doc.generationMetadata?.auditTrace;
   const { document: sanitized, report } = sanitizeLegalDocument(doc, { dedupeBlocks: false });
@@ -908,34 +955,68 @@ export async function prepareUniversalDocumentForExport(
   if (auditTrace && !sanitized.generationMetadata.auditTrace) {
     sanitized.generationMetadata = { ...sanitized.generationMetadata, auditTrace };
   }
-  const afterSanitize = validateForExport(sanitized);
-  if (!afterSanitize.ok) guardFailure(afterSanitize.errors, afterSanitize.warnings);
+  const metadataWithoutNotice = { ...sanitized.generationMetadata } as UniversalLegalDocument['generationMetadata'] & { exportNotice?: string };
+  delete metadataWithoutNotice.exportNotice;
+  const exportDocument = {
+    ...sanitized,
+    generationMetadata: {
+      ...metadataWithoutNotice,
+      exportMode,
+      ...(exportMode === 'DRAFT' ? { exportNotice: DRAFT_EXPORT_NOTICE } : {}),
+    },
+  } as UniversalLegalDocument;
+  const afterSanitize = validateForExport(exportDocument);
+  reviewOverrideWarnings.push(...collectReviewOverrideErrors(afterSanitize.errors, afterSanitize.warnings, allowReviewOverride));
 
   // Dynamic import prevents the existing qualityGate -> exportGuards dependency
   // from becoming a module initialization cycle.
   const { runQualityGateCheck } = await import('./qualityGate');
-  const qualityGate = runQualityGateCheck(sanitized);
+  const qualityGate = runQualityGateCheck(exportDocument);
   if (!qualityGate.passed || !qualityGate.canMarkAsFinal) {
-    guardFailure([
+    const qualityErrors = [
       ...qualityGate.criticalErrors.map((issue) => issue.message),
       ...(!qualityGate.canMarkAsFinal ? ['QUALITY_GATE_FAILED: el documento no puede exportarse como FINAL.'] : []),
-    ], qualityGate.warnings.map((issue) => issue.message));
+    ];
+    if (allowReviewOverride) {
+      reviewOverrideWarnings.push(`REVIEW_EXPORT_OVERRIDE: quality gate requiere revisión: ${qualityErrors.join(' | ')}`);
+    } else {
+      guardFailure(qualityErrors, qualityGate.warnings.map((issue) => issue.message));
+    }
   }
 
-  const validation = validateDocument(sanitized);
+  const validation = validateDocument(exportDocument);
   if (!validation.isValid || validation.errors.length > 0) {
-    guardFailure(
-      validation.errors.map((issue) => issue.message),
-      validation.warnings.map((issue) => issue.message),
-    );
+    const validationErrors = validation.errors.map((issue) => issue.message);
+    const reviewValidationErrors = allowReviewOverride
+      ? validationErrors.filter((message) => /puntos petitorios/i.test(message))
+      : [];
+    const hardValidationErrors = validationErrors.filter((message) => !reviewValidationErrors.includes(message));
+    if (hardValidationErrors.length > 0) {
+      guardFailure(hardValidationErrors, validation.warnings.map((issue) => issue.message));
+    }
+    if (reviewValidationErrors.length > 0) {
+      reviewOverrideWarnings.push(`REVIEW_EXPORT_OVERRIDE: validación requiere revisión: ${reviewValidationErrors.join(' | ')}`);
+    }
   }
 
-  const readiness = readDocumentExportReadiness(sanitized);
+  const readiness = readDocumentExportReadiness(exportDocument);
   if (readiness !== 'READY_TO_EXPORT' && readiness !== 'FINAL_DOCUMENT') {
-    guardFailure([`LIFECYCLE_NOT_EXPORTABLE: el documento está en estado ${readiness || 'UNKNOWN'}; se requiere READY_TO_EXPORT o FINAL_DOCUMENT.`]);
+    const message = `LIFECYCLE_NOT_EXPORTABLE: el documento está en estado ${readiness || 'UNKNOWN'}; se requiere READY_TO_EXPORT o FINAL_DOCUMENT.`;
+    if (allowReviewOverride) {
+      reviewOverrideWarnings.push(`REVIEW_EXPORT_OVERRIDE: ${message}`);
+    } else {
+      guardFailure([message]);
+    }
   }
 
-  return { document: sanitized, report, qualityGate, validation };
+  return {
+    document: exportDocument,
+    report,
+    qualityGate,
+    validation,
+    reviewOverrideApplied: allowReviewOverride && reviewOverrideWarnings.length > 0,
+    reviewOverrideWarnings,
+  };
 }
 
 /** Returns the sanitized, fully validated document or throws ExportGuardError. */

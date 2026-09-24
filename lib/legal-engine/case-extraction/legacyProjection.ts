@@ -119,7 +119,13 @@ export function projectRichCaseAnalysis(rich: RichCaseAnalysis, base: CaseAnalys
     facts,
     evidence,
     arguments: rich.arguments.length > 0 ? rich.arguments.map((argument) => argument.proposition) : base.arguments,
-    authorities: Array.from(new Set([...base.authorities, ...rich.authorities.map((authority) => authority.citationText)])),
+    authorities: Array.from(new Set([
+      ...base.authorities,
+      ...rich.authorities
+        .map((authority) => authority.citationText)
+        .filter((citation): citation is string => typeof citation === 'string' && citation.trim().length > 0)
+        .map((citation) => citation.trim()),
+    ])),
     citations: base.citations,
     missingData: Array.from(new Set([...base.missingData, ...rich.missingData.map((item) => `[${item.field}] ${item.reason}`)])),
   };

@@ -1,4 +1,4 @@
-import { prepareUniversalDocumentForExport, validateForExport } from './exportGuards';
+import { prepareUniversalDocumentForExport, validateForExport, type PrepareUniversalDocumentForExportOptions } from './exportGuards';
 import {
   verifyCompatibilityMaterialization,
   verifyFinalDocumentExportability,
@@ -671,25 +671,27 @@ export async function renderPdf(
 function verifiedInputForPreparedDocument(
   document: UniversalLegalDocument,
   exportValidation: ReturnType<typeof validateForExport>,
+  options: PrepareUniversalDocumentForExportOptions = {},
 ): VerifiedMaterializationInput {
   const candidate = document as UniversalLegalDocument & {
     documentAssemblyResult?: unknown;
     documentAssemblyQualityGate?: unknown;
   };
   if (candidate.documentAssemblyResult !== undefined || candidate.documentAssemblyQualityGate !== undefined) {
-    return verifyFinalDocumentExportability({ document, exportValidation });
+    return verifyFinalDocumentExportability({ document, exportValidation }, options);
   }
 
-  return verifyCompatibilityMaterialization({ document, exportValidation });
+  return verifyCompatibilityMaterialization({ document, exportValidation }, options);
 }
 
 export const exportUniversalToPdf = async (
   docData: UniversalLegalDocument,
   trace?: GenerationTrace,
+  exportOptions: PrepareUniversalDocumentForExportOptions = {},
 ): Promise<Buffer> => {
-  const prepared = await prepareUniversalDocumentForExport(docData);
+  const prepared = await prepareUniversalDocumentForExport(docData, exportOptions);
   const exportValidation = validateForExport(prepared.document);
-  const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation);
+  const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation, exportOptions);
 
   const model = materializePreparedFinalDocument(verified);
   const artifact = await renderPdf(model, {

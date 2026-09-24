@@ -95,6 +95,23 @@ describe('FASE 7 Task 7 — export route contracts', () => {
     await expect(pdfResponse.json()).resolves.toMatchObject({ error: 'PDF_LEGACY_PAYLOAD_REJECTED' });
   });
 
+  it('requires an explicit valid export mode when the field is present', async () => {
+    const document = createEmptyDocument({ id: 'invalid-export-mode' });
+    const docxResponse = await postDocx(request('api/legal-engine/export/docx', {
+      document,
+      exportMode: 'PRINT' as any,
+    }));
+    expect(docxResponse.status).toBe(400);
+    await expect(docxResponse.json()).resolves.toMatchObject({ errorCode: 'INVALID_EXPORT_MODE' });
+
+    const pdfResponse = await postPdf(request('api/legal-engine/export/pdf', {
+      document,
+      exportMode: 'PRINT' as any,
+    }));
+    expect(pdfResponse.status).toBe(400);
+    await expect(pdfResponse.json()).resolves.toMatchObject({ errorCode: 'INVALID_EXPORT_MODE' });
+  });
+
   it('keeps the universal routes on the universal exporter and canonical filename resolver', () => {
     for (const file of ['docx/route.ts', 'pdf/route.ts']) {
       const source = readFileSync(`${routeRoot}/${file}`, 'utf8');

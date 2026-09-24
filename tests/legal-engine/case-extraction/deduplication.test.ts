@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deduplicateRichItems } from '@/lib/legal-engine/case-extraction/deduplication';
 import { createSourceProvenance } from '@/lib/legal-engine/case-extraction/provenance';
-import type { CaseParty, DocumentItem, SourceProvenance } from '@/lib/legal-engine/case-extraction/types';
+import type { CaseParty, DocumentItem, SourceAuthorityMention, SourceProvenance } from '@/lib/legal-engine/case-extraction/types';
 
 function provenance(sourceId: string): SourceProvenance {
   return createSourceProvenance({ sourceId, excerpt: 'contrato', extractionMethod: 'PARAGRAPH', confidence: 1, inferenceLevel: 'LITERAL' });
@@ -13,6 +13,10 @@ function documentItem(title: string, sourceId: string): DocumentItem {
 
 function partyItem(name: string): CaseParty {
   return { id: `party-${name}`, name, role: 'ACTOR', aliases: [], provenance: [provenance(name)], confidence: 0.8, confirmed: false };
+}
+
+function authorityItem(id: string, citationText: string, verificationStatus: SourceAuthorityMention['verificationStatus']): SourceAuthorityMention {
+  return { id, authorityType: 'ARTICLE', citationText, verificationStatus, provenance: [provenance(id)] };
 }
 
 describe('deduplicateRichItems', () => {
@@ -32,5 +36,16 @@ describe('deduplicateRichItems', () => {
 
     expect(result.items).toHaveLength(2);
     expect(result.mergeReasons).toContain('IDENTITY_SIMILARITY_REQUIRES_REVIEW');
+  });
+
+  it('deduplicates citation variants regardless of source verification status', () => {
+    const result = deduplicateRichItems([
+      authorityItem('authority-1', 'Artículo 14 de la Constitución Política Federal', 'SOURCE_CITED'),
+      authorityItem('authority-2', 'art. 14 Constitución', 'LEGALLY_VERIFIED'),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ verificationStatus: 'LEGALLY_VERIFIED' });
+    expect(result.mergedCount).toBe(1);
   });
 });

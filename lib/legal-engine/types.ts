@@ -368,7 +368,17 @@ export interface UploadedSourceDocument {
   uploadedAt?: string;
   pages?: DocumentPage[];
   sourceValidated?: boolean;
+  sourceQualityStatus?: 'READY' | 'NEEDS_SOURCE_REVIEW';
   sourceValidationMethod?: string;
+  sourceQuality?: {
+    pageCount: number;
+    characterCount: number;
+    charactersPerPage: number;
+    emptyPageRatio: number;
+    extractionMethod: 'native' | 'ocr' | 'fallback' | 'manual';
+    ocrUsed: boolean;
+    confidence: number;
+  };
   qualityScore?: DocumentQualityScore;
   warnings?: string[];
   fileSizeBytes?: number;
@@ -403,8 +413,13 @@ export interface DocumentQualityScore {
   confidence: number;
   qualityLabel: string;
   status: 'READY' | 'NEEDS_OCR' | 'LOW_QUALITY' | 'FAILED';
+  pageCount?: number;
+  textLength?: number;
+  avgCharsPerPage?: number;
   ocrUsed?: boolean;
   emptyPages?: number;
+  emptyPageRatio?: number;
+  extractionMethod?: 'native' | 'ocr' | 'fallback' | 'manual';
 }
 
 export interface GeneratedSourceReference extends SourceReference {
@@ -454,6 +469,7 @@ export interface PipelineStageResult {
 
 export interface PipelineState {
   currentStage: PipelineStage | null;
+  phase?: 'LEGAL_RESEARCH' | 'STRUCTURE' | 'COMPOSE' | 'VERIFY' | 'POLISH' | 'ASSEMBLE';
   stages: Record<PipelineStage, PipelineStageResult>;
   isComplete: boolean;
   hasErrors: boolean;
@@ -461,6 +477,11 @@ export interface PipelineState {
 }
 
 export interface GenerationMetadata {
+  /** Modo de la última exportación materializada; no cambia el lifecycle jurídico. */
+  exportMode?: import('./exportModes').ExportMode;
+  /** Aviso que acompaña exclusivamente a una exportación de borrador. */
+  exportNotice?: string;
+  schemaVersion?: number;
   pipelineState: PipelineState;
   modelVersion?: string;
   promptVersion?: string;
@@ -525,6 +546,7 @@ export interface ClassificationResult {
 
 export interface UniversalLegalDocument {
   id: string;
+  documentSchemaVersion?: number;
   lifecycle?: DocumentLifecycleMetadata;
   templateId?: string;
   title: string;

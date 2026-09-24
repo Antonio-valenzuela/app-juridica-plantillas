@@ -65,6 +65,7 @@ export interface RenderParagraph {
   text: string;
   runs: readonly RenderRun[];
   role: 'TITLE' | 'BODY' | 'LIST' | 'SIGNATURE' | 'HEADER' | 'FOOTER' | 'SPACER';
+  headingLevel?: 1 | 2;
   style: BlockStyle;
   orderPath: readonly number[];
   keepNext: boolean;

@@ -35,6 +35,7 @@ export interface GenerationExtensionContract {
   characterCount?: number;
   extensionTargetUnmet?: boolean;
   sectionWordTargets?: Record<string, number>;
+  sectionBudgets?: Record<string, SectionBudget>;
   metrics: {
     llmCalls: number;
     continuationCalls: number;
@@ -42,6 +43,12 @@ export interface GenerationExtensionContract {
     rejectedDuplicateChunks: number;
     providerCalls: Record<string, number>;
   };
+}
+
+export interface SectionBudget {
+  targetWords: number;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  maxContinuations: number;
 }
 
 const STANDARD_LIMITS = {
@@ -155,6 +162,21 @@ export function allocateSectionWordTargets(
   return Object.fromEntries(floors.map((item) => [item.id, item.value]));
 }
 
+export function allocateSectionBudgets(
+  sections: Array<{ id: string; title?: string; type?: string }>,
+  totalWords: number,
+  maxContinuations = 6,
+): Record<string, SectionBudget> {
+  const targets = allocateSectionWordTargets(sections, totalWords);
+  return Object.fromEntries(sections.map((section) => {
+    const key = `${section.title || ''} ${section.type || ''}`.toLowerCase();
+    const priority: SectionBudget['priority'] = /agravio|defensa|argument|derecho|prueba|fundament/.test(key)
+      ? 'HIGH'
+      : /anteced|hecho|resoluci|proced/.test(key) ? 'MEDIUM' : 'LOW';
+    return [section.id, { targetWords: targets[section.id] || 120, priority, maxContinuations }];
+  }));
+}
+
 export function calculateExtensionTokenBudget(
   sectionTargetWords: number,
   taskCount: number,
@@ -208,6 +230,10 @@ export interface ContinuationPromptInput {
   pendingPoints: string[];
   factIds: string[];
   sourceIds: string[];
+  unusedFacts?: string[];
+  unusedEvidence?: string[];
+  unusedAuthorities?: string[];
+  argumentsAlreadyUsed?: string[];
 }
 
 export function buildContinuationPrompt(input: ContinuationPromptInput): string {
@@ -221,6 +247,10 @@ export function buildContinuationPrompt(input: ContinuationPromptInput): string 
     `PUNTOS PENDIENTES: ${input.pendingPoints.join(' | ') || 'Ninguno'}`,
     `HECHOS VINCULADOS: ${input.factIds.join(', ') || 'Ninguno'}`,
     `FUENTES VINCULADAS: ${input.sourceIds.join(', ') || 'Ninguna'}`,
+    `HECHOS AÚN NO DESARROLLADOS: ${input.unusedFacts?.join(', ') || 'Ninguno'}`,
+    `PRUEBAS AÚN NO DESARROLLADAS: ${input.unusedEvidence?.join(', ') || 'Ninguna'}`,
+    `AUTORIDADES AÚN NO DESARROLLADAS: ${input.unusedAuthorities?.join(', ') || 'Ninguna'}`,
+    `ARGUMENTOS YA UTILIZADOS: ${input.argumentsAlreadyUsed?.join(', ') || 'Ninguno'}`,
     '',
     'INSTRUCCIÓN: Continúa con desarrollo jurídico sustantivamente nuevo y concluye los puntos pendientes.',
     'NO REPITAS párrafos, encabezados, premisas ni citas ya presentes. No inventes hechos, fuentes ni autoridades.',

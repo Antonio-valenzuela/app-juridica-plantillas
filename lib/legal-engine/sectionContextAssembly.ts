@@ -399,6 +399,7 @@ export function assembleSectionContextPacket(input: {
     evidence: cappedEvidence,
     verifiedAuthorities,
     research,
+    argumentSupports: input.documentState?.matterKnowledgeBase.argumentSupports || [],
     clientPosition,
     previousSectionSummaries: input.documentState?.previousConclusions || [],
     blockers,

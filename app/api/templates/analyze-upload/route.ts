@@ -34,6 +34,7 @@ export interface AnalyzeResult {
    * When false, the client must NOT invoke AI legal analysis automatically.
    */
   sourceValidated: boolean;
+  sourceQualityStatus: 'READY' | 'NEEDS_SOURCE_REVIEW';
   /** How the source was validated */
   sourceValidationMethod: string;
   /** Which OCR provider was used, if any */
@@ -50,6 +51,15 @@ export interface AnalyzeResult {
     status: 'READY' | 'NEEDS_OCR' | 'LOW_QUALITY' | 'FAILED';
     ocrUsed: boolean;
     emptyPages: number;
+  };
+  sourceQuality: {
+    pageCount: number;
+    characterCount: number;
+    charactersPerPage: number;
+    emptyPageRatio: number;
+    extractionMethod: string;
+    ocrUsed: boolean;
+    confidence: number;
   };
   /** Ordered extraction steps for the UI */
   extractionSteps: Array<{
@@ -159,14 +169,33 @@ function canonicalClassificationLabel(sourceDocumentType: string, fallback: stri
 // ── POST /api/templates/analyze-upload ────────────────────────────────────────
 
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { checkRequestRateLimit } from '@/lib/security/rateLimit';
+import { validateUploadBuffer } from '@/lib/security/uploadValidation';
+import { apiErrorResponse } from '@/lib/security/apiErrors';
+import { generateRequestId } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
-  // Identidad best-effort: la extracción es stateless (sin lecturas ni escrituras
-  // en BD), así que un parpadeo de la base de datos NO debe bloquear la subida.
-  await requireLawyerAccess(request);
+  const requestId = request.headers.get('x-request-id')?.trim() || generateRequestId();
+  const access = await requireLawyerAccess(request);
+  if (!access.ok) return access.response;
+  const rateLimit = checkRequestRateLimit(
+    request,
+    'upload',
+    10,
+    `${access.context.organizationId}:${access.context.userId}`,
+  );
+  if (!rateLimit.ok) {
+    return new Response(JSON.stringify({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas cargas. Intenta de nuevo más tarde.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', ...rateLimit.headers },
+    });
+  }
 
   try {
     const formData = await request.formData();
+    if (formData.getAll('file').length > 1) {
+      return NextResponse.json({ ok: false, errorCode: 'TOO_MANY_FILES', message: 'Solo se permite un archivo por solicitud.' }, { status: 413 });
+    }
     const file = formData.get('file') as File | null;
 
     if (!file) {
@@ -200,9 +229,23 @@ export async function POST(request: NextRequest) {
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+    const uploadValidation = validateUploadBuffer({
+      buffer,
+      fileName,
+      mimeType,
+      maxImagePixels: Number(process.env.UPLOAD_MAX_IMAGE_PIXELS) || 40_000_000,
+    });
+    if (!uploadValidation.ok) {
+      const status = uploadValidation.errorCode === 'UPLOAD_IMAGE_TOO_LARGE' ? 413 : 400;
+      return NextResponse.json({ ok: false, errorCode: uploadValidation.errorCode, message: uploadValidation.message }, { status });
+    }
 
     // ── Run universal extraction pipeline ─────────────────────────────────────
     const result = await extractDocument({ buffer, fileName, mimeType });
+    const maxPages = Number(process.env.UPLOAD_MAX_PAGES) || 100;
+    if (result.pageCount > maxPages) {
+      return NextResponse.json({ ok: false, errorCode: 'UPLOAD_TOO_MANY_PAGES', message: `El documento excede el máximo permitido de ${maxPages} páginas.` }, { status: 413 });
+    }
     const sourceDocument = createSourceDocument({
       id: fileName,
       filename: fileName,
@@ -211,6 +254,7 @@ export async function POST(request: NextRequest) {
       extractedText: result.text,
       pages: result.pages,
       sourceValidated: result.sourceValidated,
+      sourceQualityStatus: result.sourceQualityStatus,
     });
     const sourceLifecycle = readDocumentLifecycle(sourceDocument);
     if (!sourceLifecycle) {
@@ -268,6 +312,7 @@ export async function POST(request: NextRequest) {
       sourceFileName: fileName,
       mimeType,
       sourceValidated: result.sourceValidated,
+      sourceQualityStatus: result.sourceQualityStatus,
       sourceValidationMethod: result.sourceValidationMethod,
       ocrProvider: result.ocrProvider,
       ocrStatus: result.ocrStatus,
@@ -281,6 +326,7 @@ export async function POST(request: NextRequest) {
         ocrUsed: result.ocrUsed,
         emptyPages: result.qualityScore.emptyPages,
       },
+      sourceQuality: result.sourceQuality,
       extractionSteps: result.extractionSteps,
       pages: result.pages,
       classification,
@@ -294,10 +340,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(response);
   } catch (err: any) {
-    console.error('[analyze-upload] Error:', err);
-    return NextResponse.json(
-      { ok: false, error: err.message || 'Error al procesar el archivo.' },
-      { status: 500 }
-    );
+    return apiErrorResponse({ requestId, status: 500, errorCode: 'UPLOAD_PROCESSING_FAILED', message: 'No fue posible procesar el archivo.', internalError: err });
   }
 }

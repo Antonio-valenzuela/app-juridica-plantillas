@@ -46,7 +46,11 @@ function provenanceFor(unit: SourceUnit, excerpt: string): SourceProvenance {
     paragraphIndex: unit.paragraphIndex,
     elementIndex: unit.elementIndex,
     excerpt,
-    extractionMethod: 'PATTERN',
+    // The date is found by a lexical pattern, but its evidence still comes
+    // from the source unit. Keep OCR/native provenance instead of replacing
+    // it with PATTERN, otherwise VERIFY reports a source-backed OCR date as
+    // untraceable derived data.
+    extractionMethod: unit.provenance.extractionMethod,
     confidence: unit.provenance.confidence,
     inferenceLevel: 'LITERAL',
   });

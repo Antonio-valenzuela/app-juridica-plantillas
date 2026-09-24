@@ -12,7 +12,7 @@ import {
 } from 'docx';
 import type { GenerationTrace } from './generationTrace';
 import { hashTraceText } from './generationTrace';
-import { prepareUniversalDocumentForExport, validateForExport } from './exportGuards';
+import { prepareUniversalDocumentForExport, validateForExport, type PrepareUniversalDocumentForExportOptions } from './exportGuards';
 import {
   verifyCompatibilityMaterialization,
   verifyFinalDocumentExportability,
@@ -203,7 +203,9 @@ function renderParagraph(paragraph: RenderParagraph, placement: 'BODY' | 'HEADER
   return new Paragraph({
     children,
     includeIfEmpty: true,
-    heading: paragraph.role === 'TITLE' ? HeadingLevel.HEADING_2 : undefined,
+    heading: paragraph.role === 'TITLE'
+      ? paragraph.headingLevel === 1 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2
+      : undefined,
     alignment: mapAlignment(style.textAlign, paragraph.role),
     spacing: { after: paragraph.role === 'SPACER' ? 80 : 120, line: lineSpacing(style.lineHeight) },
     keepNext: paragraph.keepNext,
@@ -338,16 +340,17 @@ function recordTrace(
 function verifiedInputForPreparedDocument(
   document: UniversalLegalDocument,
   exportValidation: ReturnType<typeof validateForExport>,
+  options: PrepareUniversalDocumentForExportOptions = {},
 ): VerifiedMaterializationInput {
   const candidate = document as UniversalLegalDocument & {
     documentAssemblyResult?: unknown;
     documentAssemblyQualityGate?: unknown;
   };
   if (candidate.documentAssemblyResult !== undefined || candidate.documentAssemblyQualityGate !== undefined) {
-    return verifyFinalDocumentExportability({ document, exportValidation });
+    return verifyFinalDocumentExportability({ document, exportValidation }, options);
   }
 
-  return verifyCompatibilityMaterialization({ document, exportValidation });
+  return verifyCompatibilityMaterialization({ document, exportValidation }, options);
 }
 
 /**
@@ -358,10 +361,11 @@ export const exportUniversalToDocx = async (
   docData: UniversalLegalDocument,
   lawyerProfile: LawyerProfile = DEFAULT_LAWYER_PROFILE,
   trace?: GenerationTrace,
+  exportOptions: PrepareUniversalDocumentForExportOptions = {},
 ): Promise<Buffer> => {
-  const prepared = await prepareUniversalDocumentForExport(docData);
+  const prepared = await prepareUniversalDocumentForExport(docData, exportOptions);
   const exportValidation = validateForExport(prepared.document);
-  const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation);
+  const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation, exportOptions);
   const model = materializePreparedFinalDocument(verified);
   const artifact = await renderDocx(model, {
     format: 'docx',

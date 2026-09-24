@@ -25,7 +25,7 @@ import { createContentBlock, stripTrustMarkers } from './trustLayer';
 import { LawyerProfile, DEFAULT_LAWYER_PROFILE } from '../workspace/lawyerProfileTypes';
 import { applyStyleToSectionText, evaluateStyleMatch } from './styleEngine';
 import { runQualityGateCheck } from './qualityGate';
-import { reconstructCaseAnalysis, CaseAnalysis, CaseTheory, ArgumentAxis } from './caseAnalysis';
+import { applyInstructionSupportedRichFields, reconstructCaseAnalysis, CaseAnalysis, CaseTheory, ArgumentAxis } from './caseAnalysis';
 import { buildCaseContext, formatCaseContextField, isLaboralDocumentType, isAmparoDocumentType, isAdministrativoDocumentType, isFiscalDocumentType, isPenalDocumentType, isAgrarioDocumentType, isInmobiliarioDocumentType, isCorporativoDocumentType, isContractualDocumentType, isPropiedadIntelectualDocumentType, isTramiteGeneralDocumentType } from './caseContext';
 import { normalizeUnresolvedFieldMarkers } from './pendingFields';
 import { buildDocumentIndex, type DocumentIndex } from './documentIndex';
@@ -371,6 +371,7 @@ import { runDocumentAssemblyQualityGate } from './documentAssemblyQualityGate';
 import type { DocumentAssemblyFinding, DocumentAssemblyResult, DocumentAssemblyQualityGateResult, CoverageReconciliation } from './documentAssemblyTypes';
 import {
   allocateSectionWordTargets,
+  allocateSectionBudgets,
   resolveGenerationExtensionContract,
   type GenerationExtensionContract,
   type GenerationExtensionInput,
@@ -932,7 +933,7 @@ export interface PipelineCallbacks {
   onError?: (error: any, stage: PipelineStage, doc: UniversalLegalDocument) => void;
   /** Nuevo: progreso por bloque jurídico (no rompe compatibilidad) */
   onBlockProgress?: (current: number, total: number, block: LegalBlock) => void;
-  onBlockComplete?: (completed: number, total: number, block: LegalBlock, meta: { aiUsed: boolean; aiProvider?: string | null; fallback: boolean }) => void;
+  onBlockComplete?: (completed: number, total: number, block: LegalBlock, meta: { aiUsed: boolean; aiProvider?: string | null; fallback: boolean }, document?: UniversalLegalDocument) => void;
   onProgressMessage?: (message: string) => void;
   onTraceReady?: (trace: import('./generationTrace').GenerationTrace, doc: UniversalLegalDocument) => void | Promise<void>;
 }
@@ -3173,9 +3174,15 @@ export async function runGenerationPipeline(
   }
 
   if (sources.length > 0 && requiresValidatedSources(sources)) {
-    if (!input.allowUnvalidatedSource && !input.warningMode) {
-      throw new Error('La fuente no está validada. Realice o confirme la validación/OCR antes de generar el documento.');
-    }
+    const reviewError = new Error('NEEDS_SOURCE_REVIEW: la fuente requiere validación de extracción/OCR antes de generar el documento.') as Error & { code?: string; metadata?: unknown };
+    reviewError.code = 'NEEDS_SOURCE_REVIEW';
+    reviewError.metadata = sources.map((source) => ({
+      sourceId: source.id,
+      sourceValidated: source.sourceValidated === true,
+      sourceQualityStatus: source.sourceQualityStatus || 'NEEDS_SOURCE_REVIEW',
+      qualityScore: source.qualityScore,
+    }));
+    throw reviewError;
   }
 
   const doc: UniversalLegalDocument = markDocumentAsDraft(
@@ -3209,6 +3216,11 @@ export async function runGenerationPipeline(
 
   const updateStage = (stage: PipelineStage, status: 'running' | 'complete' | 'error', error?: string) => {
     doc.generationMetadata.pipelineState.currentStage = status === 'running' ? stage : null;
+    const phaseByStage: Record<PipelineStage, NonNullable<UniversalLegalDocument['generationMetadata']['pipelineState']['phase']>> = {
+      classify: 'LEGAL_RESEARCH', extract: 'LEGAL_RESEARCH', analyze: 'LEGAL_RESEARCH', identify_issues: 'LEGAL_RESEARCH',
+      structure: 'STRUCTURE', generate_sections: 'COMPOSE', review_coherence: 'VERIFY', validate: 'VERIFY',
+    };
+    doc.generationMetadata.pipelineState.phase = phaseByStage[stage];
     const existing = (doc.generationMetadata.pipelineState.stages as any)[stage];
     (doc.generationMetadata.pipelineState.stages as any)[stage] = {
       stage,
@@ -3409,7 +3421,7 @@ export async function runGenerationPipeline(
       effectiveInputAnalysis?.richCaseAnalysis
       || (!effectiveInputAnalysis && input.traceOptions?.enabled),
     );
-    const caseAnalysis: CaseAnalysis = effectiveInputAnalysis
+    const mergedCaseAnalysis: CaseAnalysis = effectiveInputAnalysis
       ? {
           ...reconstructedAnalysis,
           ...effectiveInputAnalysis,
@@ -3427,6 +3439,12 @@ export async function runGenerationPipeline(
       : richPipelineRequested
         ? reconstructedAnalysis
         : { ...reconstructedAnalysis, richCaseAnalysis: undefined };
+    const caseAnalysis: CaseAnalysis = mergedCaseAnalysis.richCaseAnalysis
+      ? {
+          ...mergedCaseAnalysis,
+          richCaseAnalysis: applyInstructionSupportedRichFields(mergedCaseAnalysis.richCaseAnalysis, userPrompt),
+        }
+      : mergedCaseAnalysis;
     // El modo seguro de escritura desde cero debe llegar explícitamente en el
     // workflow. Los consumidores históricos sin workflow conservan su contrato
     // anterior; la UI nueva siempre construye `flow: NEW_WRITING`.
@@ -3729,6 +3747,17 @@ export async function runGenerationPipeline(
     if (plan.legalIssueMatrix) {
       doc.legalIssueMatrix = plan.legalIssueMatrix;
     }
+    // La fundamentación determinista solo puede consumir autoridades que ya
+    // pasaron la verificación oficial issue-scoped. Las candidatas citadas en
+    // la fuente y las autoridades descubiertas pero no verificadas quedan
+    // fuera del texto jurídico, aunque sigan visibles en la traza.
+    if (caseAnalysis && input.researchBundlesByIssueId) {
+      const verifiedAuthorities = Array.from(input.researchBundlesByIssueId.values())
+        .flatMap((bundle) => bundle.verifiedAuthorities)
+        .filter((authority) => authority.verificationStatus === 'VERIFIED' && authority.source.sourceTier === 'OFFICIAL_PRIMARY')
+        .filter((authority, index, all) => all.findIndex((candidate) => candidate.id === authority.id) === index);
+      caseAnalysis.verifiedAuthorities = verifiedAuthorities;
+    }
     doc.templateId = plan.templateId;
     traceContext?.snapshotDocumentPlan(plan);
     const workflowMode: GenerationMode = input.workflow?.selection.mode || 'automatic';
@@ -3857,6 +3886,11 @@ export async function runGenerationPipeline(
         input.sectionGenerationMode || 'legacy',
         generationExtension,
         documentState,
+      );
+      generationExtension.sectionBudgets = allocateSectionBudgets(
+        doc.sections.map((section) => ({ id: section.id, title: section.title, type: section.type })),
+        generationExtension.targetWords,
+        generationExtension.maxContinuationsPerSection,
       );
       if (generatedRaw.sectionDraft) {
         (section as DocumentNode & { sectionDraft?: SectionDraft }).sectionDraft = generatedRaw.sectionDraft;
@@ -4113,10 +4147,11 @@ export async function runGenerationPipeline(
         aiProvider: generated.aiProvider || 'fallback',
         stage: `Generando ${completedBlocks}/${doc.sections.length}: ${section.title.slice(0,50)}`,
       });
-      callbacks?.onBlockComplete?.(completedBlocks, doc.sections.length, pseudoBlock as LegalBlock, { aiUsed: effectiveAiUsed, aiProvider: generated.aiProvider || null, fallback: !effectiveAiUsed && !!generated.aiError });
+      callbacks?.onBlockComplete?.(completedBlocks, doc.sections.length, pseudoBlock as LegalBlock, { aiUsed: effectiveAiUsed, aiProvider: generated.aiProvider || null, fallback: !effectiveAiUsed && !!generated.aiError }, doc);
     }
 
     if (generationExtension.generationMode === 'extended-legal') {
+      jobUpdate((input as any).jobId, { phase: 'extend', stage: 'Extensión jurídica' });
       const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext });
       (doc.generationMetadata as any).generationExtension = generationExtension;
       if (expansion.warnings.length > 0) {
@@ -4129,6 +4164,7 @@ export async function runGenerationPipeline(
         stage: `Medición de extensión: ${expansion.metrics.actualPages} páginas`,
         extensionPages: expansion.metrics.actualPages,
         extensionTarget: generationExtension.targetPages,
+        phase: 'assemble',
       });
     }
 
@@ -4185,6 +4221,7 @@ export async function runGenerationPipeline(
     let documentAssemblyCoverage: CoverageReconciliation | undefined;
     let documentAssemblyContracts: readonly import('./documentAssemblyTypes').SectionContract[] = [];
     let documentAssemblyGatePassed = false;
+    doc.generationMetadata.pipelineState.phase = 'ASSEMBLE';
     try {
       const preSanitizerSections = doc.sections.map((section) => ({
         ...section,
@@ -4327,6 +4364,8 @@ export async function runGenerationPipeline(
     }
 
     // ── Stage 7: Review Coherence ──────────────────────────────────────────
+    doc.generationMetadata.pipelineState.phase = 'POLISH';
+    jobUpdate((input as any).jobId, { phase: 'polish', stage: 'Revisando coherencia' });
     updateStage('review_coherence', 'running');
     callbacks?.onStageStart?.('review_coherence', doc);
     callbacks?.onProgressMessage?.('Revisando coherencia…');
@@ -4340,6 +4379,7 @@ export async function runGenerationPipeline(
 
     // ── Stage 8: Validate & Quality Gate (CONSERVADO) ─────────────────────
     updateStage('validate', 'running');
+    jobUpdate((input as any).jobId, { phase: 'verify', stage: 'Validando documento' });
     callbacks?.onStageStart?.('validate', doc);
     callbacks?.onProgressMessage?.('Validando documento…');
 
@@ -4566,6 +4606,7 @@ export async function runGenerationPipeline(
       }
       await callbacks?.onTraceReady?.(doc.generationMetadata.auditTrace, doc);
     }
+    jobUpdate((input as any).jobId, { phase: 'materialize', stage: 'Documento listo para materialización' });
     return doc;
   } catch (error: any) {
     console.error('Pipeline error:', error);

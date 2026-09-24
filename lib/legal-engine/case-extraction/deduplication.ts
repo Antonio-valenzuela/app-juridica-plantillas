@@ -37,6 +37,19 @@ function normalize(value: string | undefined): string {
     .trim();
 }
 
+function normalizeAuthorityCitation(value: string | undefined): string {
+  return normalize(value)
+    .replace(/\b(?:art(?:iculo|\.)?|arts?\.?|art[ií]culos?)\b/g, 'articulo')
+    .replace(/\bfracc(?:i[oó]n|\.)?\b/g, 'fraccion')
+    .replace(/\b(?:p[aá]rrafo|p[aá]rrafos)\b/g, 'parrafo')
+    .replace(/\b(?:constituci[oó]n\s+pol[ií]tica|cpeum)\b/g, 'constitucion')
+    .replace(/\b(?:de\s+los\s+estados\s+unidos\s+mexicanos|federal)\b/g, '')
+    .replace(/\bde\s+la\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function provenanceKey(value: SourceProvenance): string {
   return [value.sourceId, value.page ?? '', value.elementIndex ?? '', value.excerptHash].join('|');
 }
@@ -58,7 +71,7 @@ export function canonicalKeyForItem(item: RichEntity): string {
   if ('title' in value) return `document|${normalize(String(value.title))}|${normalize(String(value.documentType || ''))}|${String(value.status)}`;
   if ('description' in value) return `evidence|${normalize(String(value.description))}|${normalize(String(value.type || ''))}|${String(value.status)}`;
   if ('evidenceMentionId' in value) return `offer|${String(value.evidenceMentionId)}|${String(value.status)}`;
-  if ('citationText' in value) return `authority|${normalize(String(value.citationText))}|${String(value.verificationStatus)}`;
+  if ('citationText' in value) return `authority|${normalizeAuthorityCitation(String(value.citationText))}`;
   if ('status' in value && 'proposition' in value) return `assertion|${normalize(String(value.proposition))}|${String(value.status)}`;
   return `argument|${normalize(String(value.proposition || ''))}`;
 }
@@ -94,6 +107,16 @@ function mergeEntity(left: RichEntity, right: RichEntity): RichEntity {
   if ('relatedClaimIds' in sourceLeft && 'relatedClaimIds' in sourceRight) target.relatedClaimIds = unionStrings(sourceLeft.relatedClaimIds as string[], sourceRight.relatedClaimIds as string[]);
   if ('supportingFactIds' in sourceLeft && 'supportingFactIds' in sourceRight) target.supportingFactIds = unionStrings(sourceLeft.supportingFactIds as string[], sourceRight.supportingFactIds as string[]);
   if ('citedAuthorityIds' in sourceLeft && 'citedAuthorityIds' in sourceRight) target.citedAuthorityIds = unionStrings(sourceLeft.citedAuthorityIds as string[], sourceRight.citedAuthorityIds as string[]);
+  if ('citationText' in sourceLeft && 'citationText' in sourceRight) {
+    const leftStatus = String(sourceLeft.verificationStatus || 'SOURCE_CITED');
+    const rightStatus = String(sourceRight.verificationStatus || 'SOURCE_CITED');
+    target.verificationStatus = leftStatus === 'LEGALLY_VERIFIED' || rightStatus === 'LEGALLY_VERIFIED'
+      ? 'LEGALLY_VERIFIED'
+      : 'SOURCE_CITED';
+    if (String(sourceRight.citationText || '').length > String(sourceLeft.citationText || '').length) {
+      target.citationText = sourceRight.citationText;
+    }
+  }
   return merged;
 }
 

@@ -102,6 +102,31 @@ model LegalDraft {
   parties CaseParty[]
 }
 
+model GenerationJob {
+  id              String    @id
+  organizationId  String
+  userId          String
+  documentId      String?
+  fingerprint     String?
+  idempotencyKey  String?
+  phase           String?
+  progress        Int       @default(0)
+  status          String
+  terminalStatus  String?
+  cancelRequested Boolean   @default(false)
+  errorCode       String?
+  errorMessage    String?
+  warnings        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  startedAt       DateTime  @default(now())
+
+  @@index([organizationId, userId, status])
+  @@index([organizationId, userId, updatedAt])
+  @@index([fingerprint])
+  @@index([idempotencyKey])
+}
+
 model CaseParty {
   id             String       @id @default(cuid())
   organizationId String
@@ -143,6 +168,7 @@ model LawyerStyleProfile {
   preferredWayToWritePetition                   Json?
   averageSectionLength                          String?
   preferredDocumentLength                       String?
+  aiDisclosureAcknowledgedAt                    DateTime?
   createdAt                                     DateTime     @default(now())
   updatedAt                                     DateTime     @updatedAt
 }

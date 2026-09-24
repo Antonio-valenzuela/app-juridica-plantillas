@@ -96,6 +96,7 @@ export interface ExtractionResult {
   ocrUsed: boolean;
   /** Whether the source can be trusted for AI analysis */
   sourceValidated: boolean;
+  sourceQualityStatus: 'READY' | 'NEEDS_SOURCE_REVIEW';
   /**
    * How the source was validated:
    * 'native-text' | 'ocr' | 'manual-text' | 'mixed' | 'unvalidated'
@@ -103,6 +104,15 @@ export interface ExtractionResult {
   sourceValidationMethod: string;
   /** Final computed quality metrics */
   qualityScore: DocumentQualityScore;
+  sourceQuality: {
+    pageCount: number;
+    characterCount: number;
+    charactersPerPage: number;
+    emptyPageRatio: number;
+    extractionMethod: ExtractionMethod;
+    ocrUsed: boolean;
+    confidence: number;
+  };
   /** Ordered steps for UI rendering */
   extractionSteps: ExtractionStep[];
   /** Non-fatal issues detected */
@@ -398,13 +408,12 @@ export async function extractDocument(
       ocrStatus = 'OCR_PROVIDER_NOT_CONFIGURED';
       steps.push({
         step: 4,
-        label: 'OCR: No disponible (configura OCR_PROVIDER=ilovepdf o =tesseract)',
+        label: 'No fue posible obtener texto suficiente del documento.',
         done: false,
         status: 'warn',
-        detail: 'OCR_PROVIDER_NOT_CONFIGURED',
       });
     } else {
-      steps.push({ step: 4, label: 'OCR: Procesando…', done: false, status: 'running' });
+      steps.push({ step: 4, label: 'Reconociendo texto del documento escaneado…', done: false, status: 'running' });
 
       try {
         const provider: DocumentOCRProvider = getOCRProvider();
@@ -439,21 +448,25 @@ export async function extractDocument(
           };
         } else {
           ocrStatus = 'OCR_AVAILABLE_AND_FAILED';
-          warnings.push('OCR completado pero sin texto recuperado.');
-          steps[3] = {
-            step: 4,
-            label: 'OCR completado sin texto recuperable (OCR_AVAILABLE_AND_FAILED)',
-            done: false,
-            status: 'error',
-          };
+          warnings.push('No fue posible obtener texto suficiente del documento.');
+        steps[3] = {
+          step: 4,
+          label: 'No fue posible obtener texto suficiente del documento.',
+          done: false,
+          status: 'error',
+        };
           extractionMethod = 'fallback';
         }
       } catch (err: any) {
         ocrStatus = 'OCR_AVAILABLE_AND_FAILED';
-        warnings.push(`OCR falló: ${err.message}`);
+        console.warn('[document-extractor] OCR local falló', {
+          provider: ocrProvider,
+          message: err?.message || 'error desconocido',
+        });
+        warnings.push('No fue posible obtener texto suficiente del documento.');
         steps[3] = {
           step: 4,
-          label: `OCR falló: ${err.message} (OCR_AVAILABLE_AND_FAILED)`,
+          label: 'No fue posible obtener texto suficiente del documento.',
           done: false,
           status: 'error',
         };
@@ -481,6 +494,9 @@ export async function extractDocument(
   }
 
   const sourceValidated = !mockOcrUsed && finalQuality.sufficient && finalScore.status === 'READY';
+  const emptyPageRatio = finalPages.length > 0
+    ? finalPages.filter((page) => page.chars < 30).length / Math.max(1, pageCount)
+    : (finalText.trim() ? 0 : 1);
   let sourceValidationMethod = 'unvalidated';
   if (sourceValidated) {
     sourceValidationMethod = ocrUsed ? 'ocr' : 'native-text';
@@ -539,8 +555,18 @@ export async function extractDocument(
     qualityLabel: finalScore.qualityLabel,
     ocrUsed,
     sourceValidated,
+    sourceQualityStatus: sourceValidated ? 'READY' : 'NEEDS_SOURCE_REVIEW',
     sourceValidationMethod,
     qualityScore: finalScore,
+    sourceQuality: {
+      pageCount,
+      characterCount: finalText.length,
+      charactersPerPage: finalText.length / Math.max(1, pageCount),
+      emptyPageRatio,
+      extractionMethod,
+      ocrUsed,
+      confidence: finalScore.confidence,
+    },
     extractionSteps: steps,
     warnings: [...new Set(warnings)],
     mimeType,

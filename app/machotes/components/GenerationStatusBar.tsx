@@ -36,18 +36,30 @@ export function GenerationStatusBar({
 
   if (!isRunning && !isCompleted && !isFailed && !isCancelled) return null;
 
-  const pct =
+  const rawPct =
     typeof job.percentage === 'number'
       ? Math.max(0, Math.min(100, Math.round(job.percentage)))
       : job.total > 0
         ? Math.round((job.completed / job.total) * 100)
         : 0;
+  const pct = isRunning ? Math.min(99, rawPct) : rawPct;
 
   const hasTotal = job.total > 0;
+  const displayCompleted = isRunning && hasTotal && pct < 100 && job.completed >= job.total
+    ? Math.max(0, job.total - 1)
+    : job.completed;
+  const isIndeterminate = isRunning && !hasTotal;
   const usingFallback = isRunning && job.aiProvider === 'fallback';
 
   return (
-    <div data-testid="generation-status-bar" className="rounded-xl bg-white px-4 py-3">
+    <div
+      data-testid="generation-status-bar"
+      data-progress-mode={isIndeterminate ? 'indeterminate' : 'determinate'}
+      role="status"
+      aria-live="polite"
+      aria-busy={isRunning}
+      className="rounded-xl bg-white px-4 py-3"
+    >
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           {isRunning && (
@@ -95,21 +107,30 @@ export function GenerationStatusBar({
 
         <div className="shrink-0 text-right">
           <p className="text-lg font-black text-[#0B2545]">
-            {isFailed ? '0%' : isCompleted ? '100%' : `${pct}%`}
+            {isIndeterminate ? 'En curso' : isFailed ? '0%' : isCompleted ? '100%' : `${pct}%`}
           </p>
-          {hasTotal && (
+          {isIndeterminate ? (
+            <p className="text-xs font-semibold text-slate-400">Esperando avance del servidor</p>
+          ) : hasTotal ? (
             <p className="text-xs font-semibold text-slate-400">
-              {job.completed}/{job.total}
+              {displayCompleted}/{job.total}
             </p>
-          )}
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+      <div
+        className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-200"
+        role="progressbar"
+        aria-label="Progreso de generación"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={isIndeterminate ? undefined : isFailed ? 0 : isCompleted ? 100 : pct}
+      >
         <div
-          className="h-full rounded-full transition-all duration-300"
+          className={`h-full rounded-full transition-all duration-300 ${isIndeterminate ? 'w-[38%] animate-pulse' : ''}`}
           style={{
-            width: `${isFailed ? 0 : isCompleted ? 100 : pct}%`,
+            width: isIndeterminate ? undefined : `${isFailed ? 0 : isCompleted ? 100 : pct}%`,
             background: 'linear-gradient(90deg,#0B2545 0%, #2457A6 60%, #5B8DEF 100%)',
           }}
         />

@@ -1427,6 +1427,9 @@ export async function executeGenerationTask(
               pendingPoints: [task.objective || 'Cerrar el razonamiento'],
               factIds: task.factIds || [],
               sourceIds: task.sourceDocIds || [],
+              unusedFacts: task.factIds || [],
+              unusedEvidence: task.evidenceIds || [],
+              unusedAuthorities: task.authorityIds || [],
             })
           : [
               `TAREA: ${task.title}`,

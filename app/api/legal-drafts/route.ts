@@ -71,6 +71,7 @@ export async function GET(request: NextRequest) {
     const drafts = await prisma.legalDraft.findMany({
       where: {
         organizationId: identity.organizationId,
+        userId: identity.userId,
       },
       orderBy: { updatedAt: 'desc' },
     });

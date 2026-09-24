@@ -37,4 +37,15 @@ describe('projectRichCaseAnalysis', () => {
     expect(projection.caseAnalysis.facts?.[0].position).toBe('REQUIRE_LAWYER_INPUT');
     expect(projection.caseAnalysis.facts?.[0].contestedStatus).toBe('UNKNOWN');
   });
+
+  it('omits authority mentions without citation text from the legacy string projection', () => {
+    const projection = projectRichCaseAnalysis(rich({
+      authorities: [
+        { id: 'authority-missing-citation', authorityType: 'ARTICLE', citationText: undefined as any, verificationStatus: 'SOURCE_CITED', provenance: [] },
+        { id: 'authority-valid', authorityType: 'ARTICLE', citationText: 'Artículo 14', verificationStatus: 'SOURCE_CITED', provenance: [] },
+      ],
+    }), base());
+
+    expect(projection.caseAnalysis.authorities).toEqual(['Artículo 14']);
+  });
 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { cancelJob, getGenerationJob } from '@/lib/legal-engine/generationJobs';
+import { recoverGenerationJob } from '@/lib/legal-engine/generationJobPersistence';
 import { logger, generateRequestId } from '@/lib/logger';
 import { z } from 'zod';
 
@@ -23,8 +24,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'MISSING_JOBID', details: parsed.error.issues }, { status: 400 });
   }
 
-  const job = getGenerationJob(parsed.data.jobId);
-  if (!job) return NextResponse.json({ ok: false, error: 'JOB_NOT_FOUND' }, { status: 404 });
+  const job = getGenerationJob(parsed.data.jobId) || await recoverGenerationJob(parsed.data.jobId);
+  if (!job || job.organizationId !== auth.context.organizationId || job.userId !== auth.context.userId) {
+    return NextResponse.json({ ok: false, error: 'JOB_NOT_FOUND' }, { status: 404 });
+  }
 
   // Solo el owner puede cancelar (en single-tenant demo, basta con validar que el job existe;
   // en multi-tenant real se validaría fingerprint/organizationId si se persiste en DB)

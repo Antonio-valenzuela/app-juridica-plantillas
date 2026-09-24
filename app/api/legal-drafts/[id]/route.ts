@@ -72,7 +72,7 @@ export async function GET(
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };
 
     const draft = await prisma.legalDraft.findFirst({
-      where: { id, organizationId: identity.organizationId },
+      where: { id, organizationId: identity.organizationId, userId: identity.userId },
     });
 
     if (!draft) {
@@ -102,7 +102,7 @@ export async function PATCH(
     const parsed = updateDraftSchema.parse(body);
 
     const existing = await prisma.legalDraft.findFirst({
-      where: { id, organizationId: identity.organizationId },
+      where: { id, organizationId: identity.organizationId, userId: identity.userId },
     });
 
     if (!existing) {
@@ -167,14 +167,14 @@ export async function DELETE(
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };
 
     const existing = await prisma.legalDraft.findFirst({
-      where: { id, organizationId: identity.organizationId },
+      where: { id, organizationId: identity.organizationId, userId: identity.userId },
     });
 
     if (!existing) {
       return NextResponse.json({ ok: false, error: 'Borrador no encontrado.' }, { status: 404 });
     }
 
-    await prisma.legalDraft.delete({ where: { id } });
+    await prisma.legalDraft.deleteMany({ where: { id, organizationId: identity.organizationId, userId: identity.userId } });
 
     return NextResponse.json({ ok: true, message: 'Borrador eliminado.' });
   } catch (error: any) {

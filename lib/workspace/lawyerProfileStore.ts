@@ -26,6 +26,7 @@ type LawyerStyleProfileRow = {
   preferredWayToWritePetition: unknown;
   averageSectionLength: string | null;
   preferredDocumentLength: string | null;
+  aiDisclosureAcknowledgedAt?: Date | string | null;
 };
 
 function toStringArray(value: unknown): string[] {
@@ -64,6 +65,7 @@ export function rowToLawyerProfile(row: LawyerStyleProfileRow, lawyerId: string)
     preferredDocumentLength: pickEnum(row.preferredDocumentLength, VALID_DOC_LENGTHS, DEFAULT_LAWYER_PROFILE.preferredDocumentLength),
     createdAt: undefined,
     updatedAt: undefined,
+    aiDisclosureAcknowledgedAt: row.aiDisclosureAcknowledgedAt ? new Date(row.aiDisclosureAcknowledgedAt).toISOString() : undefined,
   };
 }
 
@@ -105,6 +107,7 @@ function optionalScalar(value: unknown): string | undefined {
  */
 export function sanitizeProfileInput(input: Record<string, unknown>): Record<string, unknown> {
   const data: Record<string, unknown> = {};
+  if (input.aiDisclosureAcknowledged === true) data.aiDisclosureAcknowledgedAt = new Date();
 
   const scalarStringFields = ['lawyerName', 'firmName'] as const;
   for (const field of scalarStringFields) {

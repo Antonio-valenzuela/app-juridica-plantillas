@@ -9,21 +9,6 @@ import {
 import { PROFESSIONAL_TEMPLATES } from '@/lib/templates/templateDefinitions';
 import { collectVerifiedTemplateSources } from '@/lib/templates/verifiedSourceRepository';
 
-const rateLimitMap = new Map<string, number[]>();
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = 5;
-
-const isRateLimited = (ip: string): boolean => {
-  const now = Date.now();
-  const recent = (rateLimitMap.get(ip) ?? []).filter(
-    (timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS
-  );
-  if (recent.length >= RATE_LIMIT_MAX) return true;
-  recent.push(now);
-  rateLimitMap.set(ip, recent);
-  return false;
-};
-
 const asLimitedString = (value: unknown, maxLength: number): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -32,19 +17,14 @@ const asLimitedString = (value: unknown, maxLength: number): string | null => {
 };
 
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 
 export async function POST(request: Request) {
   const auth = await requireLawyerAccess(request);
   if (!auth.ok) return auth.response;
 
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const clientAddress = forwardedFor?.split(',')[0]?.trim() || 'unknown';
-  if (isRateLimited(clientAddress)) {
-    return NextResponse.json(
-      { error: 'Demasiadas solicitudes. Intenta de nuevo en un minuto.' },
-      { status: 429 }
-    );
-  }
+  const rateLimit = checkRequestRateLimit(request, 'template-ai-assist', 5, `${auth.context.organizationId}:${auth.context.userId}`);
+  if (!rateLimit.ok) return NextResponse.json({ errorCode: 'RATE_LIMITED', message: 'Demasiadas solicitudes. Intenta de nuevo en un minuto.' }, { status: 429, headers: rateLimit.headers });
 
   try {
     const body = (await request.json()) as Record<string, unknown>;

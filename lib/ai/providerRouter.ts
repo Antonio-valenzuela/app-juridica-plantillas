@@ -34,7 +34,10 @@ function resolveRetryCount(request: AIRequest, providerId: AIProviderId): number
 }
 
 function isRetryableFailure(reason: string): boolean {
-  return /TIMEOUT|RATE_LIMIT|HTTP_429|HTTP_408|HTTP_5XX|HTTP_5\d\d|SERVER_ERROR/i.test(reason);
+  // Sin Retry-After disponible en el contrato normalizado, un 429 pasa al
+  // siguiente provider para no reenviar el mismo payload durante el TPM.
+  return /TIMEOUT|HTTP_408|HTTP_5XX|HTTP_5\d\d|SERVER_ERROR/i.test(reason)
+    && !/RATE_LIMIT|HTTP_429/i.test(reason);
 }
 
 export class ProviderRouter {
@@ -114,6 +117,7 @@ export class ProviderRouter {
       const maxAttempts = 1 + resolveRetryCount(request, providerId);
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const startMs = Date.now();
+        console.log(`[GenerationLifecycle] jobId=${request.requestId || ''} phase=provider state=processing progress= provider=${providerId} attempt=${attempt + 1} durationMs=0`);
         try {
           const res = await provider.generate(request);
         const durationMs = Date.now() - startMs;
@@ -141,6 +145,7 @@ export class ProviderRouter {
               success: true,
             })}`
           );
+          console.log(`[GenerationLifecycle] jobId=${request.requestId || ''} phase=provider state=processing progress= provider=${providerId} attempt=${attempt + 1} durationMs=${durationMs}`);
 
           return {
             result: {
@@ -194,6 +199,7 @@ export class ProviderRouter {
             fallbackReason: failureReason,
           })}`
         );
+        console.log(`[GenerationLifecycle] jobId=${request.requestId || ''} phase=provider state=processing progress= provider=${providerId} attempt=${attempt + 1} durationMs=${durationMs}`);
         if (attempt + 1 < maxAttempts && isRetryableFailure(failureReason)) continue;
         break;
         } catch (err: unknown) {
@@ -230,6 +236,7 @@ export class ProviderRouter {
               detail: sanitized.slice(0, 150),
             })}`
           );
+          console.log(`[GenerationLifecycle] jobId=${request.requestId || ''} phase=provider state=processing progress= provider=${providerId} attempt=${attempt + 1} durationMs=${durationMs}`);
           if (attempt + 1 < maxAttempts && isRetryableFailure(failureReason)) continue;
           break;
         }

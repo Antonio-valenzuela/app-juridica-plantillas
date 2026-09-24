@@ -91,6 +91,8 @@ export interface ArgumentAxis {
   counterargument: string;
   rebuttal: string;
   requestedConsequence: string;
+  /** Only populated when the consequence is explicitly supported by source provenance. */
+  requestedEffectProvenance?: SourceReference[];
   sources: Array<{
     documentId?: string;
     page?: number;
@@ -144,6 +146,40 @@ export interface CaseAnalysis {
   legalIssues?: LegalIssue[];
   /** Canonical layered extraction; legacy fields remain a compatibility view. */
   richCaseAnalysis?: RichCaseAnalysis;
+  /** Ephemeral projection populated only from verified research bundles. */
+  verifiedAuthorities?: import('./legal-research/types').VerifiedAuthority[];
+}
+
+/**
+ * Reapplies only the client-position fact that is explicit in the request.
+ * Uploaded rich snapshots are persisted independently from reconstruction, so
+ * this projection must run at the pipeline merge boundary as well.
+ */
+export function applyInstructionSupportedRichFields(
+  richCaseAnalysis: RichCaseAnalysis,
+  userInstruction: string,
+): RichCaseAnalysis {
+  if (richCaseAnalysis.clientPosition.status !== 'UNKNOWN'
+    || !/\b(?:combat\w*|impugn\w*|apelaci[oó]n|recurr\w*)\b/i.test(userInstruction)
+    || !/\b(?:sentencia|resoluci[oó]n|auto|determinaci[oó]n)\b/i.test(userInstruction)) {
+    return richCaseAnalysis;
+  }
+  return {
+    ...richCaseAnalysis,
+    clientPosition: {
+      status: 'CONFIRMED',
+      source: 'CLIENT_POSITION',
+      // The instruction confirms challenging the source decision, not the
+      // truth of every extracted fact. Link only arguments/reasonings so
+      // factual admissions still require explicit client input.
+      propositionIds: [
+        ...richCaseAnalysis.arguments.map((item) => item.id),
+        ...(richCaseAnalysis.decisionReasonings || []).map((item) => item.id),
+      ],
+      provenance: [],
+    },
+    missingData: richCaseAnalysis.missingData.filter((item) => item.field !== 'clientPosition'),
+  };
 }
 
 function extractFirstMatch(text: string, patterns: RegExp[]): string | undefined {
@@ -667,6 +703,16 @@ export function reconstructCaseAnalysis(
     trace: options.trace,
   });
 
+  // A direct instruction to challenge the source resolution is a client
+  // position about the requested work, not a factual admission about every
+  // extracted fact. Preserve it so the pending-data resolver does not ask for
+  // a posture that the user already supplied.
+  const instructionSupportedRich = applyInstructionSupportedRichFields(richCaseAnalysis, userInstruction);
+  if (instructionSupportedRich !== richCaseAnalysis) {
+    richCaseAnalysis.clientPosition = instructionSupportedRich.clientPosition;
+    richCaseAnalysis.missingData = instructionSupportedRich.missingData;
+  }
+
   // 1. Partes procesales reales
   // Corrección P3: extracción compartida (partyExtraction.ts) con validación de
   // candidatos — rechaza fechas ("El diecisiete de octubre…"), frases
@@ -817,6 +863,23 @@ export function reconstructCaseAnalysis(
     }
   });
 
+  // Some judicial PDFs identify the challenged act with a standalone heading
+  // (for example, "SENTENCIA DEFINITIVA") instead of an "acto impugnado"
+  // label. The heading is sufficient to identify the type of resolution, but
+  // no date or number is inferred here.
+  if (challengedActs.length === 0) {
+    combinedTexts.forEach(({ text, filename, page }) => {
+      const match = text.match(/\bSENTENCIA(?:\s+DEFINITIVA)?\b/i);
+      if (!match || !/(?:dict(?:a|ó)|resuelve|pronuncia|sentencia\s+definitiva)/i.test(text)) return;
+      challengedActs.push({
+        authority: autoridadResponsable || '[DATO PENDIENTE: Autoridad Emisora]',
+        actDescription: match[0].replace(/\s+/g, ' ').trim(),
+        page,
+        excerpt: `${filename}: ${match[0]}`,
+      });
+    });
+  }
+
   // Extracción estructurada de pruebas reales, considerandos y resolutivos (3E, 3I, 3J)
   const extractedEvidence = extractEvidenceFromSources(combinedTexts, numberedFacts);
   const challengedReasonings = extractChallengedReasonings(combinedTexts);
@@ -886,6 +949,9 @@ export function reconstructCaseAnalysis(
       counterargument: 'La autoridad u órgano emisor consideró satisfechos los extremos legales en el acto impugnado.',
       rebuttal: 'Dicho razonamiento resulta incongruente y vulnera el principio de debida motivación y legalidad.',
       requestedConsequence: issue.consequence || 'Revocar o dejar insubsistente la determinación impugnada ordenando emitir una nueva resolución apegada a derecho.',
+      requestedEffectProvenance: issue.sourceDoc
+        ? [{ documentId: issue.sourceDoc, ...(issue.page !== undefined ? { page: issue.page } : {}), ...(issue.excerpt ? { textSnippet: issue.excerpt } : {}) }]
+        : [],
       sources: sources.map((s) => ({ documentId: s.id, excerpt: s.filename })),
     };
   });

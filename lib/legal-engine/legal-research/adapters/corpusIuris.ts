@@ -12,6 +12,7 @@ import type {
   ProviderRetrieveResult,
   ProviderSearchResult,
 } from './types';
+import { normalizeLegalAuthority } from '../legalAuthority';
 
 export type CorpusIurisFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -145,7 +146,7 @@ function candidateFromRecord(
   const sourceUrl = sourceUrlFor(record);
   const observedCitation = textField(record, 'referencia', 'citation', 'titulo', 'title') || `Corpus Iuris ${remoteIdFor(record) || 'resultado'}`;
   const authorityType = authorityTypeFor(record, input.request.requestedAuthorityTypes[0] || 'OTHER_OFFICIAL_SOURCE');
-  return {
+  const candidate: AuthorityCandidate = {
     id: stableResearchId('candidate', {
       adapterId: 'CORPUS_IURIS',
       requestId: input.request.id,
@@ -172,6 +173,7 @@ function candidateFromRecord(
     metadataStatus: sourceUrl && observedCitation ? 'PARTIAL' : 'INSUFFICIENT',
     candidateStatus: 'DISCOVERED',
   };
+  return { ...candidate, normalizedAuthority: normalizeLegalAuthority(candidate) };
 }
 
 function propositionFromRecord(record: CorpusIurisRecord, candidate: AuthorityCandidate): SupportedProposition | undefined {

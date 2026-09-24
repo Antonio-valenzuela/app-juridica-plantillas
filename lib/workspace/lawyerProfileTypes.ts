@@ -21,6 +21,7 @@ export interface LawyerProfile {
   preferredDocumentLength: 'conciso' | 'estandar' | 'extenso_exhaustivo';
   createdAt?: string;
   updatedAt?: string;
+  aiDisclosureAcknowledgedAt?: string;
 }
 
 export const DEFAULT_LAWYER_PROFILE: LawyerProfile = {

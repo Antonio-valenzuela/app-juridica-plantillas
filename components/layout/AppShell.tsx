@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useLegalWorkspaceContext } from '@/context/LegalWorkspaceContext';
+import { deriveNvidiaIndicator, type NvidiaIndicator } from '@/lib/runtime/nvidiaStatus';
 
 type SidebarItem = {
   href?: string;
@@ -37,8 +39,10 @@ export default function AppShell({
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { activeCase } = useLegalWorkspaceContext();
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [nvidiaIndicator, setNvidiaIndicator] = useState<NvidiaIndicator>(() => deriveNvidiaIndicator(null));
 
   const currentTab = searchParams.get('tab') || 'universal';
 
@@ -61,6 +65,27 @@ export default function AppShell({
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const checkNvidiaHealth = async () => {
+      try {
+        const response = await fetch('/api/health/nvidia', { cache: 'no-store' });
+        const snapshot = await response.json().catch(() => null);
+        if (!disposed) setNvidiaIndicator(deriveNvidiaIndicator(snapshot));
+      } catch {
+        if (!disposed) setNvidiaIndicator(deriveNvidiaIndicator(null));
+      }
+    };
+
+    void checkNvidiaHealth();
+    const intervalId = window.setInterval(() => void checkNvidiaHealth(), 30_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -117,14 +142,14 @@ export default function AppShell({
         </div>
 
         <div className="lex-header-right">
-          <div className="lex-build-status">
+          <div className={`lex-build-status ${nvidiaIndicator.tone === 'danger' ? 'is-error' : ''}`}>
             <span className="lex-status-dot" />
-            <span>NVIDIA Build Activo</span>
+            <span>{nvidiaIndicator.label}</span>
           </div>
 
           <div className="lex-header-case">
-            <strong>EXP-800/2026</strong>
-            <span>Juzgado 3º Civil CDMX</span>
+            <strong>{activeCase?.expedienteNumber ? `EXP-${activeCase.expedienteNumber}` : 'Sin expediente seleccionado'}</strong>
+            <span>{activeCase?.court || 'Sin órgano jurisdiccional'}</span>
           </div>
 
           <button

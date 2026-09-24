@@ -418,6 +418,7 @@ export function buildSectionPrompt(packet: SectionContextPacket): Pick<AIRequest
     evidence: packet.evidence.map((evidence) => ({ id: evidence.id, kind: evidence.kind, description: evidence.description, relatedFactIds: evidence.relatedFactIds, status: evidence.status })),
     verifiedAuthorities: packet.verifiedAuthorities.map((authority) => ({ id: authority.id, citationText: authority.citationText, proposition: authority.proposition, verificationStatus: authority.verificationStatus })),
     research: packet.research.map((item) => ({ legalIssueId: item.legalIssueId, status: item.status })),
+    argumentSupports: packet.argumentSupports || [],
     clientPosition: packet.clientPosition ? { status: packet.clientPosition.status } : undefined,
     previousSectionSummaries: packet.previousSectionSummaries,
     sourceManifest: { accepted: packet.sourceManifest.accepted },

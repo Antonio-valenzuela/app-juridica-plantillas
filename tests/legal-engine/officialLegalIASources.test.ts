@@ -47,6 +47,33 @@ const query: NormalizedResearchQuery = {
 };
 
 describe('LegalIA-derived Official Legal Sources (DOF / SIDOF / SCJN SCOW)', () => {
+  it('uses the current SIDOF public-alerts contract instead of the legacy date endpoint', async () => {
+    let capturedUrl = '';
+    let capturedMethod = '';
+    let capturedBody = '';
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(url);
+      capturedMethod = init?.method || 'GET';
+      capturedBody = String(init?.body || '');
+      return new Response(JSON.stringify({
+        messageCode: 200,
+        response: 'OK',
+        alertas: [{ id: 1513, tipoAlerta: 'PUB', textoBusqueda: 'Convenio', descripcion: 'Convenios', codEstatus: 1, buscarEn: 'T' }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+
+    const adapter = createDofAdapter({ fetch: fetchMock, clock: fixedClock });
+    const search = await adapter.search({ request, query, regime });
+
+    expect(search.status).toBe('PASS');
+    expect(search.candidates).toHaveLength(1);
+    expect(capturedUrl).toBe('https://sidof.segob.gob.mx/dof/sidof/alertas/obtieneAlertasPublicas');
+    expect(capturedMethod).toBe('POST');
+    expect(capturedBody).toBe('{}');
+    expect(search.candidates[0].sourceTier).toBe('OFFICIAL_PRIMARY');
+    expect(search.candidates[0].title).toBe('Convenios');
+  });
+
   it('queries SIDOF REST API with date and User-Agent, returning official candidates without www subdomain', async () => {
     let capturedUrl = '';
     let capturedUserAgent = '';
@@ -82,6 +109,7 @@ describe('LegalIA-derived Official Legal Sources (DOF / SIDOF / SCJN SCOW)', () 
     const adapter = createDofAdapter({
       fetch: fetchMock,
       clock: fixedClock,
+      legacyNotesByDate: true,
     });
 
     const search = await adapter.search({ request, query, regime });

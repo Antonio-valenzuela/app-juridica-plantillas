@@ -19,6 +19,7 @@ coverage/
 # Public-repository safety: local analysis artifacts and generated case documents
 scratch/
 .tmp/
+.tmp-*/
 .claude/
 .codegraph/
 *.docx

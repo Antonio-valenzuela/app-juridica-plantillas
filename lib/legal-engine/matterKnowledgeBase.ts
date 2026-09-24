@@ -13,6 +13,16 @@ export interface MatterKnowledgeBase {
   sourceAuthorityIds: string[];
   verifiedAuthorities: VerifiedAuthority[];
   unresolvedIssueIds: string[];
+  argumentSupports: ArgumentSupport[];
+}
+
+export interface ArgumentSupport {
+  argumentId: string;
+  proposition: string;
+  factRefs: string[];
+  evidenceRefs: string[];
+  authorityRefs: string[];
+  requestedEffect?: string;
 }
 
 export function buildMatterKnowledgeBase(caseAnalysis: CaseAnalysis, verifiedAuthorities: readonly VerifiedAuthority[] = [], issueMatrix?: LegalIssueMatrix): MatterKnowledgeBase {
@@ -30,5 +40,18 @@ export function buildMatterKnowledgeBase(caseAnalysis: CaseAnalysis, verifiedAut
     sourceAuthorityIds: (rich?.authorities || []).map((item) => item.id).sort(),
     verifiedAuthorities: [...verifiedAuthorities],
     unresolvedIssueIds: issues.filter((issue) => issue.status !== 'READY_FOR_GENERATION' || issue.researchStatus === 'NEEDS_RESEARCH').map((issue) => issue.id).sort(),
+    argumentSupports: (rich?.arguments || []).map((argument) => {
+      const factRefs = [...argument.supportingFactIds];
+      const evidenceRefs = (rich?.evidenceMentions || [])
+        .filter((evidence) => evidence.relatedFactIds.some((factId) => factRefs.includes(factId)))
+        .map((evidence) => evidence.id);
+      return {
+        argumentId: argument.id,
+        proposition: argument.proposition,
+        factRefs,
+        evidenceRefs,
+        authorityRefs: [...argument.citedAuthorityIds],
+      };
+    }),
   };
 }

@@ -5,6 +5,7 @@ import {
   createGenerationJob,
   failJob,
   getGenerationJob,
+  ensureTerminalJobState,
   updateJobProgress,
 } from '@/lib/legal-engine/generationJobs';
 
@@ -27,8 +28,33 @@ describe('GenerationJob — máquina de estados', () => {
     updateJobProgress(job.jobId, { completed: 8, currentBlockIndex: 8 });
     expect(getGenerationJob(job.jobId)).toMatchObject({
       completed: 3,
-      percentage: 100,
+      percentage: 99,
       currentBlockIndex: 3,
+    });
+  });
+
+  it('degrada a NEEDS_REVIEW un documento materializado que no es entregable', () => {
+    const job = createGenerationJob({ fingerprint: `review-${Date.now()}-${Math.random()}`, total: 1 });
+    const document = {
+      id: 'review-required-doc',
+      status: 'draft',
+      generationMetadata: { pipelineState: { isComplete: false } },
+      validation: { isValid: false },
+      qualityGate: { passed: false, canMarkAsFinal: false },
+      sections: [],
+    } as any;
+
+    const terminal = ensureTerminalJobState(job.jobId, {
+      document,
+      terminalStatus: 'COMPLETED',
+    });
+
+    expect(terminal).toMatchObject({
+      status: 'completed',
+      terminalStatus: 'NEEDS_REVIEW',
+      percentage: 100,
+      documentId: document.id,
+      warnings: ['DOCUMENT_REQUIRES_REVIEW'],
     });
   });
 

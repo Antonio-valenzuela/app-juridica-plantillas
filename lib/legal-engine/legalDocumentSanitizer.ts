@@ -78,7 +78,7 @@ const WATERMARK_PATTERNS = [
 const PLACEHOLDER_PATTERNS = [
   /\{\{\s*[A-Za-z0-9_áéíóúñÁÉÍÓÚÑ]+\s*\}\}/g,
   /\$\{[a-zA-Z0-9_]+\}/g,
-  /\[(?:REQUIERE|PENDIENTE|DATO\s+PENDIENTE|TODO|TBD|FIXME)[^\]]*\]/gi,
+  /\[(?:REQUIERE|PENDIENTE|DATO\s*PENDIENTE|POR\s*DEFINIR|TODO|TBD|FIXME)[^\]]*\]/gi,
   // <variable> but not HTML? keep simple
 ];
 
@@ -265,7 +265,7 @@ function handlePlaceholders(text: string): { out: string; found: string[]; class
       }
     }
     out = out.replace(re, (token) =>
-      /^\[(?:REQUIERE|PENDIENTE|DATO\s+PENDIENTE)/i.test(token) ? token : '________'
+      /^\[(?:REQUIERE|PENDIENTE|DATO\s*PENDIENTE|POR\s*DEFINIR)/i.test(token) ? token : '________'
     );
   }
   // Los marcadores jurídicos permanecen visibles para que el gate pueda
