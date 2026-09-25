@@ -56,6 +56,45 @@ export function clearCachedLawyerContext(): void {
   cachedLawyerContext = null;
 }
 
+/**
+ * El flujo local de la edición de Windows puede extraer fuentes y ejecutar
+ * jobs efímeros aunque el workspace remoto esté sin cuota. Este escape está
+ * limitado a desarrollo y a endpoints concretos; no habilita persistencia
+ * remota ni se activa en producción.
+ */
+function allowsLocalWorkspaceFallback(request: Request): boolean {
+  if (process.env.NODE_ENV === 'production' || !isDemoModeEnabled()) return false;
+  try {
+    const url = new URL(request.url);
+    const method = request.method.toUpperCase();
+    return (
+      (url.pathname === '/api/templates/analyze-upload' && method === 'POST')
+      || (url.pathname === '/api/legal-engine/generate' && (method === 'POST' || method === 'GET'))
+      || (url.pathname === '/api/legal-engine/generate/status' && method === 'GET')
+      || (url.pathname === '/api/legal-engine/generate/cancel' && (method === 'POST' || method === 'GET'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isLocalDevelopmentWorkspaceContext(
+  context: Pick<LawyerAccessContext, 'organizationId' | 'userId'>,
+): boolean {
+  return process.env.NODE_ENV !== 'production'
+    && context.organizationId === 'org-local-document-analysis'
+    && context.userId === 'user-local-document-analysis';
+}
+
+function localDevelopmentWorkspaceContext(): LawyerAccessContext {
+  return {
+    organizationId: 'org-local-document-analysis',
+    userId: 'user-local-document-analysis',
+    lawyerId: 'user-local-document-analysis',
+    role: 'lawyer',
+  };
+}
+
 export async function requireLawyerAccess(
   request: Request
 ): Promise<{ ok: true; context: LawyerAccessContext } | { ok: false; response: Response }> {
@@ -192,6 +231,10 @@ export async function requireLawyerAccess(
       // que no existe: violaría las FK al escribir (P2003) y corrompería el scope.
       console.error('[lawyerAuth] No se pudo resolver identidad desde BD:', err instanceof Error ? err.message : err);
       if (cachedLawyerContext) return { ok: true, context: cachedLawyerContext };
+      if (allowsLocalWorkspaceFallback(request)) {
+        console.warn('[lawyerAuth] Base no disponible; continúa el flujo local sin persistencia remota.');
+        return { ok: true, context: localDevelopmentWorkspaceContext() };
+      }
       // En entorno de tests (vitest) el prisma está mockeado parcialmente (solo legalDraft/item).
       // Si DEMO_MODE está habilitado y la falla es por mock incompleto, sintetizar identidad demo
       // para que los tests de integración no dependan de una BD real. En producción con prisma

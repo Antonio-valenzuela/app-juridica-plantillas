@@ -21,6 +21,16 @@ describe('AI cost controls', () => {
     expect(countMock).toHaveBeenCalledWith({ where: { organizationId: 'org-a', userId: 'user-a', status: 'processing' } });
   });
 
+  it('permite jobs efímeros del workspace local sin consultar la tabla remota', async () => {
+    const result = await checkGenerationAdmission({
+      organizationId: 'org-local-document-analysis',
+      userId: 'user-local-document-analysis',
+    }, 3);
+
+    expect(result).toMatchObject({ ok: true, active: 0, limit: 3 });
+    expect(countMock).not.toHaveBeenCalled();
+  });
+
   it('mantiene límites configurables de entrada sin permitir valores absurdos', () => {
     (process.env as any).MAX_GENERATION_INPUT_CHARS = '50000';
     expect(maxGenerationInputChars()).toBe(50000);

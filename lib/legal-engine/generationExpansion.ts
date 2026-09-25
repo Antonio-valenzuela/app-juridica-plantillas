@@ -177,8 +177,10 @@ export async function expandDocumentToPageTarget(
 
       if (response.provider === 'local' || response.origin === 'LOCAL_PLACEHOLDER' || response.isLegalAiContent === false) {
         warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:LOCAL_FALLBACK`);
-        contract.extensionTargetUnmet = true;
-        return { metrics, expansionPasses, calls, warnings };
+        // A local/non-legal fallback is not admissible as extension content,
+        // but it must not abort the whole document. Continue with the next
+        // candidate so a transient provider failure cannot strand the target.
+        continue;
       }
 
       if (!isUsableLegalResponse(response)) {

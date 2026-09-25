@@ -1,4 +1,5 @@
 import { LawyerProfile, DEFAULT_LAWYER_PROFILE } from './lawyerProfileTypes';
+import { resolveLexPlantillasStoragePaths, type LexPlantillasStoragePaths } from './storagePaths';
 export type { LawyerProfile };
 export { DEFAULT_LAWYER_PROFILE };
 
@@ -26,16 +27,23 @@ const SUBFOLDERS = [
 
 export class LegalWorkspaceManager {
   private workspaceRoot: string;
+  private readonly storagePaths: LexPlantillasStoragePaths;
 
   constructor(customRoot?: string) {
     const p = getNodePath();
-    const defaultPath = p ? p.join(process.cwd(), 'data', 'legal-workspace') : '/tmp/legal-workspace';
-    this.workspaceRoot = p ? p.resolve(customRoot || process.env.LEGAL_WORKSPACE_ROOT || defaultPath) : defaultPath;
+    const explicitRoot = customRoot || process.env.LEGAL_WORKSPACE_ROOT;
+    this.storagePaths = resolveLexPlantillasStoragePaths(explicitRoot);
+    const defaultPath = this.storagePaths.workspace;
+    this.workspaceRoot = p ? p.resolve(explicitRoot || defaultPath) : defaultPath;
     this.ensureRootDirectory();
   }
 
   public getWorkspaceRoot(): string {
     return this.workspaceRoot;
+  }
+
+  public getStoragePaths(): LexPlantillasStoragePaths {
+    return this.storagePaths;
   }
 
   private ensureRootDirectory(): void {

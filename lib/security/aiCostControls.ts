@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { isLocalDevelopmentWorkspaceContext } from '@/lib/security/lawyerAuth';
 
 export type GenerationAdmission =
   | { ok: true; active: number; limit: number }
@@ -10,6 +11,11 @@ function configuredLimit(): number {
 }
 
 export async function checkGenerationAdmission(owner: { organizationId: string; userId: string }, limit = configuredLimit()): Promise<GenerationAdmission> {
+  // En la edición local el job vive en memoria y no requiere la tabla remota.
+  // El contexto solo puede provenir de los endpoints locales de desarrollo.
+  if (isLocalDevelopmentWorkspaceContext(owner)) {
+    return { ok: true, active: 0, limit };
+  }
   try {
     const generationJob = (prisma as any).generationJob;
     if (!generationJob || typeof generationJob.count !== 'function') {

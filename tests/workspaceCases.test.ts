@@ -12,6 +12,10 @@ describe('workspace case summaries', () => {
     expect(WORKSPACE_CASE_SUMMARY_SQL).not.toMatch(/SELECT[\s\S]*"sourceDocuments"\s*,/i);
   });
 
+  it('aplica el aislamiento del workspace por organización y usuario en la consulta', () => {
+    expect(WORKSPACE_CASE_SUMMARY_SQL).toMatch(/WHERE\s+"organizationId"\s*=\s*\$1\s+AND\s+"userId"\s*=\s*\$2/i);
+  });
+
   it('maps only explicit persisted case data and keeps missing identifiers empty', () => {
     const summary = mapLegalDraftToWorkspaceCaseSummary({
       id: 'draft-1',

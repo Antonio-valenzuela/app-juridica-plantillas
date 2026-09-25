@@ -144,14 +144,14 @@ export async function searchWorkspaceJurisprudence(rawQuery: string): Promise<{
   const corpus = createCorpusIurisAdapter();
   const corpusSearch = await corpus.search(input);
   let search = corpusSearch;
-  let sourceRepo = 'Corpus Iuris MCP';
+  let sourceRepo = 'Corpus Iuris REST';
   let provider = corpus;
   let reasons = corpusSearch.reasons.map((reason) => reason === 'CORPUS_IURIS_HTTP_401' ? 'CORPUS_AUTH_REQUIRED' : reason);
 
   if (search.candidates.length === 0) {
     provider = createScjnAdapter();
     search = await provider.search(input);
-    sourceRepo = 'Corpus Iuris MCP + LegalIA-derived SCJN adapter';
+    sourceRepo = 'Corpus Iuris REST + adaptador oficial SCJN';
     reasons = [...new Set([...reasons, ...search.reasons])];
   }
 

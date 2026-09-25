@@ -14,6 +14,12 @@ next-env.d.ts
 _backups_originales/
 backups/
 data/uploads/templates/
+Datos.zip
+data/legal-workspace/
+data/documents/
+data/imports/
+data/index/
+data/logs/
 coverage/
 
 # Public-repository safety: local analysis artifacts and generated case documents

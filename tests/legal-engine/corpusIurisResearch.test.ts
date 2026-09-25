@@ -232,6 +232,20 @@ describe('Corpus Iuris discovery and official verification boundary', () => {
     expect(result.candidates).toEqual([]);
   });
 
+  it.each([401, 403, 500])('maps Corpus HTTP %s to a controlled failure', async (status) => {
+    const result = await corpusProvider(vi.fn(async () => response({ error: 'unavailable' }, status))).search({ request, query, regime });
+    expect(result.status).toBe('FAIL');
+    expect(result.errorCode).toBe(`CORPUS_IURIS_HTTP_${status}`);
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('maps an invalid Corpus payload without fabricating a result', async () => {
+    const result = await corpusProvider(vi.fn(async () => new Response('not-json', { status: 200 }))).search({ request, query, regime });
+    expect(result.status).toBe('FAIL');
+    expect(result.errorCode).toBe('CORPUS_IURIS_PARSE_FAILED');
+    expect(result.candidates).toEqual([]);
+  });
+
   it('maps Corpus timeout to a controlled failure without fabricating authority', async () => {
     const timeout = Object.assign(new Error('aborted'), { name: 'AbortError' });
     const result = await corpusProvider(vi.fn(async () => { throw timeout; })).search({ request, query, regime });

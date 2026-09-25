@@ -35,4 +35,10 @@ describe('getSafeApiErrorMessage', () => {
       ),
     ).toBe('La capacidad de generación no está disponible.');
   });
+
+  it('no expone mensajes arbitrarios de una excepción local', () => {
+    expect(
+      getSafeApiErrorMessage(new Error('PrismaClientKnownRequestError: relation does not exist'), 'No fue posible completar la operación.'),
+    ).toBe('No fue posible completar la operación.');
+  });
 });

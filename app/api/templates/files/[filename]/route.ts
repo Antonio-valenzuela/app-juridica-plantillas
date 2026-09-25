@@ -3,10 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import { requireCaseAccess } from '@/lib/cases/access';
 import { prisma } from '@/lib/prisma';
+import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
 
 export const dynamic = 'force-dynamic';
 
-const UPLOADS_BASE = path.join(process.cwd(), 'data', 'uploads', 'templates');
+const UPLOADS_BASE = resolveLexPlantillasStoragePaths().templates;
 
 const ALLOWED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg']);
 

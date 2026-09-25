@@ -6,6 +6,7 @@ import {
   hasDuplicateContent,
   resolveGenerationExtensionContract,
 } from '../../lib/legal-engine/generationExtension';
+import { expandDocumentToPageTarget } from '../../lib/legal-engine/generationExpansion';
 
 describe('generation extension contract', () => {
   it('keeps standard mode bounded and resolves extended mode to the requested 40-page window', () => {
@@ -60,5 +61,53 @@ describe('generation extension contract', () => {
     expect(prompt).toContain('fact-1');
     expect(prompt).toContain('source-1');
     expect(prompt).toContain('NO REPITAS');
+  });
+
+  it('continues with the next section after a local fallback instead of aborting the whole extension', async () => {
+    const document = {
+      documentType: 'apelacion_civil',
+      documentTypeLabel: 'Apelación Civil',
+      sourceDocuments: [],
+      generationMetadata: { generationId: 'extension-regression' },
+      sections: [
+        { id: 'agravios', title: 'Agravios', type: 'argument', content: [{ id: 'a1', text: 'Base de agravios' }] },
+        { id: 'hechos', title: 'Hechos', type: 'facts', content: [{ id: 'h1', text: 'Base de hechos' }] },
+      ],
+    } as any;
+    const contract = resolveGenerationExtensionContract({
+      generationMode: 'extended-legal',
+      targetPages: 2,
+      minPages: 2,
+      maxPages: 3,
+      maxCallsPerDocument: 2,
+      maxExpansionPasses: 1,
+    });
+    let calls = 0;
+    const result = await expandDocumentToPageTarget(document, undefined, contract, {
+      measure: async (value) => ({
+        actualPages: value.sections.some((section: any) => section.content.length > 1) ? 2 : 1,
+        wordCount: 100,
+        characterCount: 600,
+        pdfBytes: 1000,
+      }),
+      invokeProvider: async () => {
+        calls += 1;
+        return calls === 1
+          ? {
+              provider: 'local', model: 'local', success: true, content: 'fallback',
+              latencyMs: 1, origin: 'LOCAL_PLACEHOLDER', isLegalAiContent: false,
+            }
+          : {
+              provider: 'groq', model: 'test-model', success: true, content: 'Desarrollo nuevo y fundado.',
+              latencyMs: 1, origin: 'AI_GENERATED_LEGAL_CONTENT', isLegalAiContent: true,
+            };
+      },
+    });
+
+    expect(calls).toBe(2);
+    expect(document.sections[1].content).toHaveLength(2);
+    expect(result.metrics.actualPages).toBe(2);
+    expect(contract.extensionTargetUnmet).toBe(false);
+    expect(result.warnings).toContain('EXTENSION_PROVIDER_UNAVAILABLE:agravios:LOCAL_FALLBACK');
   });
 });

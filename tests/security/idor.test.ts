@@ -155,6 +155,53 @@ describe('P0 Security - lawyerAuth IDOR protection', () => {
     }
   });
 
+  it('permite analizar una fuente local si la base está sin cuota, sin crear identidad persistente', async () => {
+    mockOrgFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+    mockUserFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+
+    const result = await requireLawyerAccess(new Request('http://localhost/api/templates/analyze-upload', {
+      method: 'POST',
+    }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.context.organizationId).toBe('org-local-document-analysis');
+      expect(result.context.userId).toBe('user-local-document-analysis');
+    }
+    expect(mockOrgCreate).not.toHaveBeenCalled();
+    expect(mockUserCreate).not.toHaveBeenCalled();
+  });
+
+  it('permite iniciar y consultar el job local de generación sin depender de Neon', async () => {
+    mockOrgFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+    mockUserFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+
+    const result = await requireLawyerAccess(new Request('http://localhost/api/legal-engine/generate', {
+      method: 'POST',
+    }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.context.organizationId).toBe('org-local-document-analysis');
+      expect(result.context.userId).toBe('user-local-document-analysis');
+    }
+  });
+
+  it('mantiene bloqueadas las rutas persistentes cuando la base está sin cuota', async () => {
+    mockOrgFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+    mockUserFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+
+    const result = await requireLawyerAccess(new Request('http://localhost/api/legal-drafts', {
+      method: 'POST',
+    }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(503);
+      expect((await result.response.json()).error).toBe('WORKSPACE_UNAVAILABLE');
+    }
+  });
+
   it('isDemoModeEnabled respeta flag explícito', () => {
     process.env.DEMO_MODE_ENABLED = 'true';
     expect(isDemoModeEnabled()).toBe(true);

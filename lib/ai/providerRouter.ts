@@ -10,6 +10,7 @@ import type {
 } from "./providers/types";
 import { sanitizeAiError } from "./providers/types";
 import { getProviderChain } from "./providerChain";
+import { trackAiUsage } from "./usageTracker";
 
 export interface ProviderExecutionLog {
   provider: AIProviderId;
@@ -38,6 +39,28 @@ function isRetryableFailure(reason: string): boolean {
   // siguiente provider para no reenviar el mismo payload durante el TPM.
   return /TIMEOUT|HTTP_408|HTTP_5XX|HTTP_5\d\d|SERVER_ERROR/i.test(reason)
     && !/RATE_LIMIT|HTTP_429/i.test(reason);
+}
+
+function recordProviderUsage(request: AIRequest, log: ProviderExecutionLog, fallbackRank: number, usage?: AIProviderResult['usage']): void {
+  // Las pruebas de routing usan providers mockeados y no deben abrir una
+  // conexión Prisma externa; la telemetría real se conserva en runtime.
+  if (process.env.NODE_ENV === 'test') return;
+  void trackAiUsage({
+    requestId: request.requestId || `provider-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    provider: log.provider,
+    model: log.model || null,
+    strategy: request.taskType || null,
+    fallbackRank,
+    inputTokens: usage?.promptTokens ?? null,
+    outputTokens: usage?.completionTokens ?? null,
+    totalTokens: usage?.totalTokens ?? null,
+    estimatedCost: usage?.estimatedCost ?? null,
+    latencyMs: log.durationMs,
+    success: log.success,
+    errorCode: log.success ? null : log.fallbackReason,
+    route: 'providerRouter',
+    mode: request.mode || null,
+  });
 }
 
 export class ProviderRouter {
@@ -72,7 +95,7 @@ export class ProviderRouter {
     const requestedProvider = (chain[0] as AIProviderId) || "gemini";
     const attemptedProviders = new Set<AIProviderId>();
 
-    for (const providerIdStr of chain) {
+    for (const [fallbackRank, providerIdStr] of chain.entries()) {
       const providerId = providerIdStr as AIProviderId;
       if (attemptedProviders.has(providerId)) {
         continue;
@@ -98,14 +121,16 @@ export class ProviderRouter {
         if (!available) {
           const reason = `${providerId.toUpperCase()}_NO_API_KEY`;
           lastFailureReason = reason;
-          logs.push({
+          const unavailableLog = {
             provider: providerId,
             model: "none",
             durationMs: 0,
             outputChars: 0,
             success: false,
             fallbackReason: reason,
-          });
+          } satisfies ProviderExecutionLog;
+          logs.push(unavailableLog);
+          recordProviderUsage(request, unavailableLog, fallbackRank);
           console.warn(
             `[ProviderRouter] Provider "${providerId}" no disponible (sin API key), pasando al siguiente.`
           );
@@ -127,14 +152,16 @@ export class ProviderRouter {
 
         if (hasContent) {
           // Successful generation with non-empty content
-          logs.push({
+          const successLog = {
             provider: providerId,
             model: res.model,
             durationMs,
             outputChars,
             success: true,
             fallbackReason: null,
-          });
+          } satisfies ProviderExecutionLog;
+          logs.push(successLog);
+          recordProviderUsage(request, successLog, fallbackRank, res.usage);
 
           console.log(
             `[ProviderRouter] SUCCESS ${JSON.stringify({
@@ -181,14 +208,16 @@ export class ProviderRouter {
         }
         lastFailureReason = failureReason;
 
-        logs.push({
+        const failureLog = {
           provider: providerId,
           model: res.model,
           durationMs,
           outputChars: 0,
           success: false,
           fallbackReason: failureReason,
-        });
+        } satisfies ProviderExecutionLog;
+        logs.push(failureLog);
+        recordProviderUsage(request, failureLog, fallbackRank, res.usage);
 
         console.warn(
           `[ProviderRouter] FALLBACK ${JSON.stringify({
@@ -218,14 +247,16 @@ export class ProviderRouter {
             : `${providerId.toUpperCase()}_EXCEPTION`;
           lastFailureReason = failureReason;
 
-          logs.push({
+          const exceptionLog = {
             provider: providerId,
             model: "unknown",
             durationMs,
             outputChars: 0,
             success: false,
             fallbackReason: failureReason,
-          });
+          } satisfies ProviderExecutionLog;
+          logs.push(exceptionLog);
+          recordProviderUsage(request, exceptionLog, fallbackRank);
 
           console.warn(
             `[ProviderRouter] EXCEPTION ${JSON.stringify({
@@ -249,14 +280,16 @@ export class ProviderRouter {
       attemptedProviders.add("local");
       const fallbackLocal = this.providers.get("local") || new LocalProvider();
       localRes = await fallbackLocal.generate(request);
-      logs.push({
+      const localLog = {
         provider: "local",
         model: localRes.model || "local-deterministic-rules-v1",
         durationMs: 0,
         outputChars: localRes.content?.length || 0,
         success: true,
         fallbackReason: null,
-      });
+      } satisfies ProviderExecutionLog;
+      logs.push(localLog);
+      recordProviderUsage(request, localLog, chain.length, localRes.usage);
     } else {
       localRes = {
         provider: "local",

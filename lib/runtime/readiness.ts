@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { getProviderDisclosure } from '@/lib/ai/providerDisclosure';
 import { resolvePdfRendererForReadiness } from '@/lib/pdf/ocrProviders';
+import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
 
 export type RuntimeComponentStatus = 'READY' | 'BLOCKED' | 'CONFIGURED_NOT_VERIFIED' | 'NOT_CONFIGURED';
 
@@ -67,7 +68,7 @@ export function deriveRuntimeReadiness(input: RuntimeReadinessInput): RuntimeRea
 }
 
 export async function collectRuntimeReadiness(): Promise<RuntimeReadiness> {
-  const uploadsRoot = path.join(process.cwd(), 'data', 'uploads', 'templates');
+  const uploadsRoot = resolveLexPlantillasStoragePaths().templates;
   let storageReady = false;
   try {
     await access(uploadsRoot, constants.R_OK | constants.W_OK);

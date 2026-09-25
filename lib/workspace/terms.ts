@@ -14,6 +14,18 @@ export interface WorkspaceTermResult {
   assumptions: string[];
 }
 
+export interface WorkspaceTermRecord {
+  input: WorkspaceTermInput;
+  result: WorkspaceTermResult;
+  calculatedAt: string;
+  caseId?: string;
+  expediente?: string;
+}
+
+export function workspaceTermStorageKey(caseId?: string): string {
+  return `workspace-term:last:${caseId?.trim() || 'unassigned'}`;
+}
+
 function parseDate(value: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('La fecha debe usar YYYY-MM-DD.');
   const [year, month, day] = value.split('-').map(Number);

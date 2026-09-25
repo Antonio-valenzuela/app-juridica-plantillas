@@ -8,6 +8,7 @@ import { sanitizeTemplateContent } from '@/lib/templates/templateSanitizer';
 import { analyzePersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
 import path from 'node:path';
 import { deleteOwnedTemplateFile } from '@/lib/security/templateFileCleanup';
+import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
 
 export const dynamic = 'force-dynamic';
 
@@ -327,7 +328,7 @@ export async function DELETE(
       let cleanupResult: Awaited<ReturnType<typeof deleteOwnedTemplateFile>>;
       try {
         cleanupResult = await deleteOwnedTemplateFile({
-          storageRoot: path.join(process.cwd(), 'data', 'uploads', 'templates'),
+          storageRoot: resolveLexPlantillasStoragePaths().templates,
           savedFileName,
         });
       } catch (error) {

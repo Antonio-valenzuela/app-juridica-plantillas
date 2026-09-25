@@ -93,7 +93,7 @@ export function LexSidebar({
           })}
         </nav>
 
-        {/* Tarjeta Firma Electrónica (texto informativo existente) */}
+        {/* Tarjeta Firma Electrónica: no afirma un certificado sin estado persistido. */}
         {!isCompact && (
           <div className="p-3">
             <div className="rounded-xl bg-white/5 border border-white/10 p-3.5">
@@ -105,7 +105,7 @@ export function LexSidebar({
               </div>
               <p className="mt-2 text-[12px] font-semibold text-white">Firma Electrónica</p>
               <p className="mt-0.5 text-[11px] leading-snug text-slate-400">
-                Certificado vigente hasta Noviembre 2026
+                Estado no disponible; configura el certificado en el despacho
               </p>
             </div>
           </div>

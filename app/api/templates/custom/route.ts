@@ -13,6 +13,7 @@ import {
 } from '@/lib/templates/templateCreationIntent';
 import fs from 'fs';
 import path from 'path';
+import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -242,7 +243,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const uploadDir = path.join(process.cwd(), 'data', 'uploads', 'templates');
+        const uploadDir = resolveLexPlantillasStoragePaths().templates;
         if (!fs.existsSync(uploadDir)) {
           fs.mkdirSync(uploadDir, { recursive: true });
         }

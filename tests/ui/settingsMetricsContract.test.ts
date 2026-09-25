@@ -4,17 +4,15 @@ import { describe, expect, it } from 'vitest';
 
 const componentPath = path.resolve(process.cwd(), 'app/machotes/components/WorkspaceModulesView.tsx');
 
-describe('Configuración · métricas del sistema', () => {
-  it('incluye métricas de uso, API, estado de IAs y actividad reciente', () => {
+describe('Configuración · analíticas persistidas', () => {
+  it('integra el panel de analíticas reales sin inventar métricas de proveedores', () => {
     const source = fs.readFileSync(componentPath, 'utf8');
 
-    expect(source).toContain('Métricas del sistema');
-    expect(source).toContain('Tiempo de uso');
-    expect(source).toContain('Llamadas al API');
-    expect(source).toContain('Estado de las IAs');
-    expect(source).toContain('Actividad reciente');
-    expect(source).toContain('Gemini');
-    expect(source).toContain('Groq');
-    expect(source).toContain('NVIDIA');
+    expect(source).toContain("import { AnalyticsPanel } from './AnalyticsPanel';");
+    expect(source).toContain('Analíticas, perfil y estado real de persistencia.');
+    expect(source).not.toContain('AiUsageEvent');
+    expect(source).not.toContain('Gemini');
+    expect(source).not.toContain('Groq');
+    expect(source).not.toContain('NVIDIA');
   });
 });

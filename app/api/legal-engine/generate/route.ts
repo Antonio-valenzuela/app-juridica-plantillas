@@ -15,6 +15,8 @@ import { saveGenerationArtifact } from '@/lib/legal-engine/generationPersistence
 import { buildReviewRequest } from '@/lib/legal-engine/reviewRequest';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { checkGenerationAdmission, maxGenerationInputChars } from '@/lib/security/aiCostControls';
+import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
+import { getGenerationJobDeadlineMs } from '@/lib/legal-engine/generationDeadline';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -66,15 +68,6 @@ function buildFingerprintFromBody(body: any, sourcesArr: UploadedSourceDocument[
     expediente: expedienteFromBody || expedienteFromPrompt || '',
     partiesHash,
   });
-}
-
-const DEFAULT_GENERATION_JOB_DEADLINE_MS = 15 * 60 * 1000;
-
-function getGenerationJobDeadlineMs(): number {
-  const configured = Number(process.env.GENERATION_JOB_DEADLINE_MS);
-  return Number.isFinite(configured) && configured >= 60_000
-    ? Math.floor(configured)
-    : DEFAULT_GENERATION_JOB_DEADLINE_MS;
 }
 
 async function withGenerationDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T> {
@@ -402,7 +395,7 @@ export async function POST(req: NextRequest) {
           onStageComplete: callbacks.onStageComplete as any,
           onBlockComplete: callbacks.onBlockComplete as any,
         } as any
-      ), getGenerationJobDeadlineMs());
+      ), getGenerationJobDeadlineMs(generationExtension));
       latestCheckpoint = doc;
       const finalTotal = resolveGenerationTotal(doc, job.total);
       updateJobProgress(job.jobId, { total: finalTotal, completed: finalTotal, phase: 'materialize', stage: 'Materializando documento', currentBlock: doc.sections[doc.sections.length-1]?.title || null, checkpointDocument: doc });
@@ -472,7 +465,7 @@ export async function GET(req: NextRequest) {
       currentBlock: job.currentBlock,
       stage: job.stage,
       aiProvider: job.aiProvider,
-      error: job.error,
+      error: getSafeApiErrorMessage({ errorCode: job.errorCode }, job.status === 'failed' ? 'La generación no pudo completarse. Revisa los datos e inténtalo de nuevo.' : ''),
       errorCode: job.errorCode,
       documentId: job.documentId,
       warnings: job.warnings || [],

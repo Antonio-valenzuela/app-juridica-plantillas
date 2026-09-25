@@ -30,6 +30,7 @@ import { analyzeWritingRequest, buildWritingWorkflow } from '@/lib/legal-engine/
 import { extractPartyField, extractAuthorityLabeled, extractInstitutionalAuthority } from '@/lib/legal-engine/partyExtraction';
 import { useLegalWorkspaceContext } from '@/context/LegalWorkspaceContext';
 import { buildWorkspaceSnapshot, applyLegalEdits } from '@/lib/workspace/legalEditContract';
+import { extractAgendaEvents, readAgendaEvents, synchronizeDocumentAgenda, writeAgendaEvents } from '@/lib/workspace/agenda';
 import { MATTERS, JURISDICTIONS, DOCUMENT_TYPES, CUSTOM_VALUE_MAX_LENGTH, sanitizeCustomValue } from '@/lib/legal-taxonomy';
 import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
@@ -55,6 +56,7 @@ import {
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { createGenerationIdentityFactory } from '@/lib/legal-engine/generationIdentity';
 import { WorkspaceModulesView, type WorkspaceModule } from './components/WorkspaceModulesView';
+import type { WorkspaceCaseSummary } from '@/lib/workspace/cases';
 import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
 import { compactSourceDocumentsForGeneration, buildContestacionesWorkflowPayload } from '@/lib/legal-engine/generationRequest';
 import { getCachedUploadAnalysis, rememberUploadAnalysis } from '@/lib/uploadAnalysisCache';
@@ -528,7 +530,7 @@ export default function MachotesPage() {
           setIsUniversalGenerating(false);
           genIsGeneratingRef.current = false;
           generationOriginTabRef.current = null;
-          const message = j.error || 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.';
+          const message = getSafeApiErrorMessage({ message: j.error, errorCode: j.errorCode }, 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.');
           setActiveGenJob({ ...next, status: 'failed', error: message });
           notify('error', message);
           window.setTimeout(() => setActiveGenJob(null), 7000);
@@ -673,7 +675,7 @@ export default function MachotesPage() {
             genIsGeneratingRef.current = false;
             setIsUniversalGenerating(false);
             generationOriginTabRef.current = null;
-            const message = d.error || 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.';
+            const message = getSafeApiErrorMessage({ message: d.error, errorCode: d.errorCode }, 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.');
             setActiveGenJob({ ...parsed, status: 'failed', error: message, errorCode: d.errorCode || null, errorMetadata: d.errorMetadata || null });
             notify('error', message);
             return;
@@ -1429,7 +1431,7 @@ export default function MachotesPage() {
       try { localStorage.setItem('jr_active_gen_job', JSON.stringify(initJob)); } catch {}
       startGenPolling(jobId);
     } catch (err: any) {
-      notify('error', `Fallo al iniciar generación: ${err.message}`);
+      notify('error', `Fallo al iniciar generación: ${getSafeApiErrorMessage(err, 'No fue posible iniciar la generación.')}`);
       setIsUniversalGenerating(false);
       genIsGeneratingRef.current = false;
       generationOriginTabRef.current = null;
@@ -1720,7 +1722,7 @@ export default function MachotesPage() {
       startGenPolling(jobId);
     } catch (error: any) {
       console.error('[handleGenerateContestacion] Error:', error);
-      notify('error', `Fallo en la generación: ${error.message}`);
+      notify('error', `Fallo en la generación: ${getSafeApiErrorMessage(error, 'La generación no pudo completarse.')}`);
       setIsUniversalGenerating(false);
       genIsGeneratingRef.current = false;
       generationOriginTabRef.current = null;
@@ -1823,9 +1825,11 @@ export default function MachotesPage() {
     }
   };
 
-  const handleReopenDraft = async (): Promise<boolean> => {
-    let lastId = '';
-    try { lastId = localStorage.getItem('jr_last_draft_id') || ''; } catch { /* noop */ }
+  const handleReopenDraft = async (draftId?: string): Promise<boolean> => {
+    let lastId = draftId?.trim() || '';
+    if (!lastId) {
+      try { lastId = localStorage.getItem('jr_last_draft_id') || ''; } catch { /* noop */ }
+    }
     if (!lastId) {
       notify('warning', 'No hay un borrador guardado para reabrir.');
       return false;
@@ -1839,7 +1843,7 @@ export default function MachotesPage() {
           try { localStorage.removeItem('jr_last_draft_id'); } catch { /* noop */ }
           setHasSavedDraft(false);
         }
-        throw new Error(data?.error || 'El borrador guardado no contiene un documento estructurado.');
+        throw new Error(res.status === 404 ? 'DRAFT_NOT_FOUND' : 'DRAFT_NOT_REOPENABLE');
       }
 
       const reopened = data.draft.structuredDoc as UniversalLegalDocument;
@@ -1873,7 +1877,9 @@ export default function MachotesPage() {
       notify('success', `Borrador reabierto: "${data.draft.title}".`);
       return true;
     } catch (err: any) {
-      notify('error', `No se pudo reabrir el borrador: ${err.message}`);
+      notify('error', err?.message === 'DRAFT_NOT_FOUND'
+        ? 'El borrador ya no está disponible en este workspace.'
+        : 'El asunto no contiene un documento estructurado reabrible.');
       return false;
     }
   };
@@ -1886,7 +1892,7 @@ export default function MachotesPage() {
      1) Snapshot estructurado del documento real hacia el contexto de la burbuja.
      2) Registro del ejecutor REAL de ediciones: operaciones tipadas → estado del
         editor → persistencia por la ÚNICA ruta existente (handleSaveDraft).   */
-  const { syncActiveDocument, clearActiveDocument, registerDocumentMutator, setActiveCase } = useLegalWorkspaceContext();
+  const { syncActiveDocument, clearActiveDocument, registerDocumentMutator, activeCase, setActiveCase } = useLegalWorkspaceContext();
 
   useEffect(() => {
     if (!universalDoc) return;
@@ -1894,6 +1900,23 @@ export default function MachotesPage() {
     try { draftId = localStorage.getItem('jr_last_draft_id') || ''; } catch { /* noop */ }
     syncActiveDocument(buildWorkspaceSnapshot(universalDoc, draftId));
   }, [universalDoc, syncActiveDocument]);
+
+  // Registro automático: sólo toma fechas ligadas a un término, plazo o actuación
+  // procesal reconocible en el texto real del documento. No altera el documento.
+  useEffect(() => {
+    if (!universalDoc?.id) return;
+    const documentText = universalDoc.sections
+      .flatMap((section) => section.content.map((block) => block.text))
+      .join('\n');
+    const extracted = extractAgendaEvents(documentText, {
+      documentId: universalDoc.id,
+      caseId: activeCase?.caseId,
+      expediente: activeCase?.expedienteNumber || universalDoc.caseRefs?.expediente,
+      referenceDate: universalDoc.updatedAt?.slice(0, 10),
+    });
+    const synchronized = synchronizeDocumentAgenda(readAgendaEvents(), universalDoc.id, extracted);
+    writeAgendaEvents(synchronized);
+  }, [activeCase, universalDoc]);
 
   useEffect(() => () => { clearActiveDocument(); }, [clearActiveDocument]);
 
@@ -1978,7 +2001,7 @@ export default function MachotesPage() {
       URL.revokeObjectURL(url);
       notify('success', 'Documento DOCX exportado exitosamente.');
     } catch (err: any) {
-      notify('error', `Error al exportar DOCX: ${err.message}`);
+      notify('error', `Error al exportar DOCX: ${getSafeApiErrorMessage(err, 'No fue posible exportar el DOCX.')}`);
     }
   };
 
@@ -2019,7 +2042,7 @@ export default function MachotesPage() {
       URL.revokeObjectURL(url);
       notify('success', 'PDF Real descargado.');
     } catch (error: any) {
-      notify('error', error.message);
+      notify('error', getSafeApiErrorMessage(error, 'No fue posible exportar el PDF.'));
     }
   };
 
@@ -2368,7 +2391,30 @@ export default function MachotesPage() {
       <div className="machotes-workspace-content w-full min-h-0 min-w-0 overflow-hidden">
         {activeNavTab === 'inicio' || activeNavTab === 'expedientes' || activeNavTab === 'terminos' || activeNavTab === 'jurisprudencia' || activeNavTab === 'biblioteca' || activeNavTab === 'alertas' || activeNavTab === 'configuracion' || activeNavTab === 'ayuda' ? (
           <div className="h-full min-h-0 w-full overflow-y-auto bg-[#f4f7f9]">
-            <WorkspaceModulesView mode={activeNavTab} onNavigate={(mode) => handleSwitchMode(mode)} />
+            <WorkspaceModulesView
+              mode={activeNavTab}
+              onNavigate={(mode) => handleSwitchMode(mode)}
+              activeCase={activeCase}
+              onCaseSelected={(summary: WorkspaceCaseSummary | null) => {
+                setActiveCase(summary ? {
+                  caseId: summary.id,
+                  expedienteNumber: summary.expediente || undefined,
+                  actor: summary.actor || undefined,
+                  demandado: summary.counterparty || undefined,
+                  matter: summary.matter || undefined,
+                } : null);
+              }}
+              onOpenCase={async (summary: WorkspaceCaseSummary) => {
+                setActiveCase({
+                  caseId: summary.id,
+                  expedienteNumber: summary.expediente || undefined,
+                  actor: summary.actor || undefined,
+                  demandado: summary.counterparty || undefined,
+                  matter: summary.matter || undefined,
+                });
+                await handleReopenDraft(summary.id);
+              }}
+            />
           </div>
         ) : activeNavTab === 'my-templates' ? (
           /* TAB 4: MIS PLANTILLAS */

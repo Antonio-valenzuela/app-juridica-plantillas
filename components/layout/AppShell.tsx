@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useLegalWorkspaceContext } from '@/context/LegalWorkspaceContext';
-import { deriveNvidiaIndicator, type NvidiaIndicator } from '@/lib/runtime/nvidiaStatus';
+import { deriveProviderIndicator, type ProviderIndicator } from '@/lib/runtime/providerStatus';
 
 type SidebarItem = {
   href?: string;
@@ -42,7 +42,7 @@ export default function AppShell({
   const { activeCase } = useLegalWorkspaceContext();
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [nvidiaIndicator, setNvidiaIndicator] = useState<NvidiaIndicator>(() => deriveNvidiaIndicator(null));
+  const [providerIndicator, setProviderIndicator] = useState<ProviderIndicator>(() => deriveProviderIndicator(null));
 
   const currentTab = searchParams.get('tab') || 'universal';
 
@@ -71,18 +71,18 @@ export default function AppShell({
   useEffect(() => {
     let disposed = false;
 
-    const checkNvidiaHealth = async () => {
+    const checkProviderHealth = async () => {
       try {
-        const response = await fetch('/api/health/nvidia', { cache: 'no-store' });
+        const response = await fetch('/api/health/providers', { cache: 'no-store' });
         const snapshot = await response.json().catch(() => null);
-        if (!disposed) setNvidiaIndicator(deriveNvidiaIndicator(snapshot));
+        if (!disposed) setProviderIndicator(deriveProviderIndicator(snapshot));
       } catch {
-        if (!disposed) setNvidiaIndicator(deriveNvidiaIndicator(null));
+        if (!disposed) setProviderIndicator(deriveProviderIndicator(null));
       }
     };
 
-    void checkNvidiaHealth();
-    const intervalId = window.setInterval(() => void checkNvidiaHealth(), 30_000);
+    void checkProviderHealth();
+    const intervalId = window.setInterval(() => void checkProviderHealth(), 30_000);
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
@@ -142,9 +142,9 @@ export default function AppShell({
         </div>
 
         <div className="lex-header-right">
-          <div className={`lex-build-status ${nvidiaIndicator.tone === 'danger' ? 'is-error' : ''}`}>
+          <div className={`lex-build-status ${providerIndicator.tone === 'danger' ? 'is-error' : providerIndicator.tone === 'warning' ? 'is-warning' : ''}`}>
             <span className="lex-status-dot" />
-            <span>{nvidiaIndicator.label}</span>
+            <span>{providerIndicator.label}</span>
           </div>
 
           <div className="lex-header-case">
@@ -152,14 +152,13 @@ export default function AppShell({
             <span>{activeCase?.court || 'Sin órgano jurisdiccional'}</span>
           </div>
 
-          <button
-            type="button"
+          <Link
             className="lex-notification"
-            aria-label="Notificaciones"
+            href="/machotes?tab=alertas"
+            aria-label="Abrir alertas DOF y Boletín"
           >
             ♧
-            <span className="lex-notification-dot" />
-          </button>
+          </Link>
 
           <div className="lex-user">
             <div className="lex-user-avatar">YN</div>
@@ -220,11 +219,11 @@ export default function AppShell({
 
             <div>
               <strong>Firma Electrónica</strong>
-              <span>
-                <i />
-                Certificado vigente
-              </span>
-              <small>hasta Noviembre 2026</small>
+                <span>
+                  <i />
+                  Estado no disponible
+                </span>
+                <small>Configura el certificado en el despacho</small>
             </div>
           </div>
         </div>

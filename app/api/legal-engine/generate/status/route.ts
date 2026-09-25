@@ -3,6 +3,7 @@ import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { getGenerationJob } from '@/lib/legal-engine/generationJobs';
 import { recoverGenerationJob } from '@/lib/legal-engine/generationJobPersistence';
 import type { UniversalLegalDocument } from '@/lib/legal-engine/types';
+import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
     currentBlockIndex: job.currentBlockIndex,
     aiProvider: job.aiProvider,
     stage: job.stage,
-    error: job.error,
+    error: getSafeApiErrorMessage({ errorCode: job.errorCode }, job.status === 'failed' ? 'La generación no pudo completarse. Revisa los datos e inténtalo de nuevo.' : ''),
     errorCode: job.errorCode,
     errorMetadata: job.errorMetadata,
     documentId: job.documentId,
