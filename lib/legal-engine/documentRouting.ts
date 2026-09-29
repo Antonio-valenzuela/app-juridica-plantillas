@@ -43,6 +43,13 @@ export interface ResolveDocumentRoutingInput {
   outputFilename?: string;
 }
 
+export interface ResolveContestacionRoutingFromSourceInput {
+  /** Clasificación producida por SOURCE -> CLASSIFICATION, no por la salida solicitada. */
+  sourceDocumentType: SourceDocumentTypeValue;
+  matter: string;
+  caseText: string;
+}
+
 /**
  * Estos valores de la taxonomía describen una familia, no un escrito generable.
  * Nunca deben traducirse silenciosamente a una demanda inicial.
@@ -210,4 +217,55 @@ export function resolveDocumentRouting(input: ResolveDocumentRoutingInput): Docu
   }
 
   return safeFreeWritingFallback(input);
+}
+
+/**
+ * Construye la ruta de contestación después de clasificar la fuente. Esta
+ * función mantiene separadas las decisiones SOURCE -> CLASSIFICATION y
+ * CLASSIFICATION -> ROUTING: el tipo de salida nunca se usa como señal para
+ * clasificar el documento cargado.
+ */
+export function resolveContestacionRoutingFromSource(
+  input: ResolveContestacionRoutingFromSourceInput,
+): DocumentRoutingResolution {
+  const sourceType = normalizeSourceDocumentType(input.sourceDocumentType);
+  const matter = normalizeMatterToken(input.matter);
+  const caseText = String(input.caseText || '');
+  const sourceIsDemand = Boolean(sourceType && (
+    sourceType === 'DEMANDA'
+    || sourceType.startsWith('DEMANDA_')
+    || sourceType.startsWith('ESCRITO_INICIAL_')
+  ));
+
+  if (!sourceType || !sourceIsDemand) {
+    return throwRoutingError(
+      'NEEDS_DOCUMENT_TYPE_SELECTION',
+      'NEEDS_DOCUMENT_TYPE_SELECTION: la fuente no se clasificó como demanda o escrito inicial con materia determinada.',
+    );
+  }
+
+  let selectedDocumentType: string;
+  if (matter === 'LABORAL') selectedDocumentType = 'contestacion_demanda_laboral';
+  else if (matter === 'MERCANTIL') selectedDocumentType = 'contestacion_demanda_mercantil';
+  else if (matter === 'FAMILIAR' && /\b(?:alimentos?|pensi[oó]n\s+alimenticia|obligaci[oó]n\s+alimentaria)\b/i.test(caseText)) selectedDocumentType = 'contestacion_alimentos';
+  else if (matter === 'CIVIL') selectedDocumentType = 'contestacion_demanda_civil';
+  else {
+    return throwRoutingError(
+      'NEEDS_DOCUMENT_TYPE_SELECTION',
+      'NEEDS_DOCUMENT_TYPE_SELECTION: la materia o el subtipo de contestación no tiene una ruta canónica segura.',
+    );
+  }
+
+  return resolveDocumentRouting({
+    selectedDocumentType,
+    sourceDocumentType: sourceType,
+  });
+}
+
+function normalizeMatterToken(value: string): string {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
 }

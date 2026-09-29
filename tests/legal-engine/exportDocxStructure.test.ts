@@ -106,7 +106,7 @@ describe('FASE 7 Task 4 — DOCX structure and fidelity', () => {
     expect(documentXml).toContain('Texto con &lt; &amp; y XML escapable.');
   });
 
-  it('DOCX round trip preserves normalized substantive text', async () => {
+  it('DOCX round trip renders semantic section titles and preserves substantive text', async () => {
     const repeated = 'Misma redacción legítima con identidad distinta.';
     const body = [
       paragraph('block-heading', 'HECHOS', 'TITLE'),
@@ -127,7 +127,12 @@ describe('FASE 7 Task 4 — DOCX structure and fidelity', () => {
     const extracted = extractWordDocumentParagraphs(await packageReader.readText('word/document.xml'))
       .filter((text) => text.length > 0);
 
-    const expected = body.map((entry) => entry.text).join('\n');
+    const expected = [
+      'Sección padre no re-renderizada',
+      ...body.slice(0, 2).map((entry) => entry.text),
+      'Subsección anidada no re-renderizada',
+      ...body.slice(2).map((entry) => entry.text),
+    ].join('\n');
     expect(normalizeDocxText(extracted.join('\n'))).toBe(normalizeDocxText(expected));
     expect(extracted.filter((text) => text === repeated)).toHaveLength(2);
     expect(extracted).toContain('Contenido anidado preservado.');

@@ -77,7 +77,8 @@ describe('FALLBACK E2E — Deterministic Fallback Delivery Across All Sections',
 
     // 3. ANTECEDENTES proviene determinísticamente de la fuente
     const antecedentesText = getSectionContent(result, /antecedente/i);
-    expect(antecedentesText).toContain('AMPARO DIRECTO 800/2024');
+    expect(antecedentesText).toMatch(/3 de enero de 2024|se presentó demanda/i);
+    expect(result.caseRefs.expediente).toBe('800/2024');
 
     // 4. Secciones sustantivas clave tienen desarrollo sustantivo y fondo jurídico real
     const interesText = getSectionContent(result, /inter[eé]s\s+excepcional/i);

@@ -62,7 +62,7 @@ export async function generateNVIDIACompletion(
 
   const controller = new AbortController();
   const configuredTimeout = Number(process.env.NVIDIA_REQUEST_TIMEOUT_MS);
-  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1000 ? configuredTimeout : 30000;
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1000 ? configuredTimeout : 120000;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   // PASO 2: logging sanitizado del request (sin secretos)

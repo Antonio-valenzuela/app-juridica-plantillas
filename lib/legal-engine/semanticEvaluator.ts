@@ -7,7 +7,8 @@
  *
  * Invariantes:
  *  - generated != covered (CoverageItem sólo pasa a 'covered' tras superar evaluación semántica).
- *  - Cero evaluación por longitud: un bloque de 30 páginas repetitivo REPRUEBA; un bloque conciso y específico APRUEBA.
+ *  - Sin penalización general por longitud: un texto conciso y específico puede aprobar; sólo se aplica el
+ *    mínimo cuando el plan EXTENSIVE asignó expresamente un targetWords verificable.
  *  - Hard Fails inmediatos: seed markers, dependencias fácticas no resueltas ([DATO PENDIENTE...]),
  *    jurisprudencia fabricada, truncamiento sin resolver, o issue no respondido.
  */
@@ -978,8 +979,16 @@ export function evaluateIssueDraftResult(
       result.conclusion.trim(),
       result.application.trim(),
     ];
-  const completeness = requiredComponents.filter(Boolean).length / requiredComponents.length;
-  if (completeness < 1) deficiencies.push('ISSUE_COMPONENTS_INCOMPLETE');
+  const structuralCompleteness = requiredComponents.filter(Boolean).length / requiredComponents.length;
+  const outputWordCount = (issueDraftText(result).match(/[\p{L}\p{N}]+/gu) || []).length;
+  const targetWords = Number(task.targetWords);
+  const hasExplicitTarget = Number.isFinite(targetWords) && targetWords > 0;
+  const targetLengthRatio = hasExplicitTarget ? Math.min(1, outputWordCount / targetWords) : 1;
+  const completeness = Math.min(structuralCompleteness, targetLengthRatio);
+  if (structuralCompleteness < 1) deficiencies.push('ISSUE_COMPONENTS_INCOMPLETE');
+  if (hasExplicitTarget && outputWordCount < Math.ceil(targetWords * 0.8)) {
+    pushUnique(deficiencies, 'ISSUE_DRAFT_BELOW_TARGET');
+  }
 
   const dimensions = [
     specificity,

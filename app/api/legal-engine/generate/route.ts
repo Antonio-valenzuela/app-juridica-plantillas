@@ -17,6 +17,9 @@ import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { checkGenerationAdmission, maxGenerationInputChars } from '@/lib/security/aiCostControls';
 import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
 import { getGenerationJobDeadlineMs } from '@/lib/legal-engine/generationDeadline';
+import { resolveDraftDepthProfile } from '@/lib/legal-engine/draftDepth';
+import { generationExtensionForDraftDepth } from '@/lib/legal-engine/generationExtension';
+import { explicitExternalProviderConsent, scopeConsentIdempotencyKey } from '@/lib/ai/caseProviderConsent';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -67,6 +70,8 @@ function buildFingerprintFromBody(body: any, sourcesArr: UploadedSourceDocument[
     referenceDocumentId: body.referenceDocumentId as string | undefined,
     expediente: expedienteFromBody || expedienteFromPrompt || '',
     partiesHash,
+    draftDepth: body.draftDepth as 'PROFESSIONAL_20' | 'EXTENSIVE_40' | undefined,
+    externalProviderOptIn: explicitExternalProviderConsent(body.externalProviderOptIn),
   });
 }
 
@@ -109,8 +114,25 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
+  const externalProviderOptIn = explicitExternalProviderConsent(body.externalProviderOptIn);
   if (Buffer.byteLength(JSON.stringify(body), 'utf8') > maxGenerationInputChars()) {
     return NextResponse.json({ ok: false, errorCode: 'GENERATION_INPUT_TOO_LARGE', message: 'La solicitud de generación excede el tamaño permitido.' }, { status: 413 });
+  }
+
+  let draftDepth: 'PROFESSIONAL_20' | 'EXTENSIVE_40' | undefined;
+  let effectiveGenerationExtension = body.generationExtension;
+  if (body.draftDepth !== undefined) {
+    try {
+      const profile = resolveDraftDepthProfile(body.draftDepth);
+      draftDepth = profile.draftDepth;
+      effectiveGenerationExtension = generationExtensionForDraftDepth(profile);
+    } catch {
+      return NextResponse.json({
+        ok: false,
+        errorCode: 'INVALID_DRAFT_DEPTH',
+        message: 'Selecciona una profundidad de redacción válida.',
+      }, { status: 400 });
+    }
   }
 
   // VERIFY-only continuation: re-evaluate the same materialized document and
@@ -186,7 +208,6 @@ export async function POST(req: NextRequest) {
     caseParties,
     idempotencyKey: bodyIdempotencyKey,
     workflow,
-    generationExtension,
   } = body;
   const selectedDocumentType = typeof bodySelectedDocumentType === 'string'
     ? bodySelectedDocumentType.trim().slice(0, 80) || undefined
@@ -223,6 +244,7 @@ export async function POST(req: NextRequest) {
   const sourcesArr = (sourceDocuments as UploadedSourceDocument[] | undefined) || [];
   const headerKey = req.headers.get('x-idempotency-key')?.trim() || req.headers.get('x-generation-id')?.trim() || '';
   const idempotencyKey = headerKey || bodyIdempotencyKey?.trim() || null;
+  const scopedIdempotencyKey = scopeConsentIdempotencyKey(idempotencyKey, externalProviderOptIn);
   const fingerprint = buildFingerprintFromBody(body, sourcesArr);
   const wantSync = Boolean(body.sync) || req.nextUrl.searchParams.get('sync') === '1';
 
@@ -250,7 +272,9 @@ export async function POST(req: NextRequest) {
     try {
       const doc = await runGenerationPipeline({
         userInstruction, sourceDocuments: sourcesArr, allowUnvalidatedSource,
-        referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension,
+        referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension: effectiveGenerationExtension,
+        draftDepth,
+        externalProviderOptIn,
       }, {} as any);
       return NextResponse.json({ ok: true, document: doc });
     } catch (err: any) {
@@ -269,8 +293,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 1. Anti-duplicado: si ya existe job activo con mismo fingerprint/idempotencyKey, reutilizar
-  const existingJob = findActiveJobByFingerprint(fingerprint, idempotencyKey, owner)
-    || await recoverActiveGenerationJob(fingerprint, idempotencyKey, owner);
+  const existingJob = findActiveJobByFingerprint(fingerprint, scopedIdempotencyKey, owner)
+    || await recoverActiveGenerationJob(fingerprint, scopedIdempotencyKey, owner);
   console.log('  existingJob encontrado?:', !!existingJob, existingJob ? `(jobId:${existingJob.jobId.slice(0,8)}...)` : '');
   if (existingJob) {
     console.log('[generate:POST] Reutilizando job existente:', existingJob.jobId);
@@ -292,7 +316,7 @@ export async function POST(req: NextRequest) {
     organizationId: auth.context.organizationId,
     userId: auth.context.userId,
     fingerprint,
-    idempotencyKey,
+    idempotencyKey: scopedIdempotencyKey,
     total: 0,
     stage: 'Preparando documento…',
   });
@@ -383,9 +407,11 @@ export async function POST(req: NextRequest) {
           lawyerProfile: effectiveLawyerProfile,
           savedParties,
           workflow: workflowSnapshot,
-          idempotencyKey: idempotencyKey || fingerprint,
+          idempotencyKey: scopedIdempotencyKey || fingerprint,
           jobId: job.jobId,
-          generationExtension,
+          generationExtension: effectiveGenerationExtension,
+          draftDepth,
+          externalProviderOptIn,
         },
         // Bridge: además de callbacks estándar, enganchar progreso real por bloque
         {
@@ -395,7 +421,7 @@ export async function POST(req: NextRequest) {
           onStageComplete: callbacks.onStageComplete as any,
           onBlockComplete: callbacks.onBlockComplete as any,
         } as any
-      ), getGenerationJobDeadlineMs(generationExtension));
+      ), getGenerationJobDeadlineMs(effectiveGenerationExtension));
       latestCheckpoint = doc;
       const finalTotal = resolveGenerationTotal(doc, job.total);
       updateJobProgress(job.jobId, { total: finalTotal, completed: finalTotal, phase: 'materialize', stage: 'Materializando documento', currentBlock: doc.sections[doc.sections.length-1]?.title || null, checkpointDocument: doc });

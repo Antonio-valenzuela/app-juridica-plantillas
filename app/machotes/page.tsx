@@ -207,11 +207,13 @@ export default function MachotesPage() {
   // Sincroniza ?tab= de la URL con la pestaña activa (navegación lateral global).
   // Solo acepta modos válidos; ignora valores desconocidos sin alterar el estado.
   const urlTab = searchParams.get('tab') as LegalWorkspaceMode | null;
+  /* eslint-disable react-hooks/set-state-in-effect -- synchronize the explicit URL tab with local navigation state. */
   useEffect(() => {
     if (urlTab && (validTabs as string[]).includes(urlTab) && urlTab !== activeNavTab) {
       setActiveNavTab(urlTab);
     }
   }, [urlTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
   const [universalDoc, setUniversalDoc] = useState<UniversalLegalDocument | null>(null);
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
   const [activeSection, setActiveSection] = useState<DocumentNode | null>(null);
@@ -883,6 +885,46 @@ export default function MachotesPage() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
+  const waitForUploadAnalysis = async (
+    analysisJobId: string,
+    fileName: string,
+    fileIndex: number,
+    totalFiles: number,
+  ): Promise<any> => {
+    for (;;) {
+      const response = await fetch(`/api/templates/analyze-upload/status?jobId=${encodeURIComponent(analysisJobId)}`, { cache: 'no-store' });
+      const status = await response.json();
+      if (!response.ok || !status?.ok) throw new Error(status?.error || 'No se pudo consultar el análisis del documento.');
+      const jobPercentage = Number.isFinite(status.percentage) ? Math.max(0, Math.min(100, status.percentage)) : 0;
+      const percentage = Math.round(((fileIndex + jobPercentage / 100) / Math.max(1, totalFiles)) * 100);
+      const phaseLabel: Record<string, string> = {
+        RECIBIDO: 'Recibido; preparando análisis…',
+        EXTRAYENDO_TEXTO: 'Extrayendo texto nativo…',
+        OCR: `Reconociendo ${status.processedPages || 0}/${status.totalPages || '?'} páginas con OCR…`,
+        ANALIZANDO: 'Analizando estructura del documento…',
+        VALIDANDO: 'Validando calidad de la fuente…',
+        LISTO: 'Documento fuente listo',
+        REQUIERE_ATENCION: 'Análisis terminado; requiere revisión',
+        ERROR: 'No se pudo completar el análisis',
+      };
+      setUploadProgress((previous) => previous ? {
+        ...previous,
+        completed: status.status === 'completed' ? fileIndex + 1 : fileIndex,
+        percentage,
+        currentBlock: fileName,
+        stage: phaseLabel[status.phase] || 'Analizando documento fuente…',
+      } : previous);
+      if (status.status === 'completed') {
+        if (!status.result) throw new Error('El análisis terminó sin resultado.');
+        return status.result;
+      }
+      if (status.status === 'failed' || status.status === 'cancelled') {
+        throw new Error(status.error || 'El análisis no pudo completarse.');
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
+    }
+  };
+
   const ALLOWED_UPLOAD_EXTS = new Set(['pdf','docx','doc','jpg','jpeg','png','txt','rtf']);
 
   const uploadFilesInternal = async (fileList: File[]) => {
@@ -922,11 +964,46 @@ export default function MachotesPage() {
 
     const sources: UploadedSourceDocument[] = [];
     const caseDocs: CaseDocument[] = [];
+    const completedAsyncSources: UploadedSourceDocument[] = [];
+    const isAsyncContestaciones = activeNavTab === 'responses_resources';
 
     for (let i = 0; i < allowed.length; i++) {
       const file = allowed[i];
       const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf';
       const blobUrl = URL.createObjectURL(file);
+      const pendingId = `pending-upload-${uploadStampMs}-${i}`;
+
+      // Contestaciones muestra la fuente de inmediato. El registro provisional
+      // se reemplaza por el mismo documento cuando termina el análisis real.
+      if (isAsyncContestaciones) {
+        const pendingSource = createSourceDocument({
+          id: pendingId,
+          filename: file.name,
+          name: file.name,
+          type: file.type || ext,
+          fileUrl: blobUrl,
+          extractedText: '',
+          pages: [{ page: 1, text: 'Analizando fuente…', chars: 0 }],
+          sourceValidated: false,
+          sourceQualityStatus: 'NEEDS_SOURCE_REVIEW',
+          warnings: ['Análisis de fuente en curso. La generación permanece bloqueada hasta validar el documento.'],
+          fileSizeBytes: file.size,
+        } as any);
+        const pendingCaseDoc: CaseDocument = {
+          id: pendingId,
+          name: file.name,
+          type: ext,
+          fileUrl: blobUrl,
+          pageCount: 0,
+          pages: [],
+          role: 'fuente_general',
+          status: 'NEEDS_MANUAL_REVIEW',
+          uploadedAt: new Date().toISOString(),
+        };
+        setUploadedSourceDocs((previous) => [...previous, pendingSource]);
+        setCaseDocuments((previous) => [...previous, pendingCaseDoc]);
+        setSelectedCaseDoc(pendingCaseDoc);
+      }
 
       const formData = new FormData();
       formData.append('file', file);
@@ -938,8 +1015,16 @@ export default function MachotesPage() {
           const res = await fetch('/api/templates/analyze-upload', {
             method: 'POST',
             body: formData,
+            headers: isAsyncContestaciones ? { 'x-analysis-mode': 'async' } : undefined,
           });
           data = await res.json();
+          if (res.status === 202 && data?.analysisJobId) {
+            data = await waitForUploadAnalysis(data.analysisJobId, file.name, i, allowed.length);
+          } else if (!res.ok) {
+            throw new Error(data?.error || data?.message || 'No se pudo iniciar el análisis del archivo.');
+          } else if (data?.status === 'completed' && data?.result) {
+            data = data.result;
+          }
           if (data?.ok) rememberUploadAnalysis(uploadAnalysisCacheRef.current, file, data);
         }
 
@@ -958,7 +1043,7 @@ export default function MachotesPage() {
           : [{ page: 1, text: sanitizeClean(data.extractedText || ''), chars: data.extractedText?.length || 0 }];
 
         const newSource: UploadedSourceDocument = createSourceDocument({
-          id: data.fileId || `doc-${uploadStampMs}-${i}`,
+          id: isAsyncContestaciones ? pendingId : (data.fileId || `doc-${uploadStampMs}-${i}`),
           filename: file.name,
           name: file.name,
           type: file.type || ext,
@@ -996,8 +1081,15 @@ export default function MachotesPage() {
           uploadedAt: new Date().toISOString(),
         };
 
-        sources.push(newSource);
-        caseDocs.push(newCaseDoc);
+        if (isAsyncContestaciones) {
+          completedAsyncSources.push(newSource);
+          setUploadedSourceDocs((previous) => previous.map((source) => source.id === pendingId ? newSource : source));
+          setCaseDocuments((previous) => previous.map((doc) => doc.id === pendingId ? newCaseDoc : doc));
+          setSelectedCaseDoc(newCaseDoc);
+        } else {
+          sources.push(newSource);
+          caseDocs.push(newCaseDoc);
+        }
         setUploadProgress((previous) => previous ? {
           ...previous,
           completed: i + 1,
@@ -1117,6 +1209,23 @@ export default function MachotesPage() {
           setSelectedTemplateRefText(sanitizeClean(data.extractedText || ''));
         }
       } catch (err: any) {
+        if (isAsyncContestaciones) {
+          const failureMessage = err?.message || 'No se pudo completar el análisis de la fuente.';
+          setUploadedSourceDocs((previous) => previous.map((source) => source.id === pendingId ? {
+            ...source,
+            extractedText: '',
+            pages: [{ page: 1, text: failureMessage, chars: 0 }],
+            sourceValidated: false,
+            sourceQualityStatus: 'NEEDS_SOURCE_REVIEW',
+            warnings: [...(source.warnings || []), failureMessage],
+          } : source));
+          setCaseDocuments((previous) => previous.map((doc) => doc.id === pendingId ? {
+            ...doc,
+            pageCount: 1,
+            pages: [{ page: 1, text: failureMessage, chars: 0, ocrStatus: 'error' }],
+            status: 'NEEDS_MANUAL_REVIEW',
+          } : doc));
+        }
         setUploadProgress((previous) => previous ? {
           ...previous,
           completed: i + 1,
@@ -1128,6 +1237,19 @@ export default function MachotesPage() {
         setDocsUploadError(msg);
         notify('error', msg);
       }
+    }
+
+    if (isAsyncContestaciones) {
+      setUploadProgress(null);
+      if (completedAsyncSources.length > 0) {
+        const ficha = detectCaseFicha(completedAsyncSources.map((source) => source.extractedText || ''));
+        setCaseFicha(ficha);
+        void persistDetectedFicha(ficha, completedAsyncSources);
+        notify('success', `Documento original "${allowed[0].name}" cargado y analizado (${completedAsyncSources.length} archivo(s)).`);
+      } else {
+        notify('error', 'No se pudo analizar ningún documento fuente.');
+      }
+      return;
     }
 
     setUploadProgress(null);
@@ -1334,6 +1456,11 @@ export default function MachotesPage() {
       notify('warning', 'Ya hay una generación en curso. Por favor espera.');
       return;
     }
+    const externalProviderOptIn = window.confirm('Para generar este borrador se enviará contenido del expediente a Gemini, Groq o NVIDIA. ¿Autorizas ese envío solo para esta generación? El expediente seguirá marcado como privado.');
+    if (!externalProviderOptIn) {
+      notify('warning', 'Generación cancelada: no se autorizó el uso de proveedores externos.');
+      return;
+    }
     genIsGeneratingRef.current = true;
     generationOriginTabRef.current = activeNavTab;
     // BUG1+2: Determinar etiqueta dinámica para overlay global
@@ -1406,6 +1533,7 @@ export default function MachotesPage() {
           matter: (payload as any).taxonomy?.matter || undefined,
           workflow: requestWorkflow,
           idempotencyKey: generationId,
+          externalProviderOptIn,
         }),
       });
 
@@ -1609,17 +1737,24 @@ export default function MachotesPage() {
     referenceDocumentText?: string;
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
     generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
+    draftDepth?: 'PROFESSIONAL_20' | 'EXTENSIVE_40';
   }) => {
     const userInstructions = typeof request === 'string' ? request : request.userInstructions;
     const selectedDocumentTypeFromUi = typeof request === 'string' ? undefined : request.selectedDocumentType;
     const documentTypeLabelFromUi = typeof request === 'string' ? undefined : request.documentTypeLabel;
     const generationModeFromUi = typeof request === 'string' ? undefined : request.generationMode;
     const generationExtensionFromUi = typeof request === 'string' ? undefined : request.generationExtension;
+    const draftDepthFromUi = typeof request === 'string' ? undefined : request.draftDepth;
     const referenceDocumentIdFromUi = typeof request === 'string' ? undefined : request.referenceDocumentId;
     const referenceDocumentTextFromUi = typeof request === 'string' ? undefined : request.referenceDocumentText;
     if (isUniversalGenerating || genIsGeneratingRef.current) {
       console.warn('[handleGenerateContestacion] Doble click bloqueado — Job activo', genJobIdRef.current?.slice(0,8));
       notify('warning', 'Ya hay una generación en curso. Por favor espera.');
+      return;
+    }
+    const externalProviderOptIn = window.confirm('Para generar esta contestación se enviará contenido del expediente a Gemini, Groq o NVIDIA. ¿Autorizas ese envío solo para esta generación? El expediente seguirá marcado como privado.');
+    if (!externalProviderOptIn) {
+      notify('warning', 'Generación cancelada: no se autorizó el uso de proveedores externos.');
       return;
     }
     genIsGeneratingRef.current = true;
@@ -1697,6 +1832,8 @@ export default function MachotesPage() {
           matter: requestedMatter,
           caseParties: contestacionCaseParties.length > 0 ? contestacionCaseParties : undefined,
           generationExtension: generationExtensionFromUi || { generationMode: 'standard' },
+          draftDepth: draftDepthFromUi,
+          externalProviderOptIn,
           idempotencyKey: genId2,
         }),
       });

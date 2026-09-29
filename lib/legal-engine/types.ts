@@ -2,6 +2,8 @@ import { markDocumentAsDraft } from './documentLifecycle';
 import type { DocumentLifecycleMetadata } from './documentLifecycle';
 import type { SourceDocumentTypeValue } from './sourceDocumentTypes';
 import type { GenerationTrace } from './generationTrace';
+import type { SourceGrounding } from './sourceGrounding';
+import type { ProvenanceIntegrityEvaluation } from './provenanceIntegrityGate';
 
 export type ContentLayer = 'SOURCE_FACT' | 'COURT_REASONING' | 'USER_POSITION' | 'AI_ANALYSIS' | 'GENERATED_ARGUMENT';
 export type TrustLevel = 'VERIFIED' | 'UNVERIFIED' | 'AI_INFERENCE' | 'PENDING';
@@ -494,6 +496,13 @@ export interface GenerationMetadata {
   aiError?: string | null;
   generationMode?: GenerationMode;
   generationExtension?: import('./generationExtension').GenerationExtensionContract;
+  /** Perfil de profundidad seleccionado por el abogado; se conserva en el JSON ya persistido. */
+  draftDepth?: import('./draftDepth').DraftDepth;
+  /** Consentimiento explícito de esta generación; no se hereda de un borrador previo. */
+  externalProviderOptIn?: boolean;
+  legalDocumentPlan?: import('./legalDocumentPlan').LegalDocumentPlan;
+  factResponseMatrix?: import('./legalDocumentPlan').FactResponseMatrix;
+  draftContentStopReason?: 'TARGET_REACHED' | 'CONTENT_LIMIT_REACHED' | 'COVERAGE_COMPLETE' | 'PROVIDER_UNAVAILABLE' | 'REPETITION_BLOCKED' | 'RESOURCE_LIMIT' | 'ATTORNEY_INPUT_REQUIRED';
   selectedTemplateId?: string | null;
   referenceDocumentId?: string | null;
   referenceDocumentLifecycle?: DocumentLifecycleMetadata;
@@ -507,6 +516,16 @@ export interface GenerationMetadata {
   routing?: DocumentRoutingMetadata;
   /** Compatibilidad auditable entre la fuente cargada y la salida seleccionada. */
   sourceOutputCompatibility?: import('./sourceOutputCompatibility').SourceOutputCompatibilityResult;
+  /** Grounding semántico de la fuente y separación entre caso y autoridad citada. */
+  sourceGrounding?: SourceGrounding[];
+  /** Per-claim evidence map; absent means an AI draft is not factually certified. */
+  factualClaims?: import('./factualClaimGate').FactualClaimRecord[];
+  /** Material legal citations and their issue-specific use, separate from model text. */
+  authorityUses?: import('./authorityVerificationGate').AuthorityUse[];
+  /** Officially verified research artifacts; a citation string alone is never enough. */
+  verifiedAuthorities?: import('./legal-research/types').VerifiedAuthority[];
+  /** Gate fail-closed para impedir contaminación de jurisprudencia en FINAL. */
+  provenanceIntegrityGate?: ProvenanceIntegrityEvaluation;
   /** Preflight estructural que debe existir antes de cualquier exportación protegida. */
   preflight?: import('./documentPreflight').DocumentPreflightResult;
   sections?: Record<string, {

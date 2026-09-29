@@ -354,7 +354,7 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
     expect(routing.outputFilename).toMatch(/contestaci[oó]n|revisi[oó]n/i);
   });
 
-  it('recorre el PDF sanitizado real 0129000036717288006AST(1).PDF sin desanonimizar ni cambiar la familia', async () => {
+  it('bloquea la selección de revisión cuando el PDF sanitizado real es una demanda de amparo', async () => {
     const extraction = await extractDocument({
       buffer: fs.readFileSync(REAL_PUBLIC_PDF),
       fileName: '0129000036717288006AST(1).PDF',
@@ -369,23 +369,12 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
       fileSizeBytes: extraction.fileSizeBytes,
     });
 
-    const doc = await runGenerationPipeline({
+    await expect(runGenerationPipeline({
       selectedDocumentType: TARGET_ID,
       documentTypeLabel: TARGET_LABEL,
       userInstruction: 'Preparar el escrito post-sentencia con base únicamente en la fuente.',
       sourceDocuments: [source],
       generateSection: async ({ section }: { section: { title: string } }) => `Contenido controlado de ${section.title}.`,
-    } as any);
-    const text = doc.sections.flatMap((section) => section.content.map((block) => block.text)).join('\n');
-
-    expect(doc.caseAnalysis?.caseNumbers.principal).toBe('800/2024');
-    expect(doc.caseAnalysis?.anonymizedData).toContain('Nombre del promovente');
-    expect(doc.proceduralIdentity?.sourceDocumentType).toBe('SENTENCIA_O_RESOLUCION');
-    expect(doc.documentType).toBe(TARGET_ID);
-    expect(doc.templateId).toBe(TARGET_ID);
-    expect(text).not.toMatch(/demanda_amparo_(?:directo|indirecto)|demanda de amparo/i);
-    expect(text).not.toContain('***** ******* ********* *****');
-    expect((doc.generationMetadata as any).preflight.status).toBe('NEEDS_INPUT');
-    expect((doc.generationMetadata as any).routing.outputFilename).not.toMatch(/demanda/i);
+    } as any)).rejects.toThrow(/SOURCE_DOCUMENT_INCOMPATIBLE[\s\S]*DEMANDA_AMPARO_DIRECTO[\s\S]*SENTENCIA_AMPARO_DIRECTO/);
   }, 60000);
 });

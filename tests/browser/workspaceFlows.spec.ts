@@ -106,6 +106,26 @@ test.describe('E2E-01 navegación del espacio de trabajo', () => {
   });
 });
 
+test.describe('E2E-01b shell visual estable', () => {
+  test('mantiene iconos locales y no introduce desborde horizontal en los módulos', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    const routes = ['inicio', 'universal', 'initial_writings', 'responses_resources', 'my-templates', 'expedientes', 'terminos', 'jurisprudencia', 'biblioteca', 'alertas', 'configuracion', 'ayuda'];
+
+    for (const tab of routes) {
+      await page.goto(`/machotes?tab=${tab}`);
+      await expect(page.locator('.lex-sidebar')).toBeVisible();
+      await expect(page.locator('.lex-sidebar [data-lex-icon]')).not.toHaveCount(0);
+      await expect(page.locator('.lex-sidebar .material-symbols-outlined')).toHaveCount(0);
+      const widths = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: window.innerWidth }));
+      expect(widths.document, `${tab} must not overflow the desktop viewport`).toBeLessThanOrEqual(widths.viewport + 1);
+    }
+
+    expect(pageErrors).toEqual([]);
+  });
+});
+
 test.describe('E2E-02 generación controlada', () => {
   test('inicia el job y llega al editor con documento completado', async ({ page }) => {
     await mockGeneration(page, { readiness: 'READY' });
@@ -190,5 +210,56 @@ test.describe('E2E-07 importador local', () => {
     await page.getByRole('button', { name: 'Seleccionar importables' }).click();
     await page.getByRole('button', { name: 'Importar seleccionados (1)' }).click();
     await expect(page.getByText(/1 documento\(s\) incorporado/)).toBeVisible();
+  });
+});
+
+test.describe('E2E-08 carga asíncrona de Contestaciones', () => {
+  test('muestra el documento de inmediato y reemplaza el estado provisional al validar la fuente', async ({ page }) => {
+    let statusCalls = 0;
+    const analysisResult = {
+      ok: true,
+      sourceFileName: 'apelacion.txt',
+      mimeType: 'text/plain',
+      extractedText: 'Texto legal extraído de prueba.',
+      needsOcr: true,
+      sourceValidated: true,
+      sourceQualityStatus: 'READY',
+      sourceValidationMethod: 'ocr',
+      ocrProvider: 'tesseract',
+      ocrStatus: 'OCR_COMPLETED',
+      qualityScore: { confidence: 90, qualityLabel: 'Alta', pageCount: 2, textLength: 33, avgCharsPerPage: 17, status: 'READY', ocrUsed: true, emptyPages: 0 },
+      sourceQuality: { pageCount: 2, characterCount: 33, charactersPerPage: 17, emptyPageRatio: 0, extractionMethod: 'ocr', ocrUsed: true, confidence: 90 },
+      extractionSteps: [],
+      pages: [{ page: 1, text: 'Texto legal extraído de prueba.', chars: 33 }, { page: 2, text: 'Segundo folio.', chars: 14 }],
+      classification: { es_juridico: true, tipo_documento: 'Documento jurídico', materia: 'Civil', confianza: 90, razon: 'Prueba', secciones_detectadas: [] },
+      analysis: { facts: [], claims: [], risks: [], missingData: [] },
+      templateAnalysis: {},
+      generationEligibility: 'eligible',
+      structureJson: null,
+      warnings: [],
+      pipelineStatus: 'READY',
+      lifecycle: { entityKind: 'SOURCE_DOCUMENT', originClass: 'user', creationIntent: 'SOURCE_DOCUMENT' },
+      analysisMetrics: { documentAnalysisDurationMs: 10, nativeExtractionDurationMs: 1, ocrPreparationDurationMs: 1, ocrDurationMs: 8, ocrPages: 2, totalPages: 2, cacheHit: false, extractionStatus: 'READY', concurrency: 2 },
+    };
+
+    await page.route('**/api/templates/analyze-upload', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ ok: true, analysisJobId: 'upload-e2e-job', status: 'processing', cacheHit: false }) });
+    });
+    await page.route('**/api/templates/analyze-upload/status?jobId=upload-e2e-job', async (route) => {
+      statusCalls += 1;
+      if (statusCalls === 1) {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, analysisJobId: 'upload-e2e-job', status: 'processing', phase: 'OCR', processedPages: 1, totalPages: 2, ocrPages: 2, percentage: 50, cacheHit: false }) });
+        return;
+      }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, analysisJobId: 'upload-e2e-job', status: 'completed', phase: 'LISTO', processedPages: 2, totalPages: 2, ocrPages: 2, percentage: 100, cacheHit: false, result: analysisResult }) });
+    });
+
+    await page.goto('/machotes?tab=responses_resources');
+    const input = page.locator('input[type="file"]');
+    await input.setInputFiles({ name: 'apelacion.txt', mimeType: 'text/plain', buffer: Buffer.from('texto') });
+    await expect(page.getByText('apelacion.txt').first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('Texto legal extraído de prueba.').first()).toBeVisible({ timeout: 10_000 });
+    expect(statusCalls).toBeGreaterThanOrEqual(2);
   });
 });

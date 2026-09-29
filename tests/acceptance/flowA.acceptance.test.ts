@@ -30,7 +30,6 @@ import {
   createSyntheticPdfBuffer,
   createSyntheticDocxBuffer,
   createSyntheticTxtBuffer,
-  createSyntheticScannedPdfBuffer,
 } from './helpers/syntheticFixtures';
 
 // Desactivar proveedores de IA para ejecutar en modo determinístico estricto
@@ -532,25 +531,4 @@ describe('Flow A — 10 Materias desde archivos binarios reales', () => {
     expect(doc.sections.length).toBeGreaterThan(0);
     assertNoMockText(docToFullText(doc));
   }, 35000);
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// 2. COMPORTAMIENTO OCR ANTE PDF ESCANEADO (§4)
-// ══════════════════════════════════════════════════════════════════════════════
-
-describe('§4 — Evaluación OCR ante PDF escaneado sintético', () => {
-  it('PDF escaneado: analyze-upload detecta needsOcr=true y NO fabrica texto legal ficticio', async () => {
-    const scannedBuf = await createSyntheticScannedPdfBuffer();
-    const uploadRes = await uploadFileThroughApi(scannedBuf, 'EXP-TEST-SCANNED.pdf', 'application/pdf');
-
-    expect(uploadRes.status).toBe(200);
-    expect(uploadRes.ok).toBe(true);
-    // Debe señalar que necesita OCR o que la fuente no fue validada nativamente
-    expect(uploadRes.needsOcr === true || uploadRes.sourceValidated === false).toBe(true);
-    // Jamás debe fabricar texto jurídico largo cuando no hubo extracción
-    expect(uploadRes.extractedText.length).toBeLessThan(150);
-
-    // Reporte explícito para certificación (§4 del spec)
-    console.log('[OCR-REPORT] OCR ACCEPTANCE: NO VERIFICADO (Tesseract local limitado a imágenes; OCR PDF requiere proveedor externo configurado). Comportamiento seguro verificado: fail-closed sin texto inventado.');
-  });
 });

@@ -123,6 +123,74 @@ function modelBodyText(model: ExportRenderModel): string {
 }
 
 describe('FASE 7 Task 5 — DOCX/PDF semantic parity', () => {
+  it('preserves intentional newline characters as Word line-break elements', async () => {
+    const baseModel = semanticModel();
+    const model: ExportRenderModel = {
+      ...baseModel,
+      sections: baseModel.sections.map((section, index) => index === 0
+        ? { ...section, paragraphs: [...section.paragraphs, paragraph('block-lines', 'PRIMERO. Línea uno.\nSEGUNDO. Línea dos.')] }
+        : section),
+    };
+
+    const artifact = await renderDocx(model, docxOptions());
+    const docxPackage = await readDocxPackage(artifact.bytes);
+    const documentXml = await docxPackage.readText('word/document.xml');
+
+    expect(documentXml.match(/<w:br(?:\s[^>]*)?\s*\/>/g) || []).toHaveLength(1);
+  });
+
+  it('keeps manually broken paragraphs left aligned in DOCX and PDF', async () => {
+    const baseModel = semanticModel();
+    const multiline = paragraph(
+      'block-manual-lines',
+      'PRIMERO. La parte actora afirma que la relación inició en la fecha descrita, extremo que requiere una postura expresa del abogado antes de incorporarse como hecho admitido.\nSEGUNDO. La respuesta a este punto queda pendiente.',
+    );
+    const model: ExportRenderModel = {
+      ...baseModel,
+      sections: [{
+        ...baseModel.sections[0]!,
+        paragraphs: [multiline],
+      }],
+    };
+
+    const [docxArtifact, pdfArtifact] = await Promise.all([
+      renderDocx(model, docxOptions()),
+      renderPdf(model, pdfOptions()),
+    ]);
+    const docxPackage = await readDocxPackage(docxArtifact.bytes);
+    const documentXml = await docxPackage.readText('word/document.xml');
+    const multilineParagraph = Array.from(documentXml.matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g))
+      .find(([xml]) => xml?.includes('PRIMERO.'))?.[0];
+    const pdfContent = Buffer.from(pdfArtifact.bytes).toString('latin1');
+
+    expect(multilineParagraph).toBeDefined();
+    expect(multilineParagraph).toContain('<w:jc w:val="left"/>');
+    expect(pdfContent).not.toMatch(/\sTw\b/);
+  });
+
+  it('omits semantic section headings when their section has no rendered content', async () => {
+    const baseModel = semanticModel();
+    const emptySection: ExportRenderModel = {
+      ...baseModel,
+      sections: [{
+        ...baseModel.sections[0]!,
+        id: 'empty-section',
+        title: 'SECCIÓN SIN DESARROLLO',
+        paragraphs: [],
+      }],
+    };
+    const [docxArtifact, pdfArtifact] = await Promise.all([
+      renderDocx(emptySection, docxOptions()),
+      renderPdf(emptySection, pdfOptions()),
+    ]);
+    const docxPackage = await readDocxPackage(docxArtifact.bytes);
+    const docxText = extractWordDocumentParagraphs(await docxPackage.readText('word/document.xml')).join('\n');
+    const pdfText = await extractPdfText(pdfArtifact.bytes);
+
+    expect(docxText).not.toContain('SECCIÓN SIN DESARROLLO');
+    expect(pdfText).not.toContain('SECCIÓN SIN DESARROLLO');
+  });
+
   it('DOCX and PDF consume the same ordered semantic model', async () => {
     const sharedModel = semanticModel();
     const before = structuredClone(sharedModel);

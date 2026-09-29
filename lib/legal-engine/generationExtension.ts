@@ -6,6 +6,8 @@
  * páginas basada en el mismo renderer PDF que se entrega al usuario.
  */
 
+import type { DraftDepthProfile } from './draftDepth';
+
 export type GenerationExtensionMode = 'standard' | 'extended-legal' | 'extended';
 
 export interface GenerationExtensionInput {
@@ -49,6 +51,20 @@ export interface SectionBudget {
   targetWords: number;
   priority: 'LOW' | 'MEDIUM' | 'HIGH';
   maxContinuations: number;
+}
+
+export function generationExtensionForDraftDepth(profile: DraftDepthProfile): GenerationExtensionInput {
+  return {
+    generationMode: 'extended-legal',
+    targetPages: profile.targetPages.preferred,
+    minPages: profile.targetPages.min,
+    maxPages: profile.targetPages.max,
+    targetWords: profile.targetWords,
+    maxCallsPerDocument: profile.maxProviderCalls,
+    maxContinuationsPerSection: Math.max(3, profile.maxPasses),
+    maxExpansionPasses: profile.maxPasses,
+    maxGeneratedTokens: profile.maxTokensPerPass,
+  };
 }
 
 const STANDARD_LIMITS = {
@@ -215,11 +231,113 @@ export function paragraphSimilarity(left: string, right: string): number {
   return intersection / (a.size + b.size - intersection);
 }
 
+export function hasInternalRepetition(text: string): boolean {
+  const words = text.toLocaleLowerCase('es-MX').match(/[\p{L}\p{N}]+/gu) || [];
+  if (words.length < 60) return false;
+  const grams: string[] = [];
+  for (let i = 0; i <= words.length - 10; i += 1) {
+    grams.push(words.slice(i, i + 10).join(' '));
+  }
+  if (grams.length === 0) return false;
+  const counts = new Map<string, number>();
+  for (const gram of grams) {
+    counts.set(gram, (counts.get(gram) || 0) + 1);
+  }
+  const repeated = Array.from(counts.values()).reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  return (repeated / grams.length) > 0.20;
+}
+
 export function hasDuplicateContent(previousText: string, nextText: string): boolean {
+  if (hasInternalRepetition(nextText)) return true;
   const previousParagraphs = previousText.split(/\n{2,}|(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/).map(normalizeParagraph).filter((p) => p.length >= 40);
   const nextParagraphs = nextText.split(/\n{2,}|(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/).map(normalizeParagraph).filter((p) => p.length >= 40);
-  if (nextParagraphs.some((paragraph) => previousParagraphs.includes(paragraph))) return true;
-  return nextParagraphs.some((next) => previousParagraphs.some((previous) => paragraphSimilarity(previous, next) >= 0.84));
+  if (nextParagraphs.length === 0) return false;
+  if (nextParagraphs.length === 1) {
+    const p = nextParagraphs[0]!;
+    return previousParagraphs.includes(p) || previousParagraphs.some((prev) => paragraphSimilarity(prev, p) >= 0.84);
+  }
+  const dupCount = nextParagraphs.filter((p) => previousParagraphs.includes(p) || previousParagraphs.some((prev) => paragraphSimilarity(prev, p) >= 0.84)).length;
+  return (dupCount / nextParagraphs.length) >= 0.5;
+}
+
+export function salvageCompleteProviderSentences(
+  text: string,
+  minimumWords = 16,
+): { text: string; acceptedWords: number; rejectedWords: number } {
+  const source = String(text || '').trim();
+  const wordCount = (value: string) => (value.match(/[\p{L}\p{N}]+/gu) || []).length;
+  if (!source) return { text: '', acceptedWords: 0, rejectedWords: 0 };
+
+  const abbreviationPattern = /(?:art|arts|fracc|frac|inc|núm|num|pág|pag|pfo|párr|parr|sr|sra|dr|dra|lic|etc|exp|c|cfr|vs)$/i;
+  const boundary = /[.!?]["'”’»)}\]]*(?=\s|$)/gu;
+  let lastCompleteBoundary = -1;
+  for (const match of source.matchAll(boundary)) {
+    const end = (match.index ?? 0) + match[0].length;
+    const punctuation = match[0][0];
+    if (punctuation === '.') {
+      const prefix = source.slice(0, end - match[0].length + 1);
+      const precedingToken = prefix.split(/\s+/u).at(-1)?.replace(/[^\p{L}]+$/gu, '') || '';
+      if (abbreviationPattern.test(precedingToken)) continue;
+      // Do not treat the dot in a decimal or a numbered list as a sentence end.
+      if (/\d$/.test(prefix.slice(0, -1)) && /^\d/.test(source.slice(end).trimStart())) continue;
+    }
+    lastCompleteBoundary = end;
+  }
+
+  const recovered = lastCompleteBoundary > 0 ? source.slice(0, lastCompleteBoundary).trim() : '';
+  const acceptedWords = wordCount(recovered);
+  const safeText = acceptedWords >= minimumWords ? recovered : '';
+  const safeAcceptedWords = safeText ? acceptedWords : 0;
+  return {
+    text: safeText,
+    acceptedWords: safeAcceptedWords,
+    rejectedWords: Math.max(0, wordCount(source) - safeAcceptedWords),
+  };
+}
+
+export function deduplicateExpansionContent(
+  existingText: string,
+  incomingText: string,
+): { text: string; acceptedWords: number; removedWords: number; removedParagraphs: number; isDuplicate: boolean } {
+  const incomingParagraphs = String(incomingText || '').split(/\n\s*\n/u).map((paragraph) => paragraph.trim()).filter(Boolean);
+  if (incomingParagraphs.length === 0) {
+    return { text: '', acceptedWords: 0, removedWords: 0, removedParagraphs: 0, isDuplicate: false };
+  }
+  if (hasInternalRepetition(incomingText)) {
+    const removedWords = (incomingText.match(/[\p{L}\p{N}]+/gu) || []).length;
+    return { text: '', acceptedWords: 0, removedWords, removedParagraphs: incomingParagraphs.length, isDuplicate: true };
+  }
+
+  const seen = String(existingText || '').split(/\n\s*\n/u).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const accepted: string[] = [];
+  let removedParagraphs = 0;
+  let removedWords = 0;
+  for (const paragraph of incomingParagraphs) {
+    const normalized = normalizeParagraph(paragraph);
+    const duplicate = seen.some((previous) => {
+      const normalizedPrevious = normalizeParagraph(previous);
+      if (normalized === normalizedPrevious) return true;
+      return normalized.length >= 40 && normalizedPrevious.length >= 40
+        && paragraphSimilarity(previous, paragraph) >= 0.84;
+    });
+    if (duplicate) {
+      removedParagraphs += 1;
+      removedWords += (paragraph.match(/[\p{L}\p{N}]+/gu) || []).length;
+      continue;
+    }
+    accepted.push(paragraph);
+    seen.push(paragraph);
+  }
+
+  const cleanText = accepted.join('\n\n');
+  const acceptedWords = (cleanText.match(/[\p{L}\p{N}]+/gu) || []).length;
+  return {
+    text: cleanText,
+    acceptedWords,
+    removedWords,
+    removedParagraphs,
+    isDuplicate: accepted.length === 0 && removedParagraphs > 0,
+  };
 }
 
 export interface ContinuationPromptInput {

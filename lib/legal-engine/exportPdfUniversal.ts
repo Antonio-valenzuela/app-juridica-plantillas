@@ -10,7 +10,7 @@ import {
   resolvePdfPageProfile,
   type PdfPageProfile,
 } from './exportPageProfiles';
-import type { GenerationTrace } from './generationTrace';
+import { recordExportWordCounts, type GenerationTrace } from './generationTrace';
 import {
   createExportManifest,
   markExportManifestRecorded,
@@ -92,6 +92,25 @@ function encodeWinAnsi(text: string): Buffer {
 
 function escapePdfLiteral(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+}
+
+function groupLineFragments(
+  fragments: readonly PlacedFragment[],
+): Array<{ fontKey: string; size: number; text: string }> {
+  const groups: Array<{ fontKey: string; size: number; text: string }> = [];
+  for (const fragment of fragments) {
+    const previous = groups[groups.length - 1];
+    if (previous && previous.fontKey === fragment.fontKey && previous.size === fragment.size) {
+      previous.text += fragment.text;
+      continue;
+    }
+    groups.push({
+      fontKey: fragment.fontKey,
+      size: fragment.size,
+      text: fragment.text,
+    });
+  }
+  return groups;
 }
 
 /* ── Fuentes estándar ────────────────────────────────────────────────────── */
@@ -231,12 +250,14 @@ function paragraphSize(paragraph: RenderParagraph): number {
   return parsePt(paragraph.style.fontSize, fallback);
 }
 
-// Times has variable glyph widths; this conservative estimate only controls
-// pagination and wrapping, never changes the semantic text emitted.
-const CHAR_FACTOR = 0.5;
+// Times has variable glyph widths. This conservative estimate is used for
+// pagination, wrapping, alignment and mixed-style cursor advances. Text is
+// still emitted as a complete line so the font performs the final spacing.
+const CHAR_FACTOR = 0.58;
+const BOLD_CHAR_FACTOR = 0.66;
 const COMPATIBILITY_TRAILING_KEEP_LINES = 36;
 function estimateWidth(text: string, size: number, bold: boolean): number {
-  return text.length * size * (bold ? CHAR_FACTOR + 0.03 : CHAR_FACTOR);
+  return text.length * size * (bold ? BOLD_CHAR_FACTOR : CHAR_FACTOR);
 }
 
 interface StyledToken {
@@ -378,10 +399,13 @@ function paragraphLines(
     ? { lines: [], paragraphBreaks: 0 }
     : lineFragments(paragraphTokens(paragraph), width);
   const fragments = wrapped.lines;
-  const align = paragraph.style.textAlign
+  const requestedAlign = paragraph.style.textAlign
     || (paragraph.role === 'TITLE' ? 'center'
       : paragraph.role === 'HEADER' ? 'right'
         : paragraph.role === 'FOOTER' ? 'center' : 'justify');
+  const align = /[\r\n]/.test(paragraph.text) && requestedAlign === 'justify'
+    ? 'left'
+    : requestedAlign;
   const lines = fragments.map((line, index) => {
     const widthUsed = lineWidth(line);
     const extra = width - widthUsed;
@@ -389,9 +413,13 @@ function paragraphLines(
     let justifyGapThousandths: number | undefined;
     if (align === 'center') x = indent + Math.max(0, extra / 2);
     if (align === 'right') x = indent + Math.max(0, extra);
-    if (align === 'justify' && index < fragments.length - 1 && extra > 0 && lineHasWhitespace(line)) {
+    if (align === 'justify' && index < fragments.length - 1 && extra > 0
+      && widthUsed >= width * 0.72 && lineHasWhitespace(line)) {
       const wordGapCount = line.reduce((count, fragment) => count + (fragment.text.match(/ /g) || []).length, 0);
-      if (wordGapCount > 0) justifyGapThousandths = -(extra / wordGapCount) * 1000 / size;
+      // Avoid extreme gaps on short residual lines. Word processors normally
+      // leave a line with only one inter-word gap left-aligned even when the
+      // paragraph itself is justified.
+      if (wordGapCount >= 2) justifyGapThousandths = -(extra / wordGapCount) * 1000 / size;
     }
     return {
       fragments: [...line],
@@ -571,19 +599,20 @@ function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): B
     const stream = new StreamBuilder();
     for (const line of pages[pageIndex]!.lines) {
       let cursorX = line.x;
-      for (const fragment of line.fragments) {
-        const escaped = escapePdfLiteral(fragment.text);
-        const fontKey = FONTS.some((font) => font.key === fragment.fontKey) ? fragment.fontKey : 'F1';
-        stream.push(`BT /${fontKey} ${fragment.size} Tf 1 0 0 1 ${cursorX.toFixed(2)} ${line.y.toFixed(2)} Tm `);
+      for (const group of groupLineFragments(line.fragments)) {
+        const escaped = escapePdfLiteral(group.text);
+        const fontKey = FONTS.some((font) => font.key === group.fontKey) ? group.fontKey : 'F1';
+        const wordSpacing = line.justifyGapThousandths !== undefined
+          ? -(line.justifyGapThousandths / 1000) * group.size
+          : 0;
+        const wordSpacingOperator = wordSpacing > 0 ? ` ${wordSpacing.toFixed(3)} Tw` : '';
+        stream.push(`BT /${fontKey} ${group.size} Tf${wordSpacingOperator} 1 0 0 1 ${cursorX.toFixed(2)} ${line.y.toFixed(2)} Tm `);
         stream.push(`(${escaped}) Tj ET\n`);
         cursorX += estimateWidth(
-          fragment.text,
-          fragment.size,
+          group.text,
+          group.size,
           fontKey === 'F2' || fontKey === 'F4',
         );
-        if (line.justifyGapThousandths !== undefined && / /.test(fragment.text)) {
-          cursorX += -(line.justifyGapThousandths / 1000) * fragment.size;
-        }
       }
     }
 
@@ -699,6 +728,9 @@ export const exportUniversalToPdf = async (
     pageProfile: resolvePdfPageProfile(),
     lawyerProfile: DEFAULT_LAWYER_PROFILE,
   });
-  if (trace) trace.exportManifest = markExportManifestRecorded(artifact.manifest);
+  if (trace) {
+    trace.exportManifest = markExportManifestRecorded(artifact.manifest);
+    recordExportWordCounts(trace, artifact.manifest);
+  }
   return Buffer.from(artifact.bytes);
 };

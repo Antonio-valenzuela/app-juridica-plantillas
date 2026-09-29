@@ -332,8 +332,8 @@ describe('FASE 3 — Matriz de Cobertura Documental y Document Plan Profundo', (
     expect(deduplicated[0].relatedFactIds).toContain('fact-3');
   });
 
-  // Test 8: Deep document plan
-  it('8. deep-document-plan: DraftingPlan tiene issuePlans estructurados y NO usa legalIssues: [sec.title]', () => {
+  // Test 8: Rich analysis is canonical; a court's unchallenged recitals are not legacy argument plans.
+  it('8. deep-document-plan: no resucita issues legacy sin vínculo jurídico rico explícito', () => {
     const sources: UploadedSourceDocument[] = [
       {
         id: 'src-amparo-issues',
@@ -350,20 +350,13 @@ describe('FASE 3 — Matriz de Cobertura Documental y Document Plan Profundo', (
     const agraviosSec = plan.sections.find((s) => s.title === 'AGRAVIOS');
     expect(agraviosSec).toBeDefined();
 
-    // Invariante 3L: legalIssues NO debe ser [sec.title]
-    expect(agraviosSec?.legalIssues).not.toEqual(['AGRAVIOS']);
-    expect(agraviosSec?.legalIssues.length).toBeGreaterThan(0);
-
-    // Debe contener issuePlans estructurados
-    expect(agraviosSec?.issuePlans).toBeDefined();
-    expect(agraviosSec?.issuePlans!.length).toBeGreaterThanOrEqual(2);
-
-    for (const ip of agraviosSec!.issuePlans!) {
-      expect(ip.title).toBeDefined();
-      expect(ip.counterargumentStrategy).toBeDefined();
-      expect(ip.authorityIds).toEqual([]); // CERO INVENTADAS
-      expect(ip.expectedDepth).toBeDefined();
-    }
+    // La fuente contiene considerandos, pero no un argumento adoptado ni una
+    // relación explícita que los convierta en una cuestión controvertida.
+    // No se deben recuperar los LegalIssue legacy calculados fuera del Rich Matrix.
+    expect(plan.legalIssueMatrix?.sourceMode).toBe('RICH');
+    expect(plan.legalIssueMatrix?.issues).toEqual([]);
+    expect(agraviosSec?.legalIssues).toEqual([]);
+    expect(agraviosSec?.issuePlans).toBeUndefined();
   });
 
   // Test 9: Contestacion plan

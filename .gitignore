@@ -42,3 +42,16 @@ docs/superpowers/plans/2026-09-13-legal-research-strategic-drafting-foundation-p
 docs/superpowers/plans/2026-09-13-strategic-analyzer-model-capability.md
 docs/superpowers/plans/2026-09-13-strategic-challenge-discovery-foundation.md
 docs/superpowers/plans/2026-09-13-strategic-legal-drafting-mvp.md
+
+# Local audit runs contain real-case source material and generated evidence.
+/audit/
+/.next-phase3-audit-*/
+/REsultados_para_subir_2026-09-27.zip
+/FINAL_LEGAL_READINESS_REPORT.*
+/GENERATOR_CERTIFICATION_REPORT.md
+/GENERATOR_FINAL_GAP_AUDIT.md
+/PHASE2_SOURCE_GROUNDING_REPORT.md
+/PHASE4_AUTONOMOUS_LEGAL_DRAFTING_REPORT.md
+/reporte_cambios.txt
+/scripts/verify-factual-source-grounding.mts
+/scripts/audit/__pycache__/

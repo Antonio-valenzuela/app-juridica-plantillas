@@ -1,5 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const { requireLawyerAccess, extractDocument, parseDocumentWithNemotron } = vi.hoisted(() => ({
   requireLawyerAccess: vi.fn(),
@@ -39,7 +42,11 @@ function makeInvalidPdfRequest() {
   return new NextRequest('http://localhost/api/templates/analyze-upload', { method: 'POST', body: formData });
 }
 
-beforeEach(() => {
+let cacheDir = '';
+
+beforeEach(async () => {
+  cacheDir = await mkdtemp(join(tmpdir(), 'lex-upload-auth-'));
+  process.env.UPLOAD_ANALYSIS_CACHE_DIR = cacheDir;
   vi.clearAllMocks();
   parseDocumentWithNemotron.mockResolvedValue({ ok: false, structuredDocument: null });
   extractDocument.mockResolvedValue({
@@ -59,7 +66,13 @@ beforeEach(() => {
     avgCharsPerPage: 300,
     warnings: [],
     status: 'READY',
+    analysisMetrics: { documentAnalysisDurationMs: 1, nativeExtractionDurationMs: 1, ocrPreparationDurationMs: 0, ocrDurationMs: 0, ocrPages: 0, totalPages: 1, cacheHit: false, extractionStatus: 'READY', concurrency: 2 },
   });
+});
+
+afterEach(async () => {
+  delete process.env.UPLOAD_ANALYSIS_CACHE_DIR;
+  await rm(cacheDir, { recursive: true, force: true });
 });
 
 describe('POST /api/templates/analyze-upload authorization boundary', () => {

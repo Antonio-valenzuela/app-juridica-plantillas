@@ -9,7 +9,7 @@ import { runLegalAI } from '@/lib/ai/orchestrator';
  */
 describe('P4 — NVIDIA REAL (no mock)', () => {
   const hasKey = !!process.env.NVIDIA_API_KEY?.trim();
-  const shouldRunReal = hasKey && process.env.NVIDIA_REAL_TEST !== 'false' && process.env.CI !== 'true';
+  const shouldRunReal = hasKey && process.env.RUN_LIVE_PROVIDER_TESTS === 'true' && process.env.NVIDIA_REAL_TEST === 'true' && process.env.CI !== 'true';
 
   it.skipIf(!shouldRunReal)('NVIDIA disponible → genera operación jurídica real y registra metadata', async () => {
     const origChain = process.env.AI_PROVIDER_CHAIN;

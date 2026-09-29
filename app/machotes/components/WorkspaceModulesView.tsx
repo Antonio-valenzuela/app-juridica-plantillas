@@ -8,6 +8,7 @@ import { AGENDA_CHANGED_EVENT, readAgendaEvents, writeAgendaEvents, type AgendaE
 import type { LegalWorkspaceCaseContext } from '@/context/LegalWorkspaceContext';
 import { LocalImportPanel } from './LocalImportPanel';
 import { AnalyticsPanel } from './AnalyticsPanel';
+import { LexIcon, type LexIconName } from '@/components/layout/LexIcon';
 
 export type WorkspaceModule =
   | 'inicio'
@@ -36,7 +37,20 @@ const card = 'rounded-2xl border border-slate-200 bg-white shadow-[0_5px_18px_rg
 const input = 'h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-[#0B2545] focus:bg-white focus:ring-2 focus:ring-[#0B2545]/10';
 
 function Icon({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <span aria-hidden="true" className={`material-symbols-outlined ${className}`}>{children}</span>;
+  const iconMap: Record<string, LexIconName> = {
+    add: 'plus',
+    article: 'document',
+    description: 'document',
+    error: 'help',
+    folder_open: 'folder',
+    folder_special: 'folder',
+    gavel: 'scale',
+    menu_book: 'book',
+    progress_activity: 'calendar',
+    search: 'search',
+  };
+  const name = typeof children === 'string' ? iconMap[children] || 'document' : 'document';
+  return <LexIcon aria-hidden="true" name={name} size={18} className={className} />;
 }
 
 function authorityTypeLabel(type: string): string {
@@ -56,7 +70,7 @@ function sourceLabel(source?: string): string {
 
 function Header({ title, eyebrow, description, action }: { title: string; eyebrow: string; description: string; action?: React.ReactNode }) {
   return (
-    <div className="mb-5 flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <div className="workspace-page-header mb-5 flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p className="mb-1 text-[11px] font-bold uppercase tracking-[.18em] text-[#B58A5A]">{eyebrow}</p>
         <h1 className="text-3xl font-extrabold tracking-tight text-[#0B2545]">{title}</h1>
@@ -144,9 +158,12 @@ function RealExpedientesView({ onCaseSelected, onOpenCase }: Pick<WorkspaceModul
       setLoading(false);
     }
   }, []);
+  // The persisted cases fetch must start when the view mounts.
+  /* eslint-disable react-hooks/set-state-in-effect -- async persisted-case hydration is intentional. */
   useEffect(() => {
     void loadCases();
   }, [loadCases]);
+  /* eslint-enable react-hooks/set-state-in-effect */
   const matters = useMemo(() => Array.from(new Set(cases.map((item) => item.matter).filter((item): item is string => Boolean(item)))).sort(), [cases]);
   const filteredCases = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -200,6 +217,7 @@ function RealTermsView({ activeCase }: { activeCase?: LegalWorkspaceCaseContext 
   const [selectedAgendaDate, setSelectedAgendaDate] = useState<string | null>(null);
   const storageKey = workspaceTermStorageKey(activeCase?.caseId);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- restore the user-local term form after storage hydration. */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -216,6 +234,7 @@ function RealTermsView({ activeCase }: { activeCase?: LegalWorkspaceCaseContext 
       setCalculatedAt(saved.calculatedAt || null);
     } catch { /* Un archivo local inválido no bloquea el cálculo actual. */ }
   }, [storageKey]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const refreshAgenda = () => setAgenda(readAgendaEvents());
@@ -382,7 +401,24 @@ function RealHelpView() {
 }
 
 function WorkspaceFrame({ title, eyebrow, description, action, children }: { title: string; eyebrow: string; description: string; action?: string; children: React.ReactNode }) {
-  return <div className="mx-auto w-full max-w-[1600px] px-5 py-6 md:px-8"><Header title={title} eyebrow={eyebrow} description={description} action={action ? <button type="button" className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0B2545] px-4 text-sm font-bold text-white shadow-sm hover:bg-[#081d39]"><Icon>add</Icon>{action}</button> : undefined} />{title === 'Inicio' && <UserFacingSystemStatusPanel />}{children}</div>;
+  const contentClass = title === 'Jurisprudencia SCJN'
+    ? 'workspace-research-grid'
+    : title === 'Biblioteca Jurídica'
+      ? 'workspace-library-grid'
+      : '';
+
+  return (
+    <div className="mx-auto w-full max-w-[1600px] px-5 py-6 md:px-8">
+      <Header
+        title={title}
+        eyebrow={eyebrow}
+        description={description}
+        action={action ? <button type="button" className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0B2545] px-4 text-sm font-bold text-white shadow-sm hover:bg-[#081d39]"><Icon>add</Icon>{action}</button> : undefined}
+      />
+      {title === 'Inicio' && <UserFacingSystemStatusPanel />}
+      <div className={contentClass}>{children}</div>
+    </div>
+  );
 }
 
 export function WorkspaceModulesView({ mode, onNavigate, onCaseSelected, onOpenCase, activeCase }: WorkspaceModulesViewProps) {

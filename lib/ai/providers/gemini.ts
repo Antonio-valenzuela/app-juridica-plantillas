@@ -57,6 +57,9 @@ export function sanitizeGeminiResponseSchema(schema: Record<string, unknown>): R
   );
 }
 
+let lastGeminiCallTime = 0;
+const MIN_GEMINI_INTERVAL_MS = 3200;
+
 export async function generateGeminiCompletion(
   options: GeminiCompletionOptions
 ): Promise<GeminiCompletionResult> {
@@ -118,6 +121,13 @@ export async function generateGeminiCompletion(
   console.log(`[GEMINI] REQUEST ${JSON.stringify(sanitizedRequestLog)}`);
 
   try {
+    const now = Date.now();
+    const timeSinceLast = now - lastGeminiCallTime;
+    if (timeSinceLast < MIN_GEMINI_INTERVAL_MS) {
+      await new Promise((resolve) => setTimeout(resolve, MIN_GEMINI_INTERVAL_MS - timeSinceLast));
+    }
+    lastGeminiCallTime = Date.now();
+
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -134,6 +144,14 @@ export async function generateGeminiCompletion(
     if (!response.ok) {
       const errText = await response.text();
       const sanitizedBody = redactSecrets(errText.slice(0, 2000));
+      if (response.status === 429) {
+        console.warn(`[GEMINI] 429 RATE_LIMIT detectada. Delegando inmediatamente al siguiente provider...`);
+        throw new GeminiCompletionError(
+          `[Gemini Provider] HTTP 429: ${sanitizedBody}`,
+          429,
+          "RATE_LIMIT"
+        );
+      }
       console.error(
         `[GEMINI] GEMINI_HTTP_ERROR ${JSON.stringify({
           status: response.status,

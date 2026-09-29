@@ -1,4 +1,5 @@
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
+import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { GenerationTask } from './generationTasks';
 import type { CaseAnalysis } from './caseAnalysis';
 import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } from './coverageMatrix';
@@ -33,7 +34,7 @@ import {
 } from './issueDraftResult';
 import { evaluateIssueDraftResult, toBlockQualityEvaluation } from './semanticEvaluator';
 import { stableResearchId } from './legal-research/canonical';
-import type { IssueResearchGenerationTrace } from './generationTrace';
+import type { GenerationTraceContext, IssueResearchGenerationTrace } from './generationTrace';
 import { getSectionContentRole } from './documentSectionContracts';
 import type { SectionContract } from './documentAssemblyTypes';
 export { evaluateIssueDraftResult } from './semanticEvaluator';
@@ -64,6 +65,7 @@ export interface IssueResearchExecutionInputs {
 }
 
 const FORMAL_SECTION_TYPES = new Set(['header', 'identity', 'closing', 'signature']);
+const SAFE_REVIEW_DRAFT_TASK_TYPES = new Set(['FACT_RESPONSE', 'CLAIM', 'EVIDENCE', 'ISSUE', 'SECTION_SUPPORT']);
 
 function taskTypeOf(task: GenerationTask): string | undefined {
   return task.taskType || task.type;
@@ -90,8 +92,11 @@ function blockedEffectiveEligibility(
 
 function canonicalBlockerReason(issue: LegalIssueItem): string | undefined {
   if (issue.status === 'GENERATABLE_REQUIRES_REVIEW') return undefined;
-  if (issue.status === 'BLOCKED_BY_CONFLICT' || (issue.conflictIds.length > 0 && issue.status !== 'READY_FOR_GENERATION')) return 'BLOCKED_BY_CONFLICT';
-  if (issue.status === 'NEEDS_CLIENT_POSITION' || (issue.clientPositionStatus === 'UNKNOWN' && issue.status !== 'READY_FOR_GENERATION')) return 'BLOCKED_BY_CLIENT_POSITION';
+  if (issue.status === 'BLOCKED_BY_CONFLICT') return 'BLOCKED_BY_CONFLICT';
+  if (issue.status === 'NEEDS_CLIENT_POSITION' || (issue.clientPositionStatus === 'UNKNOWN' && issue.status !== 'READY_FOR_GENERATION')) {
+    if (issue.relationStatus === 'EXPLICIT') return undefined;
+    return 'BLOCKED_BY_CLIENT_POSITION';
+  }
   if (issue.relationStatus === 'UNLINKED' || issue.status === 'UNLINKED') return 'UNLINKED_COVERAGE_REQUIRES_REVIEW';
   if (issue.status === 'UNKNOWN') return 'UNKNOWN_ISSUE_STATUS_REQUIRES_REVIEW';
   return undefined;
@@ -205,6 +210,9 @@ export function resolveEffectiveIssueGenerationEligibility(input: {
     const blocker = canonicalBlockerReason(issue);
     if (blocker) return blockedEffectiveEligibility(issue, blocker);
     if (issue.relationStatus !== 'EXPLICIT') return blockedEffectiveEligibility(issue, 'RELATION_NOT_EXPLICIT');
+    if (issue.status === 'NEEDS_CLIENT_POSITION' && !SAFE_REVIEW_DRAFT_TASK_TYPES.has(taskType || '')) {
+      return blockedEffectiveEligibility(issue, 'MISSING_CLIENT_POSITION_REVIEW_ONLY_TASK');
+    }
   }
 
   const generationClass = classifyIssueGeneration({ issue, taskType });
@@ -212,8 +220,11 @@ export function resolveEffectiveIssueGenerationEligibility(input: {
     if (researchBundle && derivedReadiness?.researchReadiness === 'READY_FOR_GENERATION_WITH_VERIFIED_RESEARCH') {
       return resolveResearchEligibility({ issue: issue!, derivedReadiness, researchBundle, formal, taskType });
     }
-    const effectiveStatus = issue?.status === 'GENERATABLE_REQUIRES_REVIEW' ? 'GENERATABLE_REQUIRES_REVIEW' : 'READY_FOR_GENERATION';
-    const reason = 'READY_SOURCE_GROUNDED';
+    const requiresReview = issue?.status === 'GENERATABLE_REQUIRES_REVIEW' || issue?.status === 'NEEDS_CLIENT_POSITION';
+    const effectiveStatus = requiresReview ? 'GENERATABLE_REQUIRES_REVIEW' : 'READY_FOR_GENERATION';
+    const reason = issue?.status === 'NEEDS_CLIENT_POSITION'
+      ? 'MISSING_CLIENT_POSITION_SAFE_DRAFT'
+      : issue?.status === 'GENERATABLE_REQUIRES_REVIEW' ? 'SOURCE_BACKED_DRAFT_REQUIRES_REVIEW' : 'READY_SOURCE_GROUNDED';
     return {
       eligible: true,
       legalIssueId: issue?.id as any,
@@ -294,6 +305,14 @@ export function resolveIssueEligibility(
   if (taskTypeOf(task) === 'LEGAL_RESEARCH') return { eligible: false, legalIssueId: issue.id, status: issue.status, reason: 'LEGAL_RESEARCH_PLAN_ONLY' };
   if (issue.status === 'READY_FOR_GENERATION' || issue.status === 'GENERATABLE_REQUIRES_REVIEW') {
     return { eligible: true, legalIssueId: issue.id, status: issue.status, reason: issue.status };
+  }
+  if (issue.status === 'NEEDS_CLIENT_POSITION' && SAFE_REVIEW_DRAFT_TASK_TYPES.has(taskTypeOf(task) || '')) {
+    return {
+      eligible: true,
+      legalIssueId: issue.id,
+      status: issue.status,
+      reason: 'MISSING_CLIENT_POSITION_SAFE_DRAFT',
+    };
   }
   return { eligible: false, legalIssueId: issue.id, status: issue.status, reason: `ISSUE_STATUS_${issue.status}` };
 }
@@ -428,15 +447,15 @@ export interface IssuePrompt {
 }
 
 const ISSUE_PROMPT_VERSIONS: Record<LegalIssueType, string> = {
-  CLAIM_ELEMENT: 'CLAIM_ELEMENT_V1',
-  FACT_DISPUTE: 'FACT_DISPUTE_V1',
-  EVIDENCE_RELEVANCE: 'EVIDENCE_RELEVANCE_V1',
-  EVIDENCE_SUFFICIENCY: 'EVIDENCE_SUFFICIENCY_V1',
-  SOURCE_ARGUMENT: 'SOURCE_ARGUMENT_V1',
-  PROCEDURAL_ISSUE: 'ISSUE_DRAFT_V1',
-  PETITION_SUPPORT: 'PETITION_SUPPORT_V1',
-  AUTHORITY_RESEARCH: 'ISSUE_DRAFT_V1',
-  CONFLICT_DEPENDENCY: 'ISSUE_DRAFT_V1',
+  CLAIM_ELEMENT: 'CLAIM_ELEMENT_V2',
+  FACT_DISPUTE: 'FACT_DISPUTE_V2',
+  EVIDENCE_RELEVANCE: 'EVIDENCE_RELEVANCE_V2',
+  EVIDENCE_SUFFICIENCY: 'EVIDENCE_SUFFICIENCY_V2',
+  SOURCE_ARGUMENT: 'SOURCE_ARGUMENT_V2',
+  PROCEDURAL_ISSUE: 'ISSUE_DRAFT_V2',
+  PETITION_SUPPORT: 'PETITION_SUPPORT_V2',
+  AUTHORITY_RESEARCH: 'ISSUE_DRAFT_V2',
+  CONFLICT_DEPENDENCY: 'ISSUE_DRAFT_V2',
 };
 
 const ISSUE_CONTEXT_SERIALIZATION_VERSION = 'ISSUE_CONTEXT_V2';
@@ -472,7 +491,8 @@ function contextHash(value: unknown): string {
 
 function uniqueProvenance(entries: SourceProvenance[]): SourceProvenance[] {
   const seen = new Set<string>();
-  return entries.filter((entry) => {
+  return entries.filter(Boolean).filter((entry) => {
+    if (!entry?.sourceId) return false;
     const key = JSON.stringify([
       entry.sourceId,
       entry.page,
@@ -702,6 +722,14 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
     AUTHORITY_RESEARCH: 'Identifica el requisito de investigación sin afirmar una regla no verificada.',
     CONFLICT_DEPENDENCY: 'Describe la dependencia conflictiva sin resolverla ni inventar una postura.',
   }[pack.legalIssue.issueType];
+  const targetWords = Number.isFinite(task.targetWords) && Number(task.targetWords) > 0
+    ? Math.ceil(Number(task.targetWords))
+    : undefined;
+  const lengthDirective = targetWords ? [
+    `LENGTH TARGET: desarrolla aproximadamente ${targetWords} palabras sustantivas y específicas para esta issue; la salida no es completa si queda por debajo de ${Math.ceil(targetWords * 0.8)} palabras.`,
+    'Cada párrafo debe aportar una función distinta prevista por el contrato de salida; no repitas, no parafrasees en bucle ni agregues relleno para alcanzar la extensión.',
+    'La extensión nunca autoriza hechos, pruebas, posturas ni autoridades no incluidas en el contexto. Si el soporte permitido no alcanza, conserva una respuesta más breve, añade UNSUPPORTED_REQUIRED_ELEMENT o el requisito pendiente aplicable y no simules completitud.',
+  ] : [];
   const systemPrompt = [
     'Genera únicamente un IssueDraftResult estructurado para una sola LegalIssue.',
     'Devuelve exactamente un objeto JSON y la respuesta completa debe ser JSON válido.',
@@ -715,11 +743,18 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
     'No inventes derecho, hechos materiales, autoridades, evidencia, EvidenceOffer ni postura de cliente.',
     'Conserva SOURCE_CITED como no verificado y usa REQUIRES_LEGAL_RESEARCH cuando corresponda.',
     'Si falta información, declara el requisito pendiente en lugar de completarlo.',
+    ...lengthDirective,
     ...(pack.verifiedResearch ? [
       'VERIFIED AUTHORITIES AVAILABLE: usa únicamente las authorities verificadas incluidas en verifiedResearch.',
       'Usa cada proposición verificada solamente con facts/evidence allowlisted para formular la aplicación jurídica.',
       'Conserva supportLevel, temporalidad, jurisdicción y limitations; no afirmes obligatoriedad no respaldada por bindingCharacter.',
       'No inventes una autoridad ni conviertas una proposición jurídica en un hecho del expediente.',
+    ] : []),
+    ...((!pack.clientPosition || pack.clientPosition.status === 'UNKNOWN') ? [
+      'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
+      'No existe postura confirmada de la parte demandada para este punto.',
+      'ESTÁ PERMITIDO ÚNICAMENTE: cuestionar la acreditación probatoria de lo afirmado por la contraria, invocar la carga de la prueba, señalar falta de precisión o suficiencia, analizar presupuestos legales, alcance probatorio y formular argumentos subsidiarios estrictamente jurídicos.',
+      'ESTÁ TERMINANTEMENTE PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad, inventar una versión fáctica del demandado (como contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados), inventar documentos inexistentes, fechas no mencionadas o causas de terminación laboral no comprobadas en autos, o inventar acontecimientos materiales.',
     ] : []),
     strategy,
   ].join('\n');
@@ -733,8 +768,13 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
       question: pack.legalIssue.question,
       contextHash: pack.contextHash,
       taskType: task.taskType || task.type,
+      ...(targetWords ? { targetWords, minimumSubstantiveWords: Math.ceil(targetWords * 0.8) } : {}),
       issueContext: pack,
     }),
+    `IDS EXACTOS PERMITIDOS para sourceEntityIds: ${sourceEntityAllowList(pack).join(', ') || '[]'}`,
+    `IDS EXACTOS PERMITIDOS para authorityMentionIds: ${pack.authorities.map((item) => item.id).join(', ') || '[]'}`,
+    `IDS EXACTOS PERMITIDOS para verifiedAuthorityIds: ${pack.verifiedResearch?.authorities.map((item) => item.id).join(', ') || '[]'}`,
+    'No crees ni modifiques identificadores; copia únicamente los IDs exactos anteriores y devuelve [] si no corresponde vincular uno.',
     'Do not reproduce input fields as output. In particular, question and evidence metadata are context only.',
     'FINAL OUTPUT CONTRACT:',
     outputContract,
@@ -945,6 +985,7 @@ function evidenceConsolidationMetadataKey(block: import('./types').ContentBlock)
 export function assembleIssueDraftBlocks(
   section: DocumentNode,
   outcomes: IssueGenerationOutcome[],
+  trace?: GenerationTraceContext,
 ): { blocks: import('./types').ContentBlock[]; warnings: string[] } {
   void section;
   const ordered = outcomes
@@ -1001,6 +1042,14 @@ export function assembleIssueDraftBlocks(
           ...(block.issueDraftResultHashes || [block.issueDraftResultHash].filter(Boolean) as string[]),
         ])];
         warnings.push(`EVIDENCE_DUPLICATE_CONSOLIDATED:${outcome.legalIssueId}`);
+        trace?.recordWordAccounting({
+          sectionId: section.id,
+          rejectedWords: countWords(block.text || ''),
+          dedupRemovedWords: countWords(block.text || ''),
+          reason: 'EVIDENCE_DUPLICATE_CONSOLIDATED',
+          lossStage: 'deduplication',
+          taskId: outcome.taskId,
+        });
         continue;
       }
       stateSiblings.push(block);
@@ -1009,12 +1058,65 @@ export function assembleIssueDraftBlocks(
     const key = `${(block.legalIssueIds || [outcome.legalIssueId]).join(',')}|${normalizedText}`;
     if (seenByIssueAndText.has(key)) {
       warnings.push(`DUPLICATE_ISSUE_BLOCK:${outcome.legalIssueId}`);
+      trace?.recordWordAccounting({
+        sectionId: section.id,
+        rejectedWords: countWords(block.text || ''),
+        dedupRemovedWords: countWords(block.text || ''),
+        reason: 'DUPLICATE_ISSUE_BLOCK',
+        lossStage: 'deduplication',
+        taskId: outcome.taskId,
+      });
       continue;
     }
     seenByIssueAndText.add(key);
     blocks.push(block);
   }
   return { blocks, warnings };
+}
+
+const ISSUE_PROSE_FIELDS = new Set([
+  'thesis', 'factualDevelopment', 'evidentiaryDevelopment', 'legalDevelopment',
+  'counterPosition', 'application', 'conclusion',
+]);
+
+function countWords(text: string): number {
+  return (text.match(/[\p{L}\p{N}]+/gu) || []).length;
+}
+
+function proseMetrics(value: unknown): { words: number; chars: number } {
+  const prose: string[] = [];
+  const collect = (current: unknown, field?: string): void => {
+    if (typeof current === 'string') {
+      if (field && ISSUE_PROSE_FIELDS.has(field)) prose.push(current);
+      return;
+    }
+    if (Array.isArray(current)) {
+      current.forEach((child) => collect(child, field));
+      return;
+    }
+    if (current && typeof current === 'object') {
+      for (const [key, child] of Object.entries(current as Record<string, unknown>)) {
+        if (ISSUE_PROSE_FIELDS.has(key)) collect(child, key);
+        else if (prose.length === 0 && ['output', 'draft', 'result', 'content'].includes(key)) collect(child);
+      }
+    }
+  };
+  collect(value);
+  const text = prose.join('\n');
+  return { words: countWords(text), chars: text.length };
+}
+
+function providerDraftMetrics(response: AIProviderResult | undefined): { words: number; chars: number } {
+  if (!response || !response.success || response.isLegalAiContent === false) return { words: 0, chars: 0 };
+  const provider = String(response.providerActuallyUsed || response.provider || '').toLowerCase();
+  if (!['nvidia', 'gemini', 'groq'].includes(provider)) return { words: 0, chars: 0 };
+  const responseText = String(response.content || '');
+  const responseChars = responseText.length || (response.structuredOutput ? JSON.stringify(response.structuredOutput).length : 0);
+  try {
+    return { words: proseMetrics(parseIssueProviderOutput(response)).words, chars: responseChars };
+  } catch {
+    return { words: countWords(responseText), chars: responseChars };
+  }
 }
 
 export class IssueOutputError extends Error {
@@ -1151,7 +1253,7 @@ export async function executeReadyIssueTasks(
   const ordered = [...tasks].sort(compareIssueTasks);
   const results: IssueGenerationOutcome[] = [];
   let cursor = 0;
-  const limit = clampConcurrency(options.maxConcurrency ?? 3);
+  const limit = clampConcurrency(options.maxConcurrency ?? 2);
   const worker = async () => {
     while (cursor < ordered.length) {
       const task = ordered[cursor++];
@@ -1252,6 +1354,20 @@ export async function executeIssueScopedGeneration(
       result?: import('./issueDraftResult').IssueDraftResult,
       evaluation?: unknown,
     ): void => {
+      const generated = providerDraftMetrics(response);
+      const validated = ['PROVIDER_SUCCESS', 'ACCEPTED', 'SEMANTIC_FAILED'].includes(outcome) && result
+        ? proseMetrics(result)
+        : { words: 0, chars: 0 };
+      const rejectedWords = ['VALIDATION_FAILED', 'SEMANTIC_FAILED'].includes(outcome) ? generated.words : 0;
+      const evaluationRecord = evaluation && typeof evaluation === 'object'
+        ? evaluation as { hardFailReasons?: string[]; deficiencies?: string[] }
+        : undefined;
+      const lossReason = rejectedWords > 0
+        ? validation?.errors.join('; ')
+          || evaluationRecord?.hardFailReasons?.join('; ')
+          || evaluationRecord?.deficiencies?.join('; ')
+          || (outcome === 'SEMANTIC_FAILED' ? 'SEMANTIC_EVALUATION_FAILED' : 'PROVIDER_OUTPUT_REJECTED')
+        : undefined;
       options.trace?.recordIssueGenerationAttempt({
         legalIssueId: eligibility.legalIssueId!,
         taskId: task.id,
@@ -1274,6 +1390,11 @@ export async function executeIssueScopedGeneration(
               estimated: false,
             }
           : { promptTokens: null, completionTokens: null, totalTokens: null },
+        providerGeneratedWords: generated.words,
+        providerGeneratedChars: generated.chars,
+        validatedWords: validated.words,
+        rejectedWords,
+        lossReason,
         startedAt,
         completedAt: new Date().toISOString(),
         durationMs: Math.max(0, Date.now() - startedMs),
@@ -1292,6 +1413,7 @@ export async function executeIssueScopedGeneration(
       maxTokens: task.tokenBudget,
       outputSchema: activePrompt.outputSchema,
       requestId: `issue:${task.id}:attempt:${attemptNumber}`,
+      ...caseProviderFlags(doc),
     } as AIRequest & { attempt: number; contextHash: string; promptVersion: string };
 
     let response: AIProviderResult;
@@ -1312,7 +1434,7 @@ export async function executeIssueScopedGeneration(
     const currentAttempt = issueAttempt(task, activePrompt, attemptNumber, response, 'PROVIDER_COMPLETED');
     const attempts = [...previousAttempts, currentAttempt];
     const isFallback = response.origin === 'LOCAL_PLACEHOLDER'
-      || response.providerActuallyUsed === 'local'
+      || (response.providerActuallyUsed === 'local' && response.origin !== 'AI_GENERATED_LEGAL_CONTENT')
       || response.isLegalAiContent === false
       || !response.success;
     if (isFallback) {

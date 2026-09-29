@@ -149,6 +149,46 @@ export interface TaskExecutionTrace {
   error?: string;
 }
 
+export interface SectionWordAccountingLoss {
+  stage: 'provider-validation' | 'semantic-review' | 'deduplication' | 'assembly' | 'export';
+  reason: string;
+  words: number;
+  taskId?: string;
+}
+
+export interface SectionWordAccounting {
+  sectionId: string;
+  plannedWords: number;
+  providerGeneratedWords: number;
+  providerGeneratedChars: number;
+  validatedWords: number;
+  rejectedWords: number;
+  dedupRemovedWords: number;
+  materializedWords: number;
+  admittedWords: number;
+  assembledWords: number;
+  exportedWords: number;
+  losses: SectionWordAccountingLoss[];
+}
+
+export interface WordAccountingUpdate {
+  sectionId: string;
+  plannedWords?: number;
+  providerGeneratedWords?: number;
+  providerGeneratedChars?: number;
+  validatedWords?: number;
+  rejectedWords?: number;
+  dedupRemovedWords?: number;
+  materializedWords?: number;
+  admittedWords?: number;
+  assembledWords?: number;
+  exportedWords?: number;
+  reason?: string;
+  lossStage?: SectionWordAccountingLoss['stage'];
+  taskId?: string;
+  mode?: 'ADD' | 'SET';
+}
+
 export interface IssueResearchGenerationTrace {
   requestId?: string;
   researchHash?: string;
@@ -172,6 +212,11 @@ export interface IssueGenerationAttemptTrace {
   resultHash?: string;
   evaluation?: unknown;
   usage: IssueTokenUsage;
+  providerGeneratedWords?: number;
+  providerGeneratedChars?: number;
+  validatedWords?: number;
+  rejectedWords?: number;
+  lossReason?: string;
   research?: IssueResearchGenerationTrace;
   startedAt: string;
   completedAt?: string;
@@ -181,6 +226,7 @@ export interface IssueGenerationAttemptTrace {
 export interface GenerationTaskTrace extends TaskExecutionTrace {
   plannedAt: string;
   objective?: string;
+  targetWords?: number;
 }
 
 export interface CoverageTransitionTrace {
@@ -285,6 +331,8 @@ export interface GenerationTrace {
     semanticScore?: number;
     genericityClass?: string;
     research?: IssueResearchGenerationTrace;
+    sectionId?: string;
+    wordCount: number;
     textHash: string;
   }>;
   qualityGateResult?: QualityGateResult;
@@ -297,6 +345,7 @@ export interface GenerationTrace {
   };
   exportMetadata?: ExportTrace;
   exportManifest?: ExportManifest;
+  wordAccounting: SectionWordAccounting[];
   warnings: string[];
   errors: string[];
 }
@@ -324,9 +373,10 @@ export interface GenerationTraceContext {
   recordTaskPlanned(task: GenerationTask, contextPack?: unknown): void;
   recordTaskExecution(entry: TaskExecutionTrace): void;
   recordIssueGenerationAttempt(entry: IssueGenerationAttemptTrace): void;
+  recordWordAccounting(entry: WordAccountingUpdate): void;
   recordCoverageTransition(entry: CoverageTransitionTrace): void;
   recordSemanticEvaluation(value: BlockQualityEvaluation): void;
-  recordDraftBlock(block: ContentBlock, research?: IssueResearchGenerationTrace): void;
+  recordDraftBlock(block: ContentBlock, research?: IssueResearchGenerationTrace, sectionIdOverride?: string): void;
   recordQualityGate(result: QualityGateResult): void;
   recordDocumentAssembly(result: DocumentAssemblyResult): void;
   recordAssembly(entry: AssemblyParagraphTrace): void;
@@ -422,6 +472,76 @@ function copyResearchTrace(value: IssueResearchGenerationTrace | undefined): Iss
   }) as IssueResearchGenerationTrace;
 }
 
+function wordCount(text: string): number {
+  return (text.match(/[\p{L}\p{N}]+/gu) || []).length;
+}
+
+function sectionWordAccounting(trace: GenerationTrace, sectionId: string): SectionWordAccounting {
+  const existing = trace.wordAccounting.find((entry) => entry.sectionId === sectionId);
+  if (existing) return existing;
+  const created: SectionWordAccounting = {
+    sectionId,
+    plannedWords: 0,
+    providerGeneratedWords: 0,
+    providerGeneratedChars: 0,
+    validatedWords: 0,
+    rejectedWords: 0,
+    dedupRemovedWords: 0,
+    materializedWords: 0,
+    admittedWords: 0,
+    assembledWords: 0,
+    exportedWords: 0,
+    losses: [],
+  };
+  trace.wordAccounting.push(created);
+  return created;
+}
+
+function applyWordAccountingUpdate(trace: GenerationTrace, update: WordAccountingUpdate): void {
+  const accounting = sectionWordAccounting(trace, update.sectionId);
+  const mode = update.mode || 'ADD';
+  const stages = [
+    'plannedWords', 'providerGeneratedWords', 'providerGeneratedChars', 'validatedWords',
+    'rejectedWords', 'dedupRemovedWords', 'materializedWords', 'admittedWords', 'assembledWords', 'exportedWords',
+  ] as const;
+  for (const stage of stages) {
+    const value = update[stage];
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    accounting[stage] = mode === 'SET' ? Math.max(0, value) : accounting[stage] + Math.max(0, value);
+  }
+  if (update.reason && update.lossStage && (update.rejectedWords || update.dedupRemovedWords)) {
+    accounting.losses.push({
+      stage: update.lossStage,
+      reason: update.reason,
+      words: Math.max(0, update.rejectedWords ?? update.dedupRemovedWords ?? 0),
+      ...(update.taskId ? { taskId: update.taskId } : {}),
+    });
+  }
+}
+
+export function recordExportWordCounts(trace: GenerationTrace, manifest: ExportManifest): void {
+  for (const section of manifest.sectionWordCounts || []) {
+    const accounting = sectionWordAccounting(trace, section.sectionId);
+    const exportLoss = Math.max(0, accounting.assembledWords - section.wordCount);
+    const exportReason = manifest.omittedBlockIds.length > 0
+      ? `EXPORT_OMITTED_BLOCKS:${manifest.omittedBlockIds.join(',')}`
+      : 'EXPORT_WORD_COUNT_MISMATCH';
+    const alreadyRecorded = accounting.losses.some((loss) => (
+      loss.stage === 'export' && loss.reason === exportReason && loss.words === exportLoss
+    ));
+    applyWordAccountingUpdate(trace, {
+      sectionId: section.sectionId,
+      exportedWords: section.wordCount,
+      mode: 'SET',
+      ...(exportLoss > 0 && !alreadyRecorded ? {
+        rejectedWords: exportLoss,
+        reason: exportReason,
+        lossStage: 'export',
+      } : {}),
+    });
+  }
+}
+
 function createTrace(input: { generationId: string; doc: UniversalLegalDocument; now: () => Date; providerRequested?: string }): GenerationTrace {
   return {
     schemaVersion: '1.0',
@@ -438,6 +558,7 @@ function createTrace(input: { generationId: string; doc: UniversalLegalDocument;
     coverageTransitions: [],
     semanticEvaluations: [],
     draftBlocks: [],
+    wordAccounting: [],
     warnings: [],
     errors: [],
     assemblyMetadata: {
@@ -554,8 +675,12 @@ export function createGenerationTraceContext(input: {
         retryCount: 0,
         fallbackUsed: false,
         objective: task.objective,
+        targetWords: task.targetWords,
       };
       trace.generationTasks.push(taskTrace);
+      if (typeof task.targetWords === 'number' && task.targetWords > 0) {
+        applyWordAccountingUpdate(trace, { sectionId: task.sectionId, plannedWords: task.targetWords });
+      }
     },
     recordTaskExecution(entry) {
       if (!enabled) return;
@@ -587,6 +712,25 @@ export function createGenerationTraceContext(input: {
         },
         evaluation: entry.evaluation === undefined ? undefined : limitTraceValue(entry.evaluation),
       }) as IssueGenerationAttemptTrace);
+      const sectionId = trace.generationTasks.find((task) => task.taskId === entry.taskId)?.sectionId;
+      if (sectionId) {
+        applyWordAccountingUpdate(trace, {
+          sectionId,
+          providerGeneratedWords: entry.providerGeneratedWords || 0,
+          providerGeneratedChars: entry.providerGeneratedChars || 0,
+          validatedWords: entry.validatedWords || 0,
+          rejectedWords: entry.rejectedWords || 0,
+          ...(entry.lossReason ? {
+            reason: entry.lossReason,
+            lossStage: entry.outcome === 'SEMANTIC_FAILED' ? 'semantic-review' : 'provider-validation',
+          } : {}),
+          taskId: entry.taskId,
+        });
+      }
+    },
+    recordWordAccounting(entry) {
+      if (!enabled) return;
+      applyWordAccountingUpdate(trace, entry);
     },
     recordCoverageTransition(entry) {
       if (!enabled) return;
@@ -596,9 +740,13 @@ export function createGenerationTraceContext(input: {
       if (!enabled) return;
       trace.semanticEvaluations.push(sanitizeTraceValue(value) as BlockQualityEvaluation);
     },
-    recordDraftBlock(block, research) {
+    recordDraftBlock(block, research, sectionIdOverride) {
       if (!enabled) return;
-      trace.draftBlocks.push({
+      const taskId = block.generationTaskId || block.taskId;
+      const sectionId = sectionIdOverride || trace.generationTasks.find((task) => task.taskId === taskId)?.sectionId;
+      const blockWords = wordCount(block.text || '');
+      const existed = trace.draftBlocks.some((entry) => entry.id === block.id);
+      const draftBlock = {
         id: block.id,
         generationId: block.generationId,
         generationTaskId: block.generationTaskId || block.taskId,
@@ -610,8 +758,19 @@ export function createGenerationTraceContext(input: {
         fallbackReason: block.fallbackReason,
         semanticScore: block.semanticScore,
         genericityClass: block.genericityClass,
+        sectionId,
+        wordCount: blockWords,
         research: copyResearchTrace(research),
         textHash: hashTraceText(block.text || ''),
+      };
+      const existing = trace.draftBlocks.find((entry) => entry.id === block.id);
+      if (existing) Object.assign(existing, draftBlock);
+      else trace.draftBlocks.push(draftBlock);
+      if (sectionId && !existed) applyWordAccountingUpdate(trace, {
+        sectionId,
+        materializedWords: blockWords,
+        admittedWords: blockWords,
+        taskId,
       });
     },
     recordQualityGate(result) {
@@ -620,6 +779,28 @@ export function createGenerationTraceContext(input: {
     },
     recordDocumentAssembly(result) {
       if (!enabled) return;
+      for (const section of result.sections) {
+        applyWordAccountingUpdate(trace, {
+          sectionId: section.sectionId,
+          assembledWords: section.blocks.reduce((total, block) => total + wordCount(block.text || ''), 0),
+          mode: 'SET',
+        });
+      }
+      for (const blockId of result.excludedDraftBlockIds) {
+        const block = trace.draftBlocks.find((entry) => entry.id === blockId);
+        if (!block?.sectionId || !block.wordCount) continue;
+        const finding = result.findings.find((candidate) => candidate.blockIds.includes(blockId));
+        const reason = finding?.code || 'ASSEMBLY_EXCLUDED';
+        const duplicate = /DUPLICAT/i.test(reason);
+        applyWordAccountingUpdate(trace, {
+          sectionId: block.sectionId,
+          rejectedWords: block.wordCount,
+          ...(duplicate ? { dedupRemovedWords: block.wordCount } : {}),
+          reason,
+          lossStage: duplicate ? 'deduplication' : 'assembly',
+          taskId: trace.generationTasks.find((task) => task.taskId === block.generationTaskId)?.taskId,
+        });
+      }
       trace.documentAssembly = sanitizeTraceValue({
         ...result.trace,
         generationId: trace.generationId,
@@ -654,6 +835,7 @@ export function createGenerationTraceContext(input: {
         omittedBlockIds: [...manifest.omittedBlockIds],
         traceStatus: 'RECORDED',
       }) as ExportManifest;
+      recordExportWordCounts(trace, manifest);
     },
     recordExtraction(entry) {
       if (!enabled) return;

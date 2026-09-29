@@ -38,6 +38,27 @@ describe('projectRichCaseAnalysis', () => {
     expect(projection.caseAnalysis.facts?.[0].contestedStatus).toBe('UNKNOWN');
   });
 
+  it('preserves distinct atomic facts when both share a broad parent-page excerpt', () => {
+    const provenance = createSourceProvenance({
+      sourceId: 'src-laboral',
+      excerpt: 'TRIBUNAL EN TURNO. Comparezco a demandar. '.repeat(30),
+      page: 1,
+      extractionMethod: 'PARAGRAPH',
+      confidence: 1,
+      inferenceLevel: 'LITERAL',
+    });
+    const projection = projectRichCaseAnalysis(rich({ facts: [
+      { id: 'fact-start', proposition: 'La actora afirma que comenzó a trabajar en enero de 2022.', participants: [], assertionStatus: 'SOURCE_ASSERTION', provenance: [provenance], relatedDocumentIds: ['src-laboral'] },
+      { id: 'fact-pay', proposition: 'La actora afirma que recibía un pago semanal.', participants: [], assertionStatus: 'SOURCE_ASSERTION', provenance: [provenance], relatedDocumentIds: ['src-laboral'] },
+    ] }), base());
+
+    expect(projection.caseAnalysis.facts?.map((fact) => fact.sourceFact)).toEqual([
+      'La actora afirma que comenzó a trabajar en enero de 2022.',
+      'La actora afirma que recibía un pago semanal.',
+    ]);
+    expect(projection.caseAnalysis.facts?.every((fact) => fact.lawyerPosition === 'UNDEFINED')).toBe(true);
+  });
+
   it('omits authority mentions without citation text from the legacy string projection', () => {
     const projection = projectRichCaseAnalysis(rich({
       authorities: [

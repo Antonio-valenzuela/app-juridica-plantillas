@@ -18,6 +18,8 @@ export interface ExportManifest {
   omittedParagraphCount: number;
   renderedBlockIds: readonly string[];
   omittedBlockIds: readonly string[];
+  sectionWordCounts: readonly { sectionId: string; wordCount: number }[];
+  totalTextWordCount: number;
   traceStatus: ExportTraceStatus;
 }
 
@@ -54,6 +56,10 @@ function isOmitted(paragraph: RenderParagraph): boolean {
   return paragraph.text.trim().length === 0;
 }
 
+function countWords(text: string): number {
+  return (text.match(/[\p{L}\p{N}]+/gu) || []).length;
+}
+
 export function createExportFingerprint(input: Pick<ExportManifestInput, 'model' | 'format' | 'pageProfile'>): string {
   return stableResearchId('export', {
     rendererVersion: EXPORT_RENDERER_VERSION,
@@ -75,6 +81,12 @@ export function createExportManifest(input: ExportManifestInput): ExportManifest
   const paragraphs = modelParagraphs(input.model);
   const omitted = paragraphs.filter(isOmitted);
   const rendered = paragraphs.filter((paragraph) => !isOmitted(paragraph));
+  const sectionWordCounts = input.model.sections.map((section) => ({
+    sectionId: section.id,
+    wordCount: section.paragraphs
+      .filter((paragraph) => Boolean(paragraph.provenance.blockId) && !isOmitted(paragraph))
+      .reduce((total, paragraph) => total + countWords(paragraph.text), 0),
+  }));
   return {
     schemaVersion: 'fase7-v1',
     format: input.format,
@@ -87,6 +99,8 @@ export function createExportManifest(input: ExportManifestInput): ExportManifest
     omittedParagraphCount: omitted.length,
     renderedBlockIds: rendered.map(blockId),
     omittedBlockIds: omitted.map(blockId),
+    sectionWordCounts,
+    totalTextWordCount: sectionWordCounts.reduce((total, section) => total + section.wordCount, 0),
     traceStatus: input.traceStatus || 'NOT_AVAILABLE',
   };
 }

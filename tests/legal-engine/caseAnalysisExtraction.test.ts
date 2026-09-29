@@ -28,6 +28,36 @@ describe('judicial procedural extraction', () => {
     expect(analysis.proceduralTimeline.every((event) => event.page === 4)).toBe(true);
   });
 
+  it('retains source-page chronology for an explicitly classified amparo judgment', () => {
+    const analysis = reconstructCaseAnalysis([{
+      id: 'fallback-classified-resolution',
+      filename: 'sentencia_amparo_directo_800_2024.pdf',
+      type: 'application/pdf',
+      sourceValidated: true,
+      classification: { sourceDocumentType: 'SENTENCIA_AMPARO_DIRECTO' },
+      pages: [{
+        page: 1,
+        chars: 600,
+        text: [
+          'SEGUNDO TRIBUNAL COLEGIADO EN MATERIA ADMINISTRATIVA DEL TERCER CIRCUITO',
+          'AMPARO DIRECTO 800/2024',
+          'QUEJOSO: EMPRESA DEMANDANTE S.A. DE C.V.',
+          'SENTENCIA DEFINITIVA',
+          'ANTECEDENTES',
+          'El 3 de enero de 2024 se presentó demanda de amparo directo en el expediente AMPARO DIRECTO 800/2024.',
+          'El 10 de febrero de 2024 se dictó la sentencia definitiva recurrida.',
+          'El 15 de marzo de 2024 se interpuso en tiempo el presente recurso de revisión.',
+        ].join('\n'),
+      }],
+    }], 'Interponer recurso de revisión en amparo directo fundado en omisión constitucional.', '', { includeReferenceInAnalysis: false });
+
+    expect(analysis.caseNumbers.principal).toBe('800/2024');
+    expect(analysis.proceduralTimeline.map((event) => event.date)).toEqual(expect.arrayContaining([
+      '3 de enero de 2024', '10 de febrero de 2024', '15 de marzo de 2024',
+    ]));
+    expect(analysis.proceduralTimeline.every((event) => event.page === 1)).toBe(true);
+  });
+
   it('does not promote an unrelated date or party allegation into a court-established fact', () => {
     const analysis = reconstructCaseAnalysis([{
       id: 'synthetic-allegation',

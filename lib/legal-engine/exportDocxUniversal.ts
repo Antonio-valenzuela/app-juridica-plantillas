@@ -11,7 +11,7 @@ import {
   UnderlineType,
 } from 'docx';
 import type { GenerationTrace } from './generationTrace';
-import { hashTraceText } from './generationTrace';
+import { hashTraceText, recordExportWordCounts } from './generationTrace';
 import { prepareUniversalDocumentForExport, validateForExport, type PrepareUniversalDocumentForExportOptions } from './exportGuards';
 import {
   verifyCompatibilityMaterialization,
@@ -176,6 +176,24 @@ function runsForParagraph(paragraph: RenderParagraph): readonly RenderRun[] {
   return normalizedRuns;
 }
 
+function renderTextRun(run: RenderRun, style: RenderParagraph['style'], role: RenderParagraph['role']): TextRun[] {
+  const lines = run.text.replace(/\r\n?/g, '\n').split('\n');
+  const rendered: TextRun[] = [];
+  const properties = {
+    font: safeFontFamily(style?.fontFamily),
+    size: fontSizeInHalfPoints(style?.fontSize, role),
+    bold: run.bold === true,
+    italics: run.italic === true,
+    underline: run.underline === true ? { type: UnderlineType.SINGLE } : undefined,
+  };
+
+  lines.forEach((line, index) => {
+    if (line.length > 0) rendered.push(new TextRun({ ...properties, text: line }));
+    if (index < lines.length - 1) rendered.push(new TextRun({ ...properties, break: 1 }));
+  });
+  return rendered;
+}
+
 function renderParagraph(paragraph: RenderParagraph, placement: 'BODY' | 'HEADER' | 'FOOTER'): Paragraph {
   if (!SUPPORTED_ROLES.has(paragraph.role)) {
     throw new DocxRenderError(`Rol DOCX no soportado: ${String(paragraph.role)}.`);
@@ -191,14 +209,7 @@ function renderParagraph(paragraph: RenderParagraph, placement: 'BODY' | 'HEADER
   const style = paragraph.style || {};
   const children = paragraph.role === 'SPACER'
     ? []
-    : runs.map((run) => new TextRun({
-      text: run.text,
-      font: safeFontFamily(style.fontFamily),
-      size: fontSizeInHalfPoints(style.fontSize, paragraph.role),
-      bold: run.bold === true,
-      italics: run.italic === true,
-      underline: run.underline === true ? { type: UnderlineType.SINGLE } : undefined,
-    }));
+    : runs.flatMap((run) => renderTextRun(run, style, paragraph.role));
 
   return new Paragraph({
     children,
@@ -206,7 +217,10 @@ function renderParagraph(paragraph: RenderParagraph, placement: 'BODY' | 'HEADER
     heading: paragraph.role === 'TITLE'
       ? paragraph.headingLevel === 1 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2
       : undefined,
-    alignment: mapAlignment(style.textAlign, paragraph.role),
+    alignment: /[\r\n]/.test(paragraph.text)
+      && (!style.textAlign || style.textAlign === 'justify')
+      ? AlignmentType.LEFT
+      : mapAlignment(style.textAlign, paragraph.role),
     spacing: { after: paragraph.role === 'SPACER' ? 80 : 120, line: lineSpacing(style.lineHeight) },
     keepNext: paragraph.keepNext,
     keepLines: paragraph.keepTogether,
@@ -335,6 +349,7 @@ function recordTrace(
     styleCounts,
   };
   trace.exportManifest = markExportManifestRecorded(manifest);
+  recordExportWordCounts(trace, manifest);
 }
 
 function verifiedInputForPreparedDocument(

@@ -433,4 +433,28 @@ describe('section-level generation', () => {
     expect(block.generationTaskId).toBe('section:sec-pruebas');
     expect(block.generationTaskIds).toEqual(expect.arrayContaining(['section:sec-pruebas', 'task-1']));
   });
+
+  it('accepts Gemini and Groq provider outputs when valid and grounded', async () => {
+    const geminiResult = await generateSectionDraft(packet(), {
+      invokeProvider: vi.fn().mockResolvedValue(providerResponse(readyPayload, {
+        provider: 'gemini',
+        providerRequested: 'gemini',
+        providerActuallyUsed: 'gemini',
+        model: 'gemini-2.5-flash',
+      })),
+    });
+    expect(geminiResult.status).toBe('ACCEPTED');
+    expect(geminiResult.provider.actuallyUsed).toBe('gemini');
+
+    const groqResult = await generateSectionDraft(packet(), {
+      invokeProvider: vi.fn().mockResolvedValue(providerResponse(readyPayload, {
+        provider: 'groq',
+        providerRequested: 'groq',
+        providerActuallyUsed: 'groq',
+        model: 'llama-3.3-70b-versatile',
+      })),
+    });
+    expect(groqResult.status).toBe('ACCEPTED');
+    expect(groqResult.provider.actuallyUsed).toBe('groq');
+  });
 });

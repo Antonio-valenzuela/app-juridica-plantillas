@@ -1,4 +1,4 @@
-import type { DocumentNode, UniversalLegalDocument, ValidationResult } from './types';
+import type { ContentBlock, DocumentNode, UniversalLegalDocument, ValidationResult } from './types';
 import { DocumentTemplates, isContestacionRevisionAmparoDirectoType } from './documentTemplates';
 import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 import { sanitizeLegalDocument, type SanitizeReport } from './legalDocumentSanitizer';
@@ -10,6 +10,8 @@ import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { hasSeedMarkers, hasUnresolvedFactualDependencies } from './seedMarkers';
 import { DRAFT_EXPORT_NOTICE, resolveExportMode, type ExportMode } from './exportModes';
+import { evaluateProvenanceIntegrityGate } from './provenanceIntegrityGate';
+import { evaluateAuthorityVerificationGate } from './authorityVerificationGate';
 
 /**
  * exportGuards.ts
@@ -633,7 +635,13 @@ export class ExportGuardError extends Error {
   readonly code = 'EXPORT_GUARD_FAILED';
 
   constructor(readonly result: ExportValidationResult) {
-    super('El documento no cumple el contrato común de exportación');
+    const details = result.errors.length > 0
+      ? result.errors.join('; ')
+      : 'El documento no cumple el contrato común de exportación';
+    const prefix = result.errors.some((error) => /PROVENANCE_INTEGRITY_GATE|QUALITY_GATE|INCOMPLETE_DOCUMENT|PREFLIGHT_NOT_READY/.test(error))
+      ? 'FINAL_DOCUMENT_MATERIALIZATION_NOT_VERIFIED'
+      : 'EXPORT_GUARD_FAILED';
+    super(`${prefix}: ${details}`);
     this.name = 'ExportGuardError';
   }
 }
@@ -668,6 +676,18 @@ export function validateForExport(doc: UniversalLegalDocument): ExportValidation
   const sections = Array.isArray(doc.sections) ? doc.sections : [];
   const allText = collectText(doc);
   const titles = sections.map((s) => (s.title || '').trim());
+
+  const sourceGrounding = doc.generationMetadata?.sourceGrounding;
+  if (sourceGrounding && sourceGrounding.length > 0) {
+    const provenanceGate = evaluateProvenanceIntegrityGate({
+      sourceGrounding,
+      caseRefs: doc.caseRefs,
+      caseAnalysis: doc.caseAnalysis,
+    });
+    if (provenanceGate.status !== 'PASS') {
+      errors.push(`PROVENANCE_INTEGRITY_GATE: ${provenanceGate.status}${provenanceGate.issues.length ? ` (${provenanceGate.issues.join(', ')})` : ''}`);
+    }
+  }
 
   const catalogEntry = doc.documentType ? getCatalogDocument(doc.documentType) : undefined;
   if (catalogEntry?.kind === 'FAMILY' || (catalogEntry?.kind === 'DOCUMENT_TYPE' && catalogEntry.status !== 'IMPLEMENTED')) {
@@ -903,7 +923,131 @@ const REVIEW_OVERRIDE_ERROR_PATTERNS = [
   /^COMMERCIAL_QUALITY_GATE_NOT_READY:/,
   /^RESPONSE_PREFLIGHT_NOT_READY:/,
   /^RESPONSE_QUALITY_GATE_NOT_READY:/,
+  /^PROVENANCE_INTEGRITY_GATE:/,
+  /^UNRESOLVED_FACTUAL_DEPENDENCY:/,
+  /^TRUNCATED_GENERATION:/,
 ];
+
+// A DRAFT may expose missing expediente data, but it must not export content
+// whose factual support, client posture, evidence, or legal authority is known
+// to be missing or invalid.
+const DRAFT_HARD_BLOCKING_QUALITY_CHECKS = new Set([
+  'FACTUAL_CLAIM_AUDIT_MISSING',
+  'UNSUPPORTED_FACTUAL_CLAIM',
+  'FACTUAL_CLAIM_UNVERIFIED',
+  'MISAPPLIED_AUTHORITY',
+  'CONTRADICTORY_POSITION',
+  'UNSUPPORTED_EVIDENCE',
+]);
+
+const MATERIAL_AUTHORITY_CITATION_RE = /\b(?:art[íi]culos?\s+\d+[\w.°º-]*|registro\s+digital\s*[:#]?\s*\d+|tesis\s+[A-Z0-9./-]+)\b/giu;
+
+function materialCitations(text: string): string[] {
+  return Array.from(text.matchAll(new RegExp(MATERIAL_AUTHORITY_CITATION_RE.source, 'giu')), (match) => match[0]);
+}
+
+function normalizeCitation(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-MX').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * DRAFT keeps useful review content but never exports an unverified material
+ * citation as if it were law. The affected sentence is replaced with an
+ * explicit editorial notice; FINAL continues to require the full authority gate.
+ */
+function omitUnverifiedAuthoritySentencesForDraft(document: UniversalLegalDocument): string[] {
+  const metadata = document.generationMetadata;
+  const verifiedAuthorities = metadata.verifiedAuthorities || [];
+  const authorityUses = metadata.authorityUses || [];
+  const omittedBlockIds = new Set<string>();
+  let omittedCitationCount = 0;
+
+  for (const section of document.sections) {
+    let sectionHasOmittedCitation = false;
+    for (const block of section.content || []) {
+      if (block.generatedBy !== 'AI' || !block.text?.trim() || materialCitations(block.text).length === 0) continue;
+      const blockUses = authorityUses.filter((use) => use.blockId === block.id);
+      const audit = evaluateAuthorityVerificationGate({
+        blocks: [{ id: block.id, text: block.text }],
+        uses: blockUses,
+        verifiedAuthorities,
+      });
+      if (audit.status === 'PASS') continue;
+
+      const pieces = block.text.split(/(?<=[.!?;])\s+|\r?\n+/).map((piece) => piece.trim()).filter(Boolean);
+      const safePieces = pieces.map((piece) => {
+        const citations = materialCitations(piece);
+        if (citations.length === 0) return piece;
+        omittedCitationCount += citations.length;
+        omittedBlockIds.add(block.id);
+        sectionHasOmittedCitation = true;
+        return '';
+      }).filter(Boolean);
+      block.text = safePieces.join('\n\n');
+    }
+    const noteId = `draft-authority-omission-${document.id}-${section.id}`;
+    if (sectionHasOmittedCitation && !section.content.some((block) => block.id === noteId)) {
+      section.content.push({
+        id: noteId,
+        layer: 'GENERATED_ARGUMENT',
+        trustLevel: 'VERIFIED',
+        text: 'CITA JURÍDICA OMITIDA - REQUIERE VERIFICACIÓN OFICIAL.',
+        style: { fontStyle: 'italic' },
+        generationRequirement: 'DETERMINISTIC',
+        generationStatus: 'generated',
+        generatedBy: 'DETERMINISTIC',
+        isManuallyEdited: false,
+      });
+    }
+  }
+
+  if (omittedBlockIds.size > 0) {
+    const survivingCitations = new Map(
+      document.sections.flatMap((section) => section.content || [])
+        .filter((block) => block.generatedBy === 'AI')
+        .map((block) => [block.id, materialCitations(block.text)]),
+    );
+    metadata.authorityUses = authorityUses.filter((use) => {
+      const citations = survivingCitations.get(use.blockId) || [];
+      return citations.some((citation) => normalizeCitation(citation) === normalizeCitation(use.citationText));
+    });
+  }
+
+  return omittedCitationCount > 0
+    ? [`DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED:${omittedCitationCount}`]
+    : [];
+}
+
+function normalizeInlineMarkdownFormatting(doc: UniversalLegalDocument): {
+  document: UniversalLegalDocument;
+  boldCount: number;
+  italicCount: number;
+  htmlTagCount: number;
+} {
+  let boldCount = 0;
+  let italicCount = 0;
+  let htmlTagCount = 0;
+  const sections = doc.sections.map((section) => ({
+    ...section,
+    content: (section.content || []).map((block) => {
+      if (typeof block.text !== 'string') return block;
+      const htmlTags = block.text.match(/<br\s*\/?>|<\/?(?:b|strong|i|em)>/gi) || [];
+      htmlTagCount += htmlTags.length;
+      const withBold = block.text.replace(/(?<!\*)\*\*([^*\n]+?)\*\*(?!\*)/g, (_match, content: string) => {
+        boldCount += 1;
+        return content;
+      });
+      const text = withBold.replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, (_match, content: string) => {
+        italicCount += 1;
+        return content;
+      })
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/?(?:b|strong|i|em)>/gi, '');
+      return text === block.text ? block : { ...block, text };
+    }),
+  }));
+  return { document: { ...doc, sections }, boldCount, italicCount, htmlTagCount };
+}
 
 function isReviewOverrideError(error: string): boolean {
   return REVIEW_OVERRIDE_ERROR_PATTERNS.some((pattern) => pattern.test(error));
@@ -945,11 +1089,22 @@ export async function prepareUniversalDocumentForExport(
     || (options.allowReviewOverride === true ? 'DRAFT' : 'FINAL');
   const allowReviewOverride = exportMode === 'DRAFT';
   const reviewOverrideWarnings: string[] = [];
-  const initial = validateForExport(doc);
+  const formatting = normalizeInlineMarkdownFormatting(doc);
+  const exportSource = formatting.document;
+  if (formatting.boldCount > 0) {
+    reviewOverrideWarnings.push(`INLINE_MARKDOWN_FORMATTING_NORMALIZED: ${formatting.boldCount} negrita(s)`);
+  }
+  if (formatting.italicCount > 0) {
+    reviewOverrideWarnings.push(`INLINE_MARKDOWN_FORMATTING_NORMALIZED: ${formatting.italicCount} cursiva(s)`);
+  }
+  if (formatting.htmlTagCount > 0) {
+    reviewOverrideWarnings.push(`INLINE_HTML_FORMATTING_NORMALIZED: ${formatting.htmlTagCount} etiqueta(s)`);
+  }
+  const initial = validateForExport(exportSource);
   reviewOverrideWarnings.push(...collectReviewOverrideErrors(initial.errors, initial.warnings, allowReviewOverride));
 
-  const auditTrace = doc.generationMetadata?.auditTrace;
-  const { document: sanitized, report } = sanitizeLegalDocument(doc, { dedupeBlocks: false });
+  const auditTrace = exportSource.generationMetadata?.auditTrace;
+  const { document: sanitized, report } = sanitizeLegalDocument(exportSource, { dedupeBlocks: false });
   // El trace es metadata transitoria de auditoría. Se conserva en el clon de
   // exportación para que el exporter pueda registrar DOCX sin tocar el texto.
   if (auditTrace && !sanitized.generationMetadata.auditTrace) {
@@ -965,6 +1120,9 @@ export async function prepareUniversalDocumentForExport(
       ...(exportMode === 'DRAFT' ? { exportNotice: DRAFT_EXPORT_NOTICE } : {}),
     },
   } as UniversalLegalDocument;
+  if (exportMode === 'DRAFT') {
+    reviewOverrideWarnings.push(...omitUnverifiedAuthoritySentencesForDraft(exportDocument));
+  }
   const afterSanitize = validateForExport(exportDocument);
   reviewOverrideWarnings.push(...collectReviewOverrideErrors(afterSanitize.errors, afterSanitize.warnings, allowReviewOverride));
 
@@ -972,9 +1130,30 @@ export async function prepareUniversalDocumentForExport(
   // from becoming a module initialization cycle.
   const { runQualityGateCheck } = await import('./qualityGate');
   const qualityGate = runQualityGateCheck(exportDocument);
+  const omittedAuthorities = reviewOverrideWarnings
+    .filter((warning) => warning.startsWith('DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED:'))
+    .reduce((total, warning) => total + (Number(warning.split(':')[1]) || 0), 0);
+  if (omittedAuthorities > 0) {
+    qualityGate.passed = false;
+    qualityGate.canMarkAsFinal = false;
+    qualityGate.criticalErrors.push({
+      checkId: 'DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED',
+      message: `${omittedAuthorities} cita(s) no verificadas se excluyeron del borrador; la fundamentación debe completarse antes de FINAL.`,
+    });
+  }
+  if (allowReviewOverride) {
+    const draftIntegrityFailures = qualityGate.criticalErrors
+      .filter((issue) => DRAFT_HARD_BLOCKING_QUALITY_CHECKS.has(issue.checkId));
+    if (draftIntegrityFailures.length > 0) {
+      guardFailure(
+        draftIntegrityFailures.map((issue) => `${issue.checkId}: ${issue.message}`),
+        qualityGate.warnings.map((issue) => issue.message),
+      );
+    }
+  }
   if (!qualityGate.passed || !qualityGate.canMarkAsFinal) {
     const qualityErrors = [
-      ...qualityGate.criticalErrors.map((issue) => issue.message),
+      ...qualityGate.criticalErrors.map((issue) => `${issue.checkId}: ${issue.message}`),
       ...(!qualityGate.canMarkAsFinal ? ['QUALITY_GATE_FAILED: el documento no puede exportarse como FINAL.'] : []),
     ];
     if (allowReviewOverride) {

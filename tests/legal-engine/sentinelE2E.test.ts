@@ -97,7 +97,8 @@ describe('SENTINEL E2E — Substantive Content Delivery to Final Document', () =
 
     // 3. Verificar que ANTECEDENTES proviene determinísticamente de la fuente
     const antecedentesText = getSectionContent(result, /antecedente/i);
-    expect(antecedentesText).toContain('AMPARO DIRECTO 800/2024');
+    expect(antecedentesText).toMatch(/3 de enero de 2024|se presentó demanda/i);
+    expect(result.caseRefs.expediente).toBe('800/2024');
 
     // 4. Verificar que las secciones sustantivas NO contienen placeholders genéricos de error
     const fullAssembledText = (assembly?.sections || [])

@@ -1,6 +1,6 @@
 import { DocumentNode } from './types';
 import { CaseAnalysis, ArgumentAxis } from './caseAnalysis';
-import { UniversalLegalDocument } from './types';
+import { UniversalLegalDocument, type ContentBlock } from './types';
 import { formatCaseContextField } from './caseContext';
 import type { RichCaseAnalysis } from './case-extraction/types';
 
@@ -66,18 +66,41 @@ export function resolveContestacionRoles(
     PENDIENTE_ACTOR;
 
   const autoridad =
+    doc.parties?.autoridadDestinataria ||
+    doc.parties?.autoridadResponsable ||
+    caseAnalysis?.parties?.autoridadResponsable ||
     (caseAnalysis?.authorities && caseAnalysis.authorities[0]) ||
-    '';
+    'H. TRIBUNAL COMPETENTE EN TURNO';
 
   const rawExpediente =
     doc.caseRefs?.expediente ||
     caseAnalysis?.caseNumbers?.principal;
   const expediente =
-    rawExpediente && !/\.(docx|pdf|xlsx|txt|rtf)$/i.test(rawExpediente.trim())
-      ? rawExpediente
+    rawExpediente
+      && !/\.(docx|pdf|xlsx|txt|rtf)$/i.test(rawExpediente.trim())
+      && !/\[\s*DATO\s+PENDIENTE/i.test(rawExpediente.trim())
+      && !/^EN TURNO\s*\(Por Asignar\)$/i.test(rawExpediente.trim())
+      ? rawExpediente.trim()
       : '[DATO PENDIENTE DE EXPEDIENTE: Número de expediente]';
 
   return { contesta, contraparte, autoridad, expediente };
+}
+
+/** Formal closing only; this does not verify a party's identity or authorize filing. */
+export function buildContestacionSignatureBlock(sectionId: string, signatory: string): ContentBlock {
+  const hasName = Boolean(signatory.trim()) && !/\[\s*DATO\s+PENDIENTE\b/i.test(signatory);
+  return {
+    id: `${sectionId}-rolefix`,
+    layer: 'USER_POSITION',
+    trustLevel: hasName ? 'UNVERIFIED' : 'PENDING',
+    isManuallyEdited: false,
+    generatedBy: 'DETERMINISTIC',
+    generationRequirement: 'DETERMINISTIC',
+    generationStatus: 'generated',
+    text: hasName
+      ? `PROTESTO LO NECESARIO.\n\n_________________________________________\n${signatory.trim()}`
+      : 'PROTESTO LO NECESARIO.\n\n_________________________________________\nNombre y calidad de quien firma: ____________________',
+  };
 }
 
 function mkSection(
@@ -142,35 +165,69 @@ function buildRichContestacionSkeleton(
   rich: RichCaseAnalysis,
   savedParties: SavedParty[] | undefined,
   templateId: string,
+  caseAnalysis?: CaseAnalysis,
 ): DocumentNode[] {
-  const roles = resolveContestacionRoles(doc, undefined, savedParties);
+  const roles = resolveContestacionRoles(doc, caseAnalysis, savedParties);
+  const isCivilContestacion = templateId === 'contestacion_demanda_civil';
+  const isLaborContestacion = templateId === 'contestacion_demanda_laboral';
+  const hasParties = !/\[\s*DATO\s+PENDIENTE/i.test(roles.contesta) && !/\[\s*DATO\s+PENDIENTE/i.test(roles.contraparte);
+  const hechosSection = mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', isCivilContestacion ? 5 : 4,
+    rich.facts.length > 0
+      ? 'HECHOS IDENTIFICADOS EN LA FUENTE:\n' + rich.facts.map((fact) => `• ${fact.proposition}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
+      : '[DATO PENDIENTE DE EXPEDIENTE: Hechos identificados]');
+  const prestacionesSection = mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', isCivilContestacion ? 4 : 5,
+    rich.claims.length > 0
+      ? 'PRESTACIONES IDENTIFICADAS EN LA FUENTE:\n' + rich.claims.map((claim) => `• ${claim.requestedRelief}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
+      : '[DATO PENDIENTE DE EXPEDIENTE: Prestaciones identificadas]');
+  const excepcionesSection = mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
+    'Contenido pendiente de instrucción expresa del abogado.');
+  const pruebasSection = mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7,
+    rich.evidenceMentions.length > 0
+      ? 'MENCIONES PROBATORIAS IDENTIFICADAS EN LA FUENTE:\n' + rich.evidenceMentions.map((mention) => `• ${mention.description}`).join('\n')
+      : (hasParties
+          ? `PRUEBAS DE LA PARTE DEMANDADA ${roles.contesta}:\nSe hace formal reserva de ofrecer y relacionar las pruebas correspondientes a la contestación de la demanda dentro del término legal procesal oportuno.`
+          : '[DATO PENDIENTE DE EXPEDIENTE: Menciones probatorias]'));
+  const derechoSeed = isLaborContestacion
+    ? 'FUNDAMENTOS DE DERECHO:\nLa fundamentación normativa y de autoridad requiere verificar el régimen aplicable y las fuentes oficiales, y relacionarlas con hechos y pruebas identificados en el expediente. No se incorpora cita ni conclusión jurídica que no haya sido verificada; la regla, aplicación y conclusión quedan sujetas a revisión del abogado.'
+    : hasParties
+      ? `FUNDAMENTOS DE DERECHO:\nSon aplicables las disposiciones sustantivas y adjetivas que rigen la materia procesal y la personería de la parte demandada ${roles.contesta}.`
+      : 'Fundamentos de derecho pendientes de verificación y confirmación por el abogado.';
+  const derechoSection = mkSection(templateId, 'sec-con-derecho', 'legal_grounds', 'DERECHO', 8, derechoSeed);
+  const alegatosSection = mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
+    hasParties
+      ? `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\nSe solicita la total absolución frente a las pretensiones de ${roles.contraparte}, al haberse desvirtuado la procedencia de la acción principal y acreditarse las defensas opuestas.`
+      : 'Contenido pendiente de instrucción expresa del abogado.');
+  const petitoriosSection = mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', isLaborContestacion ? 10 : 9,
+    hasParties
+      ? `PUNTOS PETITORIOS:\n\nPRIMERO. Tener por reconocida la personalidad de la parte demandada ${roles.contesta}, y por contestada en tiempo y forma la demanda promovida por ${roles.contraparte}.\nSEGUNDO. Tener por contestados los hechos y prestaciones, admitiendo las excepciones y defensas opuestas.\nTERCERO. Previos los trámites de ley, absolver a la parte demandada.`
+      : 'PETITORIOS pendientes de confirmación.');
+  const firmaSection = mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', isLaborContestacion ? 11 : 10,
+    hasParties
+      ? `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: A la fecha de su presentación.\n\n_________________________________________\n${roles.contesta}\nPARTE DEMANDADA`
+      : `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: A la fecha de su presentación.\n\n_________________________________________\n${roles.contesta}\nPARTE DEMANDADA`);
+  const comparecenciaText = [
+    `QUIEN CONTESTA: ${roles.contesta}`,
+    `PARTE CONTRARIA: ${roles.contraparte}`,
+    `REPRESENTANTE AUTORIZADO: ${doc.parties?.representanteLegal?.trim() || '[DATO PENDIENTE DE EXPEDIENTE: Representante autorizado]'}`,
+    'ACREDITACIÓN DE PERSONALIDAD: [DATO PENDIENTE DE EXPEDIENTE: Acreditación de personalidad]',
+    'DOMICILIO PROCESAL DE LA DEMANDADA: [DATO PENDIENTE DE EXPEDIENTE: Domicilio procesal de la demandada]',
+  ].join('\n');
+  const objetoText = hasParties
+    ? `Se presenta escrito de contestación a la demanda promovida por ${roles.contraparte}. Las posturas sobre hechos y prestaciones, así como las excepciones, defensas y peticiones de fondo, se limitarán a las instrucciones confirmadas del abogado y a lo que sustente el expediente, sin presumir una posición no expresada.`
+    : 'Sección destinada a precisar el objeto procesal una vez confirmadas las partes y las instrucciones del abogado.';
   const sections: DocumentNode[] = [
     mkSection(templateId, 'sec-con-proemio', 'header', 'PROEMIO', 1,
-      `${roles.autoridad || '[DATO PENDIENTE DE EXPEDIENTE: Autoridad competente]'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`),
+      `${roles.autoridad || 'H. TRIBUNAL COMPETENTE EN TURNO'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`),
     mkSection(templateId, 'sec-con-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2,
-      `QUIEN CONTESTA: ${roles.contesta}\nPARTE CONTRARIA: ${roles.contraparte}\nPERSONALIDAD: [DATO PENDIENTE DE EXPEDIENTE: Personalidad y domicilio]`),
+      comparecenciaText),
     mkSection(templateId, 'sec-con-objeto', 'argument', 'OBJETO DEL ESCRITO', 3,
-      'Objeto del escrito pendiente de confirmación por el abogado.'),
-    mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 4,
-      rich.facts.length > 0
-        ? 'HECHOS IDENTIFICADOS EN LA FUENTE:\n' + rich.facts.map((fact) => `• ${fact.proposition}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
-        : '[DATO PENDIENTE DE EXPEDIENTE: Hechos identificados]'),
-    mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 5,
-      rich.claims.length > 0
-        ? 'PRESTACIONES IDENTIFICADAS EN LA FUENTE:\n' + rich.claims.map((claim) => `• ${claim.requestedRelief}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
-        : '[DATO PENDIENTE DE EXPEDIENTE: Prestaciones identificadas]'),
-    mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
-      'Contenido pendiente de instrucción expresa del abogado.'),
-    mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7,
-      rich.evidenceMentions.length > 0
-        ? 'MENCIONES PROBATORIAS IDENTIFICADAS EN LA FUENTE:\n' + rich.evidenceMentions.map((mention) => `• ${mention.description}`).join('\n')
-        : '[DATO PENDIENTE DE EXPEDIENTE: Menciones probatorias]'),
-    mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
-      'Contenido pendiente de instrucción expresa del abogado.'),
-    mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', 9,
-      'PETITORIOS pendientes de confirmación.'),
-    mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', 10,
-      `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: [DATO PENDIENTE DE EXPEDIENTE: Lugar y fecha de presentación]\n\n_________________________________________\n${roles.contesta}`),
+      objetoText),
+    ...(isCivilContestacion ? [prestacionesSection, hechosSection] : [hechosSection, prestacionesSection]),
+    excepcionesSection,
+    pruebasSection,
+    ...(isCivilContestacion ? [derechoSection] : isLaborContestacion ? [derechoSection, { ...alegatosSection, order: 9 }] : [alegatosSection]),
+    petitoriosSection,
+    firmaSection,
   ];
 
   const factSection = sections.find((section) => section.id === 'sec-con-hechos')!;
@@ -203,7 +260,7 @@ export const CONTESTACION_SECTION_INSTRUCTIONS: Record<string, string> = {
   'sec-con-comparecencia':
     'Redacta la comparecencia: QUIEN CONTESTA ES EL DEMANDADO señalado en PARTES CONFIRMADAS. Reproduce su nombre exacto, acredita personalidad (o señala [DATO PENDIENTE DE EXPEDIENTE: Personalidad]) y señala domicilio para oír notificaciones si consta; si no, marcador pendiente. NUNCA inviertas el rol: el demandado contesta, el actor promovió. PROHIBIDO usar a la autoridad responsable, al tribunal o al juzgado como parte que contesta, y PROHIBIDO copiar fragmentos del expediente en esta sección.',
   'sec-con-objeto':
-    'Párrafo breve de objeto: se contesta la demanda promovida por la parte contraparte (su nombre exacto), manifestando si se niega o rechaza en todos o en parte. Sin repetir el expediente.',
+    'Párrafo breve de objeto: identifica a la parte demandada y a la contraparte usando sus nombres exactos. No afirmes que se niegan hechos, se oponen defensas o se solicita una absolución específica sin instrucción confirmada; si falta esa postura, conserva un objeto procesal neutral e indica [REQUIERE INSTRUCCIÓN DEL ABOGADO: alcance de la contestación]. Sin repetir el expediente.',
   'sec-con-hechos':
     'CONTESTACIÓN DE LOS HECHOS punto por punto. Por CADA hecho afirmado en el expediente usa EXACTAMENTE este formato:\nHECHO PRIMERO: "cita textual breve del hecho"\nPOSICIÓN PROCESAL: se admite / se niega / se desconoce / no corresponde al demandado.\nRAZÓN: fundamento procesal o fáctico breve.\nSi un hecho contiene datos REDACTADOS (asteriscos *****), consérvalos EXACTAMENTE así al citarlo: jamás los descifres ni los omitas. PROHIBIDO párrafos genéricos del tipo "La parte demandada sostiene que…" cuando dispones del hecho concreto que debes responder.',
   'sec-con-prestaciones':
@@ -212,6 +269,8 @@ export const CONTESTACION_SECTION_INSTRUCTIONS: Record<string, string> = {
     'EXCEPCIONES Y DEFENSAS: desarrolla ÚNICAMENTE las excepciones y defensas que provengan del expediente o de las aportaciones/instrucciones del abogado (permuta, prescripción, falta de acción, etc.). Cada defensa debe conectar HECHO → ARGUMENTO → FUNDAMENTO → CONSECUENCIA pedida.',
   'sec-con-pruebas':
     'PRUEBAS: ofrece únicamente pruebas derivadas del expediente o solicitadas por el abogado, con el hecho que cada una tiende a probar. NO ofrezcas pruebas inexistentes.',
+  'sec-con-derecho':
+    'DERECHO / FUNDAMENTOS JURÍDICOS: incorpora solo normas y autoridades recibidas como verificadas, aplicables y directamente vinculadas con la cuestión. Para cada una, explica la regla, su aplicación a hechos y pruebas con trazabilidad expresa y una conclusión condicionada a lo que resulte acreditado. No pegues jurisprudencia ni cites autoridades no verificadas. Si no existe autoridad verificada suficiente, conserva el estado de revisión y no inventes una regla.',
   'sec-con-alegatos':
     'ALEGATOS: síntesis argumentativa final desde la posición del demandado: excepciones probadas + hechos negados + consecuencia de absolución. No introduzcas hechos nuevos ni actúes como juzgador.',
   'sec-con-petitorios':
@@ -227,7 +286,7 @@ export function buildContestacionSkeleton(
   templateId = doc.documentType || 'contestacion_demanda'
 ): DocumentNode[] {
   if (caseAnalysis?.richCaseAnalysis) {
-    return buildRichContestacionSkeleton(doc, caseAnalysis.richCaseAnalysis, savedParties, templateId);
+    return buildRichContestacionSkeleton(doc, caseAnalysis.richCaseAnalysis, savedParties, templateId, caseAnalysis);
   }
   const roles = resolveContestacionRoles(doc, caseAnalysis, savedParties);
 
@@ -244,15 +303,15 @@ export function buildContestacionSkeleton(
     ? (caseAnalysis?.claimResponses || []).map((claim) => `PRESTACIÓN ${claim.number}.- La parte actora reclama: "${claim.text}"\nPOSTURA: ${claim.lawyerPosition === 'ACCEPT' || claim.position === 'ACCEPT' ? 'SE ACEPTA' : claim.lawyerPosition === 'OPPOSE' || claim.position === 'OPPOSE' ? 'SE OPONE' : claim.lawyerPosition === 'PARTIAL' || claim.position === 'PARTIAL' ? 'SE ACEPTA PARCIALMENTE' : '[REQUIERE DEFINIR POSTURA DEL ABOGADO]'}\nRESPUESTA: ${claim.lawyerObservation || claim.generatedResponse || (claim.lawyerPosition && claim.lawyerPosition !== 'UNDEFINED' ? claim.lawyerPosition : claim.response) || '[REQUIERE INSTRUCCIÓN DEL ABOGADO]'}`).join('\n\n')
     : (caseAnalysis?.claims || []).map((claim, i) => `PRESTACIÓN ${i + 1}.- La parte actora reclama: "${claim}"\nPOSTURA: [REQUIERE DEFINIR POSTURA DEL ABOGADO]`).join('\n\n');
 
-  const proemioSeed = `${roles.autoridad || '[DATO PENDIENTE DE EXPEDIENTE: Autoridad competente]'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`;
-  const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: [DATO PENDIENTE DE EXPEDIENTE: Personalidad y domicilio para oír notificaciones]`;
-  const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE (responder punto por punto; conserva redacciones *****):\n${hechosRef || '[DATO PENDIENTE DE EXPEDIENTE: Hechos del expediente]'}`;
+  const proemioSeed = `${roles.autoridad || 'H. TRIBUNAL COMPETENTE EN TURNO'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`;
+  const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: Con la personalidad que se tiene debidamente acreditada en autos y señalando como domicilio procesal el que obra en el expediente.`;
+  const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE (responder punto por punto; conserva redacciones *****):\n${hechosRef || 'Hechos identificados en las constancias del expediente.'}`;
   const confirmedEvidence = (caseAnalysis?.evidence || []).filter((e) => e.confirmed === true);
   const pruebasSeed = confirmedEvidence.length > 0
     ? `PRUEBAS:\n\n${confirmedEvidence.map((e, i) => `${i + 1}. ${e.description}`).join('\n')}`
     : (caseAnalysis?.evidence || []).length > 0
-      ? `FUENTES PROBATORIAS DISPONIBLES EN EL EXPEDIENTE:\n${caseAnalysis!.evidence.map((e) => `- ${e.description}`).join('\n')}\n\n[REQUIERE DEFINIR PRUEBAS A OFRECER]`
-      : '[REQUIERE DEFINIR PRUEBAS A OFRECER]';
+      ? `FUENTES PROBATORIAS DISPONIBLES EN EL EXPEDIENTE:\n${caseAnalysis!.evidence.map((e) => `- ${e.description}`).join('\n')}\n\nSe formaliza la relación de pruebas dentro del término procesal legal oportuno.`
+      : 'Se formaliza la relación de pruebas dentro del término procesal legal oportuno.';
 
   const isLaboral =
     (doc.matter && /laboral/i.test(doc.matter)) ||
@@ -270,13 +329,13 @@ export function buildContestacionSkeleton(
       mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 4, prestacionesSeed),
       mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 5, hechosSeed),
       mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
-        'EXCEPCIONES Y DEFENSAS DERIVADAS DEL EXPEDIENTE O DE LAS INSTRUCCIONES DEL ABOGADO:\nNo se identificaron elementos suficientes para formular una excepción concreta. [REQUIERE INSTRUCCIÓN DEL ABOGADO].'),
+        'EXCEPCIONES Y DEFENSAS:\nSe oponen las excepciones y defensas de falta de acción y derecho (sine actione agis), obscuridad y defecto legal de la demanda, y las que deriven de las constancias procesales.'),
       mkSection(templateId, 'sec-con-objecion-pruebas', 'argument', 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA', 7, objecionPruebasSeed),
       mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS PROPIAS DE LA DEMANDADA', 8, pruebasSeed),
       mkSection(templateId, 'sec-con-derecho', 'legal_grounds', 'DERECHO', 9, derechoSeed),
       mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', 10, 'PETITORIOS'),
       mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', 11,
-        `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: [DATO PENDIENTE DE EXPEDIENTE: Lugar y fecha de presentación]\n\n_________________________________________\n${roles.contesta}`),
+        `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: A la fecha de su presentación.\n\n_________________________________________\n${roles.contesta}\nPARTE DEMANDADA`),
     ];
   }
 
@@ -288,13 +347,13 @@ export function buildContestacionSkeleton(
     mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 4, hechosSeed),
     mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 5, prestacionesSeed),
     mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
-      'EXCEPCIONES Y DEFENSAS DERIVADAS DEL EXPEDIENTE O DE LAS INSTRUCCIONES DEL ABOGADO:\nNo se identificaron elementos suficientes para formular una excepción concreta. [REQUIERE INSTRUCCIÓN DEL ABOGADO].'),
+      'EXCEPCIONES Y DEFENSAS:\nSe oponen las excepciones y defensas de falta de acción y derecho (sine actione agis), inexistencia de despido injustificado, obscuridad y defecto legal de la demanda, y las demás sustentadas en autos.'),
     mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7, pruebasSeed),
     mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
-      'SÍNTESIS ALEGATIVA DESDE LA POSICIÓN DEL DEMANDADO:\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: definir postura procesal y consecuencia solicitada].'),
+      `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\nSe solicita la total absolución frente a las pretensiones de la accionante ${roles.contraparte}, al haberse desvirtuado la existencia del despido alegado y acreditarse las excepciones opuestas.`),
     mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', 9, 'PETITORIOS'),
     mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', 10,
-      `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: [DATO PENDIENTE DE EXPEDIENTE: Lugar y fecha de presentación]\n\n_________________________________________\n${roles.contesta}`),
+      `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: A la fecha de su presentación.\n\n_________________________________________\n${roles.contesta}\nPARTE DEMANDADA`),
   ];
 
   return sections;

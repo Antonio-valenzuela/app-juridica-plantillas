@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildGenerationTasksForSection } from '@/lib/legal-engine/generationTasks';
+import { resolveGenerationExtensionContract } from '@/lib/legal-engine/generationExtension';
 import type { CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 import type { CoverageMatrix, DocumentCoverageItem } from '@/lib/legal-engine/coverageMatrix';
 import type { LegalIssueItem, LegalIssueMatrix } from '@/lib/legal-engine/legalIssueMatrix';
@@ -137,6 +138,33 @@ function makeFixture(options: {
 }
 
 describe('granularidad LegalIssue → GenerationTask', () => {
+  it('no impone targets extensos a respuestas descriptivas breves de hechos y prestaciones', () => {
+    const basePlan = makeFixture({ coverages: [], issues: [] }).sectionPlan;
+    const extension = resolveGenerationExtensionContract({
+      generationMode: 'extended-legal', targetWords: 20000,
+    });
+    extension.sectionWordTargets = { [SECTION_ID]: 3000 };
+    const claimTasks = buildGenerationTasksForSection(
+      { ...basePlan, claimPlans: [{ claimId: 'claim-1', claimNumber: '1', claimText: 'Pago de una prestación reclamada.' }] } as any,
+      createEmptyDocument({ id: 'doc-descriptive-targets', documentType: 'contestacion_laboral' }),
+      undefined,
+      undefined,
+      extension,
+    );
+    const factTasks = buildGenerationTasksForSection(
+      { ...basePlan, factResponsePlans: [{ factId: 'fact-1', factNumber: '1', factText: 'La parte actora afirma una fecha de ingreso.' }] } as any,
+      createEmptyDocument({ id: 'doc-descriptive-targets', documentType: 'contestacion_laboral' }),
+      undefined,
+      undefined,
+      extension,
+    );
+
+    expect(factTasks.find((task) => task.taskType === 'FACT_RESPONSE')?.targetWords).toBe(65);
+    expect(claimTasks.find((task) => task.taskType === 'CLAIM')?.targetWords).toBe(35);
+    expect(factTasks.find((task) => task.taskType === 'FACT_RESPONSE')?.tokenBudget).toBeLessThanOrEqual(800);
+    expect(claimTasks.find((task) => task.taskType === 'CLAIM')?.tokenBudget).toBeLessThanOrEqual(800);
+  });
+
   it('separa un issue READY de otro bloqueado en tareas independientes', () => {
     const readyCoverage = makeCoverage('cov-ready', 'fact-ready');
     const blockedCoverage = makeCoverage('cov-blocked', 'fact-blocked');

@@ -21,6 +21,8 @@ export interface LawyerAccessContext {
 // Caché de la identidad ya resuelta contra la BD: tolera parpadeos breves de la
 // conexión (p. ej. cold-start de Postgres serverless) sin fabricar identidad falsa.
 let cachedLawyerContext: LawyerAccessContext | null = null;
+let localFallbackCachedAt = 0;
+const LOCAL_FALLBACK_TTL_MS = 30_000;
 
 export function isDemoModeEnabled(): boolean {
   const flag = process.env.DEMO_MODE_ENABLED?.trim().toLowerCase();
@@ -54,6 +56,7 @@ function unauthorizedResponse(message = 'No autorizado. Identidad no válida.'):
 
 export function clearCachedLawyerContext(): void {
   cachedLawyerContext = null;
+  localFallbackCachedAt = 0;
 }
 
 /**
@@ -69,6 +72,8 @@ function allowsLocalWorkspaceFallback(request: Request): boolean {
     const method = request.method.toUpperCase();
     return (
       (url.pathname === '/api/templates/analyze-upload' && method === 'POST')
+      || (url.pathname === '/api/templates/analyze-upload/status' && method === 'GET')
+      || (url.pathname === '/api/templates/analyze-upload/cancel' && method === 'POST')
       || (url.pathname === '/api/legal-engine/generate' && (method === 'POST' || method === 'GET'))
       || (url.pathname === '/api/legal-engine/generate/status' && method === 'GET')
       || (url.pathname === '/api/legal-engine/generate/cancel' && (method === 'POST' || method === 'GET'))
@@ -172,6 +177,13 @@ export async function requireLawyerAccess(
       }
     }
 
+    // Status polling can issue many requests while the local database is
+    // unavailable. Reuse the explicitly local development identity briefly;
+    // this is never reached for session- or proxy-authenticated requests.
+    if (allowsLocalWorkspaceFallback(request) && Date.now() - localFallbackCachedAt < LOCAL_FALLBACK_TTL_MS) {
+      return { ok: true, context: localDevelopmentWorkspaceContext() };
+    }
+
     // 2. Fallback to configured workspace identity (demo/dev or env)
     // In production without DEMO_MODE, do NOT silently fallback to demo.
     let identity: { email: string; orgSlug: string };
@@ -225,6 +237,7 @@ export async function requireLawyerAccess(
         lawyerId: user.id,
         role: 'lawyer',
       };
+      localFallbackCachedAt = 0;
       return { ok: true, context: cachedLawyerContext };
     } catch (err) {
       // La BD no respondió al resolver identidad. JAMÁS inventar un organizationId
@@ -232,6 +245,7 @@ export async function requireLawyerAccess(
       console.error('[lawyerAuth] No se pudo resolver identidad desde BD:', err instanceof Error ? err.message : err);
       if (cachedLawyerContext) return { ok: true, context: cachedLawyerContext };
       if (allowsLocalWorkspaceFallback(request)) {
+        localFallbackCachedAt = Date.now();
         console.warn('[lawyerAuth] Base no disponible; continúa el flujo local sin persistencia remota.');
         return { ok: true, context: localDevelopmentWorkspaceContext() };
       }

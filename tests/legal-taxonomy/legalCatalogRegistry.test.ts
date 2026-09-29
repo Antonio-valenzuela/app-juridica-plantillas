@@ -57,13 +57,13 @@ describe('LOOP 7 — registry jurídico jerárquico', () => {
     expect(new Set(LEGAL_AREAS.map((area) => area.id)).size).toBe(20);
   });
 
-  it('mantiene un inventario documental único de 305 identificadores', () => {
+  it('mantiene un inventario documental único de 306 identificadores', () => {
     const stats = getCatalogStats();
-    expect(stats.coveredDocumentIdentifierCount).toBe(305);
+    expect(stats.coveredDocumentIdentifierCount).toBe(306);
     expect(stats.proposedDocumentIdentifierCount).toBe(278);
     expect(stats.legacyDocumentIdentifierCount).toBe(33);
     expect(new Set(LEGACY_DOCUMENT_IDENTIFIER_IDS).size).toBe(33);
-    expect(new Set(LEGAL_CATALOG_REGISTRY.documentIdentifiers.map((entry) => entry.id)).size).toBe(305);
+    expect(new Set(LEGAL_CATALOG_REGISTRY.documentIdentifiers.map((entry) => entry.id)).size).toBe(306);
   });
 
   it('proyecta los 33 IDs legacy sin eliminar ninguno', () => {

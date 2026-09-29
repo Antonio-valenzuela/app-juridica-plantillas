@@ -7,6 +7,10 @@ export type AIResponseOrigin =
   | "SOURCE_DIRECT";
 
 export interface AIRequest {
+  /** Per-request external transfer consent, independent of case privacy classification. */
+  externalProviderOptIn?: boolean;
+  /** Defaults to true; remains true for private case material even with explicit external consent. */
+  privateCaseContext?: boolean;
   systemPrompt?: string;
   userMessage: string;
   mode?: "fast" | "deep";

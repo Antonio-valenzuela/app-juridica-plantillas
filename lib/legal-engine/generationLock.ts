@@ -39,6 +39,8 @@ export function buildFingerprint(input: {
   referenceDocumentId?: string;
   expediente?: string;
   partiesHash?: string;
+  draftDepth?: 'PROFESSIONAL_20' | 'EXTENSIVE_40';
+  externalProviderOptIn?: boolean;
 }): string {
   const payload = JSON.stringify({
     ids: (input.sourceIds || []).sort(),
@@ -50,6 +52,8 @@ export function buildFingerprint(input: {
     refId: input.referenceDocumentId || '',
     expediente: (input.expediente || '').trim(),
     partiesHash: input.partiesHash || '',
+    ...(input.draftDepth ? { draftDepth: input.draftDepth } : {}),
+    externalProviderOptIn: input.externalProviderOptIn === true,
   });
   return createHash('sha256').update(payload).digest('hex').slice(0, 32);
 }

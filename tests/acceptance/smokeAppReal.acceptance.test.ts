@@ -223,7 +223,7 @@ describe('LOOP 9.1 — Objetivo 3: Smoke Test de App Real (UI / API)', () => {
     const statusJson = await statusRes.json();
     expect(statusJson.ok).toBe(true);
     expect(statusJson.jobId).toBe(asyncJobId);
-    expect(['queued', 'running', 'completed']).toContain(statusJson.status);
+    expect(['processing', 'completed', 'failed', 'cancelled']).toContain(statusJson.status);
     expect(typeof statusJson.percentage).toBe('number');
     expect(typeof statusJson.total).toBe('number');
     expect(typeof statusJson.completed).toBe('number');
@@ -254,7 +254,7 @@ describe('LOOP 9.1 — Objetivo 3: Smoke Test de App Real (UI / API)', () => {
   });
 
   // ── 8. Descarga DOCX funcional ───────────────────────────────────────────────
-  it('8. Descarga DOCX: POST /api/legal-engine/export/docx devuelve archivo binario válido', async () => {
+  it('8. Exportación DOCX bloquea con 422 controlado cuando el gate final no pasa', async () => {
     const exportable = prepareDocForExport(generatedDocument);
     const req = new NextRequest('http://localhost/api/legal-engine/export/docx', {
       method: 'POST',
@@ -263,14 +263,14 @@ describe('LOOP 9.1 — Objetivo 3: Smoke Test de App Real (UI / API)', () => {
     });
 
     const res = await POST_exportDocx(req);
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(422);
     await expect(res.json()).resolves.toMatchObject({
-      error: expect.stringMatching(/FINAL_DOCUMENT_MATERIALIZATION_NOT_VERIFIED|QualityGate|REQUIRES_REVIEW/i),
+      error: 'EXPORT_GUARD_FAILED',
     });
   });
 
   // ── 9. Descarga PDF funcional ────────────────────────────────────────────────
-  it('9. Descarga PDF: POST /api/legal-engine/export/pdf devuelve archivo binario válido', async () => {
+  it('9. Exportación PDF bloquea con 422 controlado cuando el gate final no pasa', async () => {
     const exportable = prepareDocForExport(generatedDocument);
     const req = new NextRequest('http://localhost/api/legal-engine/export/pdf', {
       method: 'POST',
@@ -279,8 +279,10 @@ describe('LOOP 9.1 — Objetivo 3: Smoke Test de App Real (UI / API)', () => {
     });
 
     const res = await POST_exportPdf(req);
-    expect(res.status).toBe(500);
-    await expect(res.json()).resolves.toMatchObject({ error: 'PDF_EXPORT_FAILED' });
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'EXPORT_GUARD_FAILED',
+    });
   });
 
   // ── 10. Comportamiento ante documento incompatible ───────────────────────────

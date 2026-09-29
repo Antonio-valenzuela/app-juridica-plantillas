@@ -110,6 +110,41 @@ export async function generateGroqCompletion(
     if (!response.ok) {
       const errText = await response.text();
       const sanitizedBody = redactSecrets(errText.slice(0, 2000));
+      if (response.status === 429 && model !== "openai/gpt-oss-120b") {
+        console.warn(`[GROQ] 429 en ${model}. Reintentando con modelo alternativo openai/gpt-oss-120b...`);
+        try {
+          const fallbackRes = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: "openai/gpt-oss-120b",
+              messages,
+              temperature: options.temperature ?? 0.2,
+              max_tokens: resolveGroqOutputTokenLimit(options.maxTokens),
+              ...(options.outputSchema ? { response_format: { type: "json_object" } } : {}),
+            }),
+          });
+          if (fallbackRes.ok) {
+            const fallbackData = (await fallbackRes.json()) as GroqChatResponse;
+            const fallbackRaw = fallbackData?.choices?.[0]?.message?.content || "";
+            if (fallbackRaw.trim()) {
+              return {
+                text: fallbackRaw.trim(),
+                model: "openai/gpt-oss-120b",
+                tokensUsed: fallbackData?.usage?.total_tokens,
+                finishReason: fallbackData?.choices?.[0]?.finish_reason || "stop",
+                isTruncated: fallbackData?.choices?.[0]?.finish_reason === "length",
+                httpStatus: 200,
+              };
+            }
+          }
+        } catch {
+          // Si falla el modelo alternativo, proceder con el error normal
+        }
+      }
       console.error(
         `[GROQ] GROQ_HTTP_ERROR ${JSON.stringify({
           status: response.status,

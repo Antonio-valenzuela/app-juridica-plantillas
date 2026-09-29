@@ -22,6 +22,8 @@ export * from './documentReadiness';
 export * from './documentAssemblyQualityGate';
 export * from './finalDocumentMaterializationTypes';
 export * from './finalDocumentMaterializationGate';
+export * from './sourceGrounding';
+export * from './provenanceIntegrityGate';
 export * from './finalDocumentMaterialization';
 export * from './exportArtifactTypes';
 export * from './outputFilename';

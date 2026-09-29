@@ -15,6 +15,7 @@ import {
 import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { isAmparoDocumentType } from './caseContext';
+import { buildSourceGrounding } from './sourceGrounding';
 
 export { SOURCE_TYPE_UNKNOWN } from './sourceDocumentTypes';
 
@@ -219,6 +220,7 @@ const LABOR_INDICATOR_PATTERNS: readonly RegExp[] = [
   /\bmateria\s+laboral\b/,
   /\brelacion\s+(?:laboral|de\s+trabajo)\b/,
   /\bcontrato\s+(?:individual\s+)?de\s+trabajo\b/,
+  /\btribunal\s+de\s+arbitraje\b/,
   /\blaudo\b/,
 ];
 
@@ -271,6 +273,10 @@ export function inferSourceOutputType(
   // Una clasificación explícita desconocida debe permanecer desconocida. No
   // se sustituye por una conjetura textual que pueda abrir otra ruta.
   if (explicitType) return normalizeSourceDocumentType(explicitType) || UNKNOWN_SOURCE_DOCUMENT_TYPE;
+  const structuralGrounding = classifiedDocuments[0] ? buildSourceGrounding(classifiedDocuments[0]) : undefined;
+  if (structuralGrounding && structuralGrounding.container.documentType !== UNKNOWN_SOURCE_DOCUMENT_TYPE) {
+    return structuralGrounding.container.documentType as InferredSourceDocumentType;
+  }
   const labor = laborMatterForCorpus(corpus, layout) || matterLabel(sourceMatter) === 'LABORAL';
   const mercantile = /mercantil|juicio\s+(?:ejecutivo|ordinario)\s+mercantil/.test(corpus);
   const familiar = /familiar|alimentos|divorcio|custodia/.test(corpus) || matterLabel(sourceMatter) === 'FAMILIAR';
@@ -380,6 +386,11 @@ export function inferSourceMatterForDocuments(
 ): string {
   const sourceType = inferSourceOutputType(sourceDocuments, sourceMatterFallback);
   const classifiedDocuments = classificationDocuments(sourceDocuments);
+  const structuralGrounding = classifiedDocuments[0] ? buildSourceGrounding(classifiedDocuments[0]) : undefined;
+  if (structuralGrounding && structuralGrounding.container.matter !== 'NO_IDENTIFICADA'
+    && structuralGrounding.container.documentFamily !== 'UNKNOWN') {
+    return structuralGrounding.container.matter;
+  }
   return inferSourceMatter(
     sourceType,
     normalize(sourceText(classifiedDocuments)),

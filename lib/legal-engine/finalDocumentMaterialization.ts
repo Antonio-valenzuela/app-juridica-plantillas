@@ -240,6 +240,9 @@ export function materializeDocumentForPageMeasurement(
  */
 export function renderableBodyParagraphs(model: ExportRenderModel): readonly RenderParagraph[] {
   return model.sections.flatMap((section) => {
+    if (!section.paragraphs.some((paragraph) => paragraph.role !== 'SPACER' && paragraph.text.trim().length > 0)) {
+      return [];
+    }
     const first = section.paragraphs[0];
     const heading: RenderParagraph = {
       id: `heading-${section.id}`,

@@ -124,6 +124,8 @@ export function AnalyticsPanel({ endpoint = '/api/workspace/analytics' }: { endp
     }
   }, [endpoint]);
 
+  // The effect owns the initial and range-change fetch lifecycle.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async loader state is intentional here.
   useEffect(() => { void load(rangeDays); }, [load, rangeDays]);
 
   const hasActivity = Boolean(state.data && (state.data.hasActivity ?? state.data.totals.total > 0));

@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import type { CaseDocument, UploadedSourceDocument } from '@/lib/legal-engine/types';
 import { reconstructCaseAnalysis, CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 import type { TemplateItem } from './TemplateLibraryManager';
+import type { DraftDepth } from '@/lib/legal-engine/draftDepth';
 import { LEGAL_CATALOG_REGISTRY, getCatalogDocument } from '@/lib/catalog/legalCatalog';
 import {
   evaluateSourceOutputCompatibility,
@@ -30,6 +31,7 @@ export interface CaseDocumentsReaderProps {
     referenceDocumentText?: string;
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
     generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
+    draftDepth?: DraftDepth;
   }) => void;
   onOpenEditor?: () => void;
   isGenerating?: boolean;
@@ -240,7 +242,7 @@ export function CaseDocumentsReader({
   const [selectedResponseType, setSelectedResponseType] = useState<string>('contestacion_demanda_civil');
   const userHasManuallyChangedDocTypeRef = useRef(false);
   const [generationMode, setGenerationMode] = useState<'automatic' | 'personal_template' | 'reference_document'>('automatic');
-  const [extensionMode, setExtensionMode] = useState<'standard' | 'extended-legal'>('standard');
+  const [draftDepth, setDraftDepth] = useState<DraftDepth>('PROFESSIONAL_20');
   const [selectedMachoteId, setSelectedMachoteId] = useState<string>('');
 
   // Reconstrucción del análisis del caso
@@ -467,9 +469,7 @@ export function CaseDocumentsReader({
       selectedDocumentType: effectiveDocType,
       documentTypeLabel: effectiveLabel,
       generationMode,
-      generationExtension: extensionMode === 'extended-legal'
-        ? { generationMode: 'extended-legal', targetPages: 40, minPages: 40, maxPages: 44 }
-        : { generationMode: 'standard' },
+      draftDepth,
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
     });
@@ -895,8 +895,8 @@ export function CaseDocumentsReader({
             documentTypeOptions={documentTypeOptions}
             generationMode={generationMode}
             onGenerationModeChange={setGenerationMode}
-            extensionMode={extensionMode}
-            onExtensionModeChange={setExtensionMode}
+            draftDepth={draftDepth}
+            onDraftDepthChange={setDraftDepth}
             customTemplates={customTemplates}
             selectedTemplateId={selectedMachoteId}
             onSelectTemplateId={setSelectedMachoteId}

@@ -11,7 +11,7 @@ export interface RenderedDocumentPageMetrics {
   pdfBytes: number;
 }
 
-function countPdfPages(bytes: Uint8Array): number {
+export function countPdfPages(bytes: Uint8Array): number {
   const raw = Buffer.from(bytes).toString('latin1');
   // The local serializer emits one exact page object marker per rendered page.
   // Match the parent link so /Type /Pages is never counted as a page.

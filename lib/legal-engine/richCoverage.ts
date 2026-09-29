@@ -197,7 +197,7 @@ function buildFactCoverageItems(rich: RichCaseAnalysis, sections: DocumentNode[]
       factIds: [fact.id],
       scope: requiresResponse ? 'SUBSTANTIVE' : undefined,
       satisfactionPolicy: requiresResponse ? 'REQUIRES_SEMANTIC_RESPONSE' : 'REFERENCE_ONLY',
-      blocking: requiresResponse && postureUnknown && requiresClientPosition,
+      blocking: false,
       requiresClientPosition,
       statusReason: isEstablishedFact
         ? 'ESTABLISHED_FACT_DRAFTABLE'
@@ -229,7 +229,7 @@ function buildFactCoverageItems(rich: RichCaseAnalysis, sections: DocumentNode[]
         factIds: [fact.id],
         scope: 'SUBSTANTIVE',
         satisfactionPolicy: 'REQUIRES_SEMANTIC_RESPONSE',
-        blocking: true,
+        blocking: false,
         requiresClientPosition: true,
         statusReason: 'CLIENT_POSITION_UNKNOWN_FOR_FACT',
         relationStatus: 'EXPLICIT',
@@ -277,7 +277,7 @@ function buildArgumentCoverageItems(rich: RichCaseAnalysis, sections: DocumentNo
         authorityMentionIds: [...argument.citedAuthorityIds],
         scope: targetSectionIds.length > 0 ? 'SUBSTANTIVE' : undefined,
         satisfactionPolicy: targetSectionIds.length > 0 ? 'REQUIRES_SEMANTIC_RESPONSE' : 'REFERENCE_ONLY',
-        blocking: targetSectionIds.length > 0 && requiresClientPosition,
+        blocking: targetSectionIds.length === 0,
         requiresClientPosition,
         statusReason: hasEstablishedFactSupport
           ? 'SOURCE_ARGUMENT_ESTABLISHED_FACT_BACKED'
@@ -331,7 +331,8 @@ function buildAuthorityCoverageItems(rich: RichCaseAnalysis, sections: DocumentN
     .map((authority): DocumentCoverageItem => {
       const sourceSections = authority.provenance.map((entry) => entry.section || '').join(' ');
       const courtDecisionSource = /razones\s+y\s+fundamentos\s+de\s+la\s+decisi[oó]n|antecedentes\s+al\s+tr[aá]mite/i.test(sourceSections);
-      const required = targetSectionIds.length > 0 && !courtDecisionSource;
+      const isLawCitation = authority.authorityType === 'LAW';
+      const required = targetSectionIds.length > 0 && !courtDecisionSource && !isLawCitation;
       return {
         id: `cov-authority-mention-${authority.id}`,
         category: 'AUTHORITY_MENTION',
@@ -611,6 +612,7 @@ function findArgumentSections(sections: DocumentNode[]): string[] {
 }
 
 export function summarizeRichCoverage(items: DocumentCoverageItem[]): CoverageMatrix['summary'] {
+  const canonicalItems = items.filter((item) => item.metadata?.compatibilityAlias !== true);
   const byCategory: Partial<Record<CoverageCategory, number>> = {};
   let required = 0;
   let pending = 0;
@@ -624,7 +626,7 @@ export function summarizeRichCoverage(items: DocumentCoverageItem[]): CoverageMa
   let contradictory = 0;
   let insufficient = 0;
 
-  for (const item of items) {
+  for (const item of canonicalItems) {
     byCategory[item.category] = (byCategory[item.category] || 0) + 1;
     if (item.required) required += 1;
     if (item.status === 'pending') pending += 1;
@@ -640,7 +642,7 @@ export function summarizeRichCoverage(items: DocumentCoverageItem[]): CoverageMa
   }
 
   return {
-    total: items.length,
+    total: canonicalItems.length,
     required,
     pending,
     generated,
@@ -679,6 +681,7 @@ export function bindCoverageToSections(
   const orphans: string[] = [];
 
   for (const item of matrix.items) {
+    if (item.metadata?.compatibilityAlias === true) continue;
     const linked: DocumentNode[] = [];
     for (const sectionId of item.targetSectionIds) {
       const section = byId.get(sectionId);

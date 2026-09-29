@@ -10,6 +10,35 @@
 import { Document, Paragraph, TextRun, Packer } from 'docx';
 import sharp from 'sharp';
 
+const PDF_TEST_PAGE_WIDTH = 612;
+const PDF_TEST_PAGE_HEIGHT = 792;
+const PDF_TEST_PAGE_MARGIN = 30;
+
+async function getSyntheticImageDimensions(imageBuffer: Buffer): Promise<{ width: number; height: number }> {
+  const metadata = await sharp(imageBuffer).metadata();
+  if (!metadata.width || !metadata.height) throw new Error('SYNTHETIC_IMAGE_DIMENSIONS_UNAVAILABLE');
+  return { width: metadata.width, height: metadata.height };
+}
+
+function fitSyntheticImageToPage(width: number, height: number): { width: number; height: number; x: number; y: number } {
+  const scale = Math.min(
+    (PDF_TEST_PAGE_WIDTH - PDF_TEST_PAGE_MARGIN * 2) / width,
+    (PDF_TEST_PAGE_HEIGHT - PDF_TEST_PAGE_MARGIN * 2) / height
+  );
+  const fittedWidth = width * scale;
+  const fittedHeight = height * scale;
+  return {
+    width: fittedWidth,
+    height: fittedHeight,
+    x: (PDF_TEST_PAGE_WIDTH - fittedWidth) / 2,
+    y: (PDF_TEST_PAGE_HEIGHT - fittedHeight) / 2,
+  };
+}
+
+function imagePlacementCommand(imageName: string, placement: { width: number; height: number; x: number; y: number }): string {
+  return `q ${placement.width.toFixed(5)} 0 0 ${placement.height.toFixed(5)} ${placement.x.toFixed(5)} ${placement.y.toFixed(5)} cm /${imageName} Do Q\n`;
+}
+
 /**
  * Genera un PDF 1.4 estándar y válido en memoria con texto extraíble por pdf-parse.
  */
@@ -140,8 +169,8 @@ export async function createSyntheticImageBuffer(
  */
 export async function createSyntheticScannedPdfBuffer(customLines?: string[]): Promise<Buffer> {
   const jpegBuffer = await createSyntheticImageBuffer('image/jpeg', customLines);
-  const width = 850;
-  const height = 300;
+  const { width, height } = await getSyntheticImageDimensions(jpegBuffer);
+  const placement = fitSyntheticImageToPage(width, height);
 
   const header = Buffer.from('%PDF-1.4\n', 'latin1');
   const obj1 = Buffer.from('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n', 'latin1');
@@ -151,7 +180,7 @@ export async function createSyntheticScannedPdfBuffer(customLines?: string[]): P
     'latin1'
   );
   // El Contents sólo dibuja la imagen: cero comandos de texto (sin BT, sin ET, sin Tj)
-  const contentStream = Buffer.from('q 612 0 0 792 0 0 cm /Im0 Do Q\n', 'latin1');
+  const contentStream = Buffer.from(imagePlacementCommand('Im0', placement), 'latin1');
   const obj4 = Buffer.from(`4 0 obj\n<< /Length ${contentStream.length} >>\nstream\n${contentStream.toString('latin1')}endstream\nendobj\n`, 'latin1');
 
   // Objeto 5: Imagen XObject con filtro DCTDecode (JPEG nativo)
@@ -220,6 +249,12 @@ export async function createSyntheticMultiPageScannedPdfBuffer(
 
   const img1 = await createSyntheticImageBuffer('image/jpeg', p1Lines);
   const img2 = await createSyntheticImageBuffer('image/jpeg', p2Lines);
+  const [dimensions1, dimensions2] = await Promise.all([
+    getSyntheticImageDimensions(img1),
+    getSyntheticImageDimensions(img2),
+  ]);
+  const placement1 = fitSyntheticImageToPage(dimensions1.width, dimensions1.height);
+  const placement2 = fitSyntheticImageToPage(dimensions2.width, dimensions2.height);
 
   const header = Buffer.from('%PDF-1.4\n', 'latin1');
   const obj1 = Buffer.from('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n', 'latin1');
@@ -230,9 +265,9 @@ export async function createSyntheticMultiPageScannedPdfBuffer(
     '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n',
     'latin1'
   );
-  const c1 = Buffer.from('q 612 0 0 792 0 0 cm /Im0 Do Q\n', 'latin1');
+  const c1 = Buffer.from(imagePlacementCommand('Im0', placement1), 'latin1');
   const obj4 = Buffer.from(`4 0 obj\n<< /Length ${c1.length} >>\nstream\n${c1.toString('latin1')}endstream\nendobj\n`, 'latin1');
-  const obj5Header = Buffer.from(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width 850 /Height 300 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img1.length} >>\nstream\n`, 'latin1');
+  const obj5Header = Buffer.from(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${dimensions1.width} /Height ${dimensions1.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img1.length} >>\nstream\n`, 'latin1');
   const obj5Footer = Buffer.from('\nendstream\nendobj\n', 'latin1');
 
   // Page 2
@@ -240,9 +275,9 @@ export async function createSyntheticMultiPageScannedPdfBuffer(
     '6 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 8 0 R >> >> /Contents 7 0 R >>\nendobj\n',
     'latin1'
   );
-  const c2 = Buffer.from('q 612 0 0 792 0 0 cm /Im1 Do Q\n', 'latin1');
+  const c2 = Buffer.from(imagePlacementCommand('Im1', placement2), 'latin1');
   const obj7 = Buffer.from(`7 0 obj\n<< /Length ${c2.length} >>\nstream\n${c2.toString('latin1')}endstream\nendobj\n`, 'latin1');
-  const obj8Header = Buffer.from(`8 0 obj\n<< /Type /XObject /Subtype /Image /Width 850 /Height 300 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img2.length} >>\nstream\n`, 'latin1');
+  const obj8Header = Buffer.from(`8 0 obj\n<< /Type /XObject /Subtype /Image /Width ${dimensions2.width} /Height ${dimensions2.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${img2.length} >>\nstream\n`, 'latin1');
   const obj8Footer = Buffer.from('\nendstream\nendobj\n', 'latin1');
 
   const o1 = header.length;

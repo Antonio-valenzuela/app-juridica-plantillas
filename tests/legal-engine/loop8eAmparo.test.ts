@@ -109,8 +109,22 @@ describe('LOOP 8E — CONSTITUCIONAL / AMPARO EXTENDIDO', () => {
         const rule = SOURCE_OUTPUT_COMPATIBILITY_RULES[id];
         expect(rule, `Regla de compatibilidad no encontrada para ${id}`).toBeDefined();
         const incompatibleMatters = rule.incompatibleMatterRules?.map((r) => r.matter) || [];
-        expect(incompatibleMatters).toContain('civil');
-        expect(incompatibleMatters).toContain('laboral');
+        if (id === 'recurso_revision_amparo_directo') {
+          // The review challenges an amparo judgment that may arise from a
+          // civil, labor, or other underlying matter. Its source type is the
+          // controlling boundary, not the underlying case's matter label.
+          expect(incompatibleMatters).not.toContain('civil');
+          expect(incompatibleMatters).not.toContain('laboral');
+          expect(rule.acceptedSourceTypes).toEqual(expect.arrayContaining([
+            'SENTENCIA_AMPARO_DIRECTO',
+            'SENTENCIA_AMPARO',
+            'SENTENCIA_O_RESOLUCION',
+            'LAUDO',
+          ]));
+        } else {
+          expect(incompatibleMatters).toContain('civil');
+          expect(incompatibleMatters).toContain('laboral');
+        }
       }
     });
 

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
+import type { DraftDepth } from '@/lib/legal-engine/draftDepth';
 import type { TemplateItem } from './TemplateLibraryManager';
 
 interface ContestacionesConfigPanelProps {
@@ -10,8 +11,8 @@ interface ContestacionesConfigPanelProps {
   documentTypeOptions: Array<{ value: string; label: string }>;
   generationMode: 'automatic' | 'personal_template' | 'reference_document';
   onGenerationModeChange: (mode: 'automatic' | 'personal_template' | 'reference_document') => void;
-  extensionMode: 'standard' | 'extended-legal';
-  onExtensionModeChange: (mode: 'standard' | 'extended-legal') => void;
+  draftDepth: DraftDepth;
+  onDraftDepthChange: (depth: DraftDepth) => void;
   customTemplates?: TemplateItem[];
   selectedTemplateId?: string;
   onSelectTemplateId?: (id: string) => void;
@@ -32,8 +33,8 @@ export function ContestacionesConfigPanel({
   documentTypeOptions,
   generationMode,
   onGenerationModeChange,
-  extensionMode,
-  onExtensionModeChange,
+  draftDepth,
+  onDraftDepthChange,
   customTemplates = [],
   selectedTemplateId,
   onSelectTemplateId,
@@ -102,34 +103,37 @@ export function ContestacionesConfigPanel({
           </div>
         </div>
 
-        {/* Row 1, Col 3: Extensión jurídica opt-in */}
+        {/* Row 1, Col 3: Profundidad jurídica con límite de soporte */}
         <div>
           <label className="mb-2 flex items-center gap-1 text-sm font-medium text-slate-600">
-            <span>Extensión del escrito</span>
-            <span className="text-slate-400 cursor-help" title="La opción extensa busca aproximadamente 40 páginas reales en el PDF final">ⓘ</span>
+            <span>Profundidad del escrito</span>
+            <span className="text-slate-400 cursor-help" title="El rango es orientativo. El sistema se detiene si las fuentes no permiten desarrollar más contenido sin inventar.">ⓘ</span>
           </label>
           <div className="flex flex-wrap items-center gap-3 pt-1">
             {([
-              { value: 'standard', label: 'Normal' },
-              { value: 'extended-legal', label: 'Extensa (~40 páginas)' },
+              { value: 'PROFESSIONAL_20', label: 'Profesional (18 a 24 páginas)' },
+              { value: 'EXTENSIVE_40', label: 'Extensa (35 a 45 páginas)' },
             ] as const).map((option) => (
               <label
                 key={option.value}
-                className={`inline-flex cursor-pointer select-none items-center gap-2 text-sm font-semibold ${extensionMode === option.value ? 'text-[#0B2545]' : 'text-slate-600 hover:text-slate-900'}`}
+                className={`inline-flex cursor-pointer select-none items-center gap-2 text-sm font-semibold ${draftDepth === option.value ? 'text-[#0B2545]' : 'text-slate-600 hover:text-slate-900'}`}
               >
                 <input
                   type="radio"
-                  name="generationExtension"
+                  name="draftDepth"
                   value={option.value}
-                  checked={extensionMode === option.value}
+                  checked={draftDepth === option.value}
                   disabled={disabled}
-                  onChange={() => onExtensionModeChange(option.value)}
+                  onChange={() => onDraftDepthChange(option.value)}
                   className="h-4 w-4 border-slate-300 text-[#0B2545] focus:ring-[#0B2545]"
                 />
                 <span>{option.label}</span>
               </label>
             ))}
           </div>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            Son rangos aproximados, no una meta para rellenar páginas. La generación termina y señala revisión si faltan datos, posturas o soporte verificable.
+          </p>
         </div>
 
         {/* Row 2, Col 1: Machote / plantilla */}

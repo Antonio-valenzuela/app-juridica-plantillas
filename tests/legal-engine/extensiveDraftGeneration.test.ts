@@ -332,7 +332,7 @@ describe('Generación extensa de borradores — QA y trazabilidad sustentable', 
     expect(text).toMatch(/exhaustividad|prestaciones/i);
   });
 
-  it('D. fundamentos construidos solo desde fuentes verificables sin inventar normas', async () => {
+  it('D. fundamentos construidos con normas fuente y sin elevar una tesis no verificada', async () => {
     const source = buildRichSyntheticSource();
     const analysis = buildRichCaseAnalysis();
 
@@ -357,8 +357,10 @@ describe('Generación extensa de borradores — QA y trazabilidad sustentable', 
     // Debe contener las normas de las fuentes verificables
     expect(text).toMatch(/Constitución|CPEUM|123|14|16|17/i);
     expect(text).toMatch(/Ley Federal del Trabajo|841|48/i);
-    // Y la jurisprudencia verificada
-    expect(text).toMatch(/Tesis 2a\.\/J\.\s*15\/2024/i);
+    // La tesis aparece citada en la fuente, pero el fixture no acredita su
+    // verificación oficial ni aplicabilidad; no debe insertarse como autoridad.
+    expect(text).not.toMatch(/Tesis 2a\.\/J\.\s*15\/2024/i);
+    expect(validateForExport(doc).ok).toBe(false);
     // Jamás debe inventar códigos no relacionados como Código de Comercio o Código Penal
     expect(text).not.toMatch(/Código de Comercio/i);
     expect(text).not.toMatch(/Código Penal/i);
@@ -432,7 +434,7 @@ describe('Generación extensa de borradores — QA y trazabilidad sustentable', 
     expect(agraviosText.length).toBeGreaterThan(1200);
   });
 
-  it('H. cada afirmación concreta sensible conserva trazabilidad a una fuente/context item', async () => {
+  it('H. afirmaciones sensibles conservan fuente y una tesis no verificada no se presenta como aplicada', async () => {
     const source = buildRichSyntheticSource();
     const analysis = buildRichCaseAnalysis();
 
@@ -452,8 +454,9 @@ describe('Generación extensa de borradores — QA y trazabilidad sustentable', 
 
     // Trazabilidad de antecedentes a fuente/foja
     expect(allText).toMatch(/\[FUENTE:[^\]]*sentencia_sintetica_amparo\.pdf[^\]]*\]/i);
-    // Trazabilidad de citas y tesis
-    expect(allText).toContain('Tesis 2a./J. 15/2024');
+    // La referencia bibliográfica fuente-citada permanece en el expediente,
+    // pero no se redacta como fundamento hasta verificarla oficialmente.
+    expect(allText).not.toContain('Tesis 2a./J. 15/2024');
     // Cuestión constitucional trazable a página o extracto
     expect(allText).toMatch(/página\s*3|p\.\s*3|sentencia_sintetica_amparo/i);
   });

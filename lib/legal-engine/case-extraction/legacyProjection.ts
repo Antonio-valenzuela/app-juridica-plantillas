@@ -35,10 +35,18 @@ function projectParties(rich: RichCaseAnalysis, base: CaseAnalysis['parties'], l
 
 function projectFact(fact: FactItem, index: number) {
   const excerpt = fact.provenance[0]?.excerpt;
-  const sourceText = excerpt
-    ?.replace(/^\s*(?:HECHO\s+)?(?:\d+|[IVXLCDM]+|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[ÉE]PTIMO|OCTAVO|NOVENO|D[ÉE]CIMO)\s*[.)\-:]\s*/i, '')
-    .trim() || fact.proposition;
-  const sourceNumber = excerpt?.match(/^\s*(?:HECHO\s+)?(\d+|[IVXLCDM]+|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[ÉE]PTIMO|OCTAVO|NOVENO|D[ÉE]CIMO)\s*[.)\-:]/i)?.[1];
+  const proposition = fact.proposition.replace(/\s+/g, ' ').trim();
+  const normalizedExcerpt = excerpt?.replace(/\s+/g, ' ').trim();
+  // Provenance can describe an entire page. Its clipped excerpt must not
+  // replace a distinct atomic proposition when it does not contain it.
+  const specificExcerpt = normalizedExcerpt && proposition
+    && normalizedExcerpt.toLocaleLowerCase('es-MX').includes(proposition.toLocaleLowerCase('es-MX'))
+    ? normalizedExcerpt
+    : undefined;
+  const sourceText = (specificExcerpt || proposition)
+    .replace(/^\s*(?:HECHO\s+)?(?:\d+|[IVXLCDM]+|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[ÉE]PTIMO|OCTAVO|NOVENO|D[ÉE]CIMO)\s*[.)\-:]\s*/i, '')
+    .trim();
+  const sourceNumber = specificExcerpt?.match(/^\s*(?:HECHO\s+)?(\d+|[IVXLCDM]+|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|S[ÉE]PTIMO|OCTAVO|NOVENO|D[ÉE]CIMO)\s*[.)\-:]/i)?.[1];
   return {
     id: fact.id,
     number: sourceNumber || String(index + 1),

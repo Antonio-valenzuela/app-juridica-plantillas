@@ -102,6 +102,13 @@ function findMissing(original: string, extracted: string): string[] {
 }
 
 describe('Exportación PDF — texto REAL, cp1252, multipágina e integridad', () => {
+  it('emite cada línea con espaciado tipográfico natural, sin posicionar cada palabra con una estimación', async () => {
+    const buffer = await exportUniversalToPdf(makeDoc('HOSPITAL CIVIL DE ORIENTE'));
+    const rawPdf = buffer.toString('latin1');
+
+    expect(rawPdf).toContain('(HOSPITAL CIVIL DE ORIENTE) Tj');
+  });
+
   it('caracteres acentados y símbolos cp1252 (— “ ” ¿ ¡) sobreviven la exportación', async () => {
     const tricky = 'NACIÓN\n\nPÉREZ GARCÍA\n\nConstitución\n\ndiseño jurídico — integral\n\n“texto citado textualmente”\n\n¿qué? ¡esto! Ü ü';
     const buffer = await exportUniversalToPdf(makeDoc(tricky));

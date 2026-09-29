@@ -3,6 +3,8 @@ import { buildContestacionSkeleton, resolveContestacionRoles } from '../../lib/l
 import { validateForExport } from '../../lib/legal-engine/exportGuards';
 import { sanitizeLegalDocument } from '../../lib/legal-engine/legalDocumentSanitizer';
 import { UniversalLegalDocument, createEmptyDocument } from '../../lib/legal-engine/types';
+import { getDocumentTemplate } from '../../lib/legal-engine/documentTemplates';
+import { buildDocumentPlan } from '../../lib/legal-engine/documentPlan';
 
 function mkDoc(overrides: Partial<UniversalLegalDocument> = {}): UniversalLegalDocument {
   return createEmptyDocument({
@@ -67,6 +69,54 @@ describe('buildContestacionSkeleton — estructura GENERATED dedicada', () => {
     for (let i = 1; i < secs.length; i++) {
       expect(secs[i].title.toLowerCase()).not.toBe(secs[i - 1].title.toLowerCase());
     }
+  });
+
+  it('mantiene la sección canónica DERECHO en la contestación civil rich-first', () => {
+    const civil = mkDoc({
+      documentType: 'contestacion_demanda_civil',
+      documentTypeLabel: 'Contestación de Demanda Civil',
+      matter: 'Civil',
+    });
+    const secs = buildContestacionSkeleton(civil, {
+      richCaseAnalysis: { facts: [], claims: [], evidenceMentions: [] },
+    } as any);
+
+    expect(secs.map((section) => section.title)).toContain('DERECHO');
+    expect(secs.find((section) => section.title === 'DERECHO')?.type).toBe('legal_grounds');
+  });
+
+  it('conserva DERECHO además de ALEGATOS en el plan canónico rich-first laboral', () => {
+    const doc = mkDoc({
+      documentType: 'contestacion_demanda_laboral',
+      documentTypeLabel: 'Contestación de Demanda Laboral',
+      matter: 'Laboral',
+    });
+    const caseAnalysis = {
+      richCaseAnalysis: {
+        parties: [], assertions: [], claims: [], facts: [], documents: [], evidenceMentions: [], evidenceOffers: [],
+        arguments: [], authorities: [], dates: [], amounts: [], proceduralTimeline: [], conflicts: [], missingData: [],
+        sourcePosition: { status: 'UNKNOWN', assertionIds: [], provenance: [] },
+        clientPosition: { status: 'UNKNOWN', source: 'SOURCE_POSITION', propositionIds: [], provenance: [] },
+        extractionStats: {
+          sourceUnitCount: 0, candidatesDetected: 0, candidatesAccepted: 0, candidatesMerged: 0,
+          candidatesRejected: 0, candidatesForReview: 0, rejectionReasons: {}, provenanceComplete: 0,
+          provenancePartial: 0, provenanceMissing: 0,
+        },
+        candidates: [],
+      },
+    } as any;
+    const plan = buildDocumentPlan({
+      doc,
+      template: getDocumentTemplate('contestacion_demanda_laboral'),
+      caseAnalysis,
+    });
+    const titles = plan.sections.map((section) => section.title);
+    const derecho = plan.sections.find((section) => section.title === 'DERECHO');
+
+    expect(titles).toEqual(expect.arrayContaining(['DERECHO', 'ALEGATOS']));
+    expect(derecho?.type).toBe('legal_grounds');
+    expect(derecho?.content[0]?.text).toContain('fuentes oficiales');
+    expect(derecho?.content[0]?.text).not.toMatch(/artículo\s+\d|jurisprudencia/i);
   });
 });
 

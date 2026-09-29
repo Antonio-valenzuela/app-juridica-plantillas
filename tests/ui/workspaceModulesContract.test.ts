@@ -40,6 +40,13 @@ describe('Workspace visual modules contract', () => {
     expect(modules).toContain('Fechas excluidas configuradas');
   });
 
+  it('fija el encabezado y las vistas de investigación a clases de layout resistentes a utilidades heredadas', () => {
+    const modules = fs.readFileSync(modulesPath, 'utf8');
+    expect(modules).toContain('workspace-page-header');
+    expect(modules).toContain('workspace-research-grid');
+    expect(modules).toContain('workspace-library-grid');
+  });
+
   it('no mezcla el estado de error de investigación con el estado vacío', () => {
     const modules = fs.readFileSync(modulesPath, 'utf8');
     expect(modules).toContain('!hasError && !loading && query && results.length === 0');

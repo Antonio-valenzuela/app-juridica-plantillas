@@ -13,7 +13,7 @@ import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { join } from 'path';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -41,6 +41,12 @@ export interface OCRResult {
   durationMs: number;
   /** Any provider-specific warnings */
   warnings: string[];
+  /** Time spent rendering/preparing pages before recognition, when measurable. */
+  preparationDurationMs?: number;
+  /** Time spent in recognition, excluding page preparation, when measurable. */
+  recognitionDurationMs?: number;
+  /** Bounded worker count used by the provider, when applicable. */
+  concurrency?: number;
 }
 
 export interface OCRInput {
@@ -51,6 +57,20 @@ export interface OCRInput {
   language?: string;
   /** Original filename for logging */
   fileName?: string;
+  /** Pages selected by native extraction; one-based. Omitted means every page. */
+  pageNumbers?: number[];
+  /** Total source pages, which may be greater than pageNumbers.length. */
+  totalPages?: number;
+  /** Real progress callback, invoked after each page finishes OCR. */
+  onProgress?: (progress: OCRPageProgress) => void;
+  /** Bounded worker count; falls back to OCR_CONCURRENCY or 2. */
+  concurrency?: number;
+}
+
+export interface OCRPageProgress {
+  processedPages: number;
+  totalPages: number;
+  page: number;
 }
 
 /** Contract all OCR providers must implement */
@@ -382,6 +402,13 @@ export function extractImagesFromPdfBuffer(pdfBuffer: Buffer): Buffer[] {
 
 let resolvedPdfRenderer: string | null | undefined;
 
+export function resolveOcrConcurrency(requested: number | undefined, totalPages: number): number {
+  const configured = Number.isFinite(requested) && requested && requested > 0
+    ? requested
+    : Number(process.env.OCR_CONCURRENCY) || 2;
+  return Math.min(Math.max(1, Math.floor(configured)), 4, Math.max(1, totalPages));
+}
+
 function resolveTesseractWorkerPath(): string | undefined {
   const configured = process.env.TESSERACT_WORKER_PATH?.trim();
   const packageWorker = join(process.cwd(), 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
@@ -424,28 +451,51 @@ export async function resolvePdfRendererForReadiness(): Promise<string | null> {
   return resolvePdfRenderer();
 }
 
-async function renderPdfToImages(pdfBuffer: Buffer, command: string): Promise<Buffer[]> {
+interface RenderedPdfImage {
+  page: number;
+  buffer: Buffer;
+}
+
+function pageRanges(pageNumbers: number[]): Array<[number, number]> {
+  const pages = Array.from(new Set(pageNumbers.filter((page) => Number.isInteger(page) && page > 0))).sort((a, b) => a - b);
+  const ranges: Array<[number, number]> = [];
+  for (const page of pages) {
+    const previous = ranges[ranges.length - 1];
+    if (previous && page === previous[1] + 1) previous[1] = page;
+    else ranges.push([page, page]);
+  }
+  return ranges;
+}
+
+async function renderPdfToImages(pdfBuffer: Buffer, command: string, selectedPages?: number[]): Promise<RenderedPdfImage[]> {
   const workDir = await mkdtemp(join(tmpdir(), 'app-plantillas-ocr-'));
   const pdfPath = join(workDir, 'document.pdf');
-  const outputPrefix = join(workDir, 'page');
+  const ranges = selectedPages?.length ? pageRanges(selectedPages) : [];
+  const renderRanges = ranges.length ? ranges : [[1, Number.MAX_SAFE_INTEGER] as [number, number]];
 
   try {
     await writeFile(pdfPath, pdfBuffer);
-    await execFileAsync(
-      command,
-      ['-jpeg', '-jpegopt', 'quality=85', '-r', '120', pdfPath, outputPrefix],
-      { windowsHide: true, maxBuffer: 2 * 1024 * 1024 }
-    );
-
-    const renderedFiles = (await readdir(dirname(outputPrefix)))
-      .filter((name) => /^page-\d+\.jpe?g$/i.test(name))
-      .sort((a, b) => {
-        const pageA = Number(a.match(/(\d+)/)?.[1] || 0);
-        const pageB = Number(b.match(/(\d+)/)?.[1] || 0);
-        return pageA - pageB;
-      });
-
-    return Promise.all(renderedFiles.map((fileName) => readFile(join(workDir, fileName))));
+    const rendered: RenderedPdfImage[] = [];
+    for (let rangeIndex = 0; rangeIndex < renderRanges.length; rangeIndex += 1) {
+      const [from, to] = renderRanges[rangeIndex];
+      const outputPrefix = join(workDir, `range-${rangeIndex}`);
+      const args = ['-jpeg', '-jpegopt', 'quality=85', '-r', '120'];
+      if (to !== Number.MAX_SAFE_INTEGER) args.push('-f', String(from), '-l', String(to));
+      args.push(pdfPath, outputPrefix);
+      await execFileAsync(command, args, { windowsHide: true, maxBuffer: 2 * 1024 * 1024 });
+      const renderedFiles = (await readdir(workDir))
+        .filter((name) => name.startsWith(`range-${rangeIndex}-`) && /\.jpe?g$/i.test(name))
+        .sort((a, b) => {
+          const pageA = Number(a.match(/-(\d+)\.jpe?g$/i)?.[1] || 0);
+          const pageB = Number(b.match(/-(\d+)\.jpe?g$/i)?.[1] || 0);
+          return pageA - pageB;
+        });
+      for (const fileName of renderedFiles) {
+        const page = Number(fileName.match(/-(\d+)\.jpe?g$/i)?.[1] || 0);
+        rendered.push({ page, buffer: await readFile(join(workDir, fileName)) });
+      }
+    }
+    return rendered.sort((a, b) => a.page - b.page);
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -469,14 +519,15 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
 
   async process(input: OCRInput): Promise<OCRResult> {
     const start = Date.now();
-    let imageBuffers: Buffer[] = [];
+    const preparationStart = Date.now();
+    let imageBuffers: RenderedPdfImage[] = [];
     let warningsFromRenderError = '';
 
     if (input.mimeType === 'application/pdf') {
       const pdfRenderer = await resolvePdfRenderer();
       if (pdfRenderer) {
         try {
-          imageBuffers = await renderPdfToImages(input.buffer, pdfRenderer);
+          imageBuffers = await renderPdfToImages(input.buffer, pdfRenderer, input.pageNumbers);
         } catch (error: any) {
           warningsFromRenderError = `Renderizado PDF local falló: ${error?.message || 'error desconocido'}`;
         }
@@ -485,7 +536,7 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
       // Keep the embedded-JPEG path as a lightweight fallback for PDFs whose
       // native renderer is unavailable or cannot decode a particular file.
       if (imageBuffers.length === 0) {
-        imageBuffers = extractImagesFromPdfBuffer(input.buffer);
+        imageBuffers = extractImagesFromPdfBuffer(input.buffer).map((buffer, index) => ({ page: index + 1, buffer }));
       }
       if (imageBuffers.length === 0) {
         return {
@@ -502,11 +553,12 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
         };
       }
     } else {
-      imageBuffers = [input.buffer];
+      imageBuffers = [{ page: 1, buffer: input.buffer }];
     }
+    const preparationDurationMs = Date.now() - preparationStart;
 
     const Tesseract = await import('tesseract.js');
-    const workerCount = Math.min(2, imageBuffers.length);
+    const workerCount = resolveOcrConcurrency(input.concurrency, imageBuffers.length);
     const workerPath = resolveTesseractWorkerPath();
     const workers = await Promise.all(
       Array.from(
@@ -516,6 +568,9 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
     );
     const pageResults: Array<OCRPageResult & { confidence: number }> = [];
     const warnings: string[] = warningsFromRenderError ? [warningsFromRenderError] : [];
+    let processedPages = 0;
+    const totalPages = input.totalPages || imageBuffers.length;
+    const recognitionStart = Date.now();
 
     try {
       let nextPage = 0;
@@ -523,14 +578,17 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
         while (true) {
           const idx = nextPage++;
           if (idx >= imageBuffers.length) return;
-          const result = await worker.recognize(imageBuffers[idx]);
+          const image = imageBuffers[idx];
+          const result = await worker.recognize(image.buffer);
           const pageText = (result.data.text || '').trim();
           pageResults[idx] = {
-            page: idx + 1,
+            page: image.page,
             text: pageText,
             chars: pageText.length,
             confidence: Math.round(result.data.confidence || 0),
           };
+          processedPages += 1;
+          input.onProgress?.({ processedPages, totalPages, page: image.page });
         }
       }));
     } catch (err: any) {
@@ -550,9 +608,12 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
       pages,
       confidence: avgConfidence,
       provider: this.name,
-      pageCount: imageBuffers.length,
+      pageCount: totalPages,
       durationMs: Date.now() - start,
       warnings,
+      preparationDurationMs,
+      recognitionDurationMs: Date.now() - recognitionStart,
+      concurrency: workerCount,
     };
   }
 }
@@ -594,7 +655,9 @@ export function getOCRProvider(): DocumentOCRProvider {
 
   switch (provider) {
     case 'ilovepdf':
-      return new ILovePDFOCRProvider();
+      // Case documents are private. Keep the adapter for a future consented
+      // workflow, but never select cloud OCR in the current local-only build.
+      return new DisabledOCRProvider();
     case 'tesseract':
       return new TesseractOCRProvider();
     case 'mock':

@@ -129,6 +129,19 @@ export interface ExtractionResult {
   ocrProvider: string | null;
   /** Formal OCR lifecycle status (distinguishes NOT_CONFIGURED from AVAILABLE_AND_FAILED) */
   ocrStatus?: 'OCR_COMPLETED' | 'OCR_NOT_REQUIRED' | 'OCR_AVAILABLE_AND_FAILED' | 'OCR_PROVIDER_NOT_CONFIGURED';
+  analysisMetrics: ExtractionMetrics;
+}
+
+export interface ExtractionMetrics {
+  documentAnalysisDurationMs: number;
+  nativeExtractionDurationMs: number;
+  ocrPreparationDurationMs: number;
+  ocrDurationMs: number;
+  ocrPages: number;
+  totalPages: number;
+  cacheHit: boolean;
+  extractionStatus: ExtractionResult['status'];
+  concurrency: number;
 }
 
 // ── Quality threshold ──────────────────────────────────────────────────────────
@@ -238,6 +251,24 @@ export function assessExtractionQuality(
   return { sufficient: true, reason: 'Extracción nativa suficiente', warnings, emptyPages };
 }
 
+export function selectOcrPageNumbers(nativePages: DocumentPage[], pageCount: number): number[] {
+  const totalPages = Math.max(1, pageCount);
+  if (nativePages.length === 0) return Array.from({ length: totalPages }, (_, index) => index + 1);
+
+  const pagesByNumber = new Map(nativePages.map((page) => [page.page, page]));
+  const selected = Array.from({ length: totalPages }, (_, index) => index + 1)
+    .filter((pageNumber) => {
+      const page = pagesByNumber.get(pageNumber);
+      if (!page) return true;
+      const text = page.text.trim();
+      const illegalChars = (text.match(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFD]/g) || []).length;
+      const illegalRatio = illegalChars / Math.max(1, text.length);
+      return text.length < NATIVE_QUALITY_THRESHOLD || illegalRatio > 0.15;
+    });
+
+  return selected.length > 0 ? selected : [];
+}
+
 // ── Native extractors per file type ───────────────────────────────────────────
 
 async function extractNative(
@@ -321,6 +352,14 @@ export interface ExtractDocumentInput {
   buffer: Buffer;
   fileName: string;
   mimeType: string;
+  onProgress?: (progress: {
+    phase: 'NATIVE_EXTRACTION' | 'OCR' | 'NORMALIZATION' | 'QUALITY_VALIDATION';
+    processedPages: number;
+    totalPages: number;
+    ocrPages: number;
+    percentage: number;
+  }) => void;
+  cacheHit?: boolean;
 }
 
 /**
@@ -338,6 +377,12 @@ export async function extractDocument(
   const steps: ExtractionStep[] = [];
   const warnings: string[] = [];
   let ocrProvider: string | null = null;
+  let nativeExtractionDurationMs = 0;
+  let ocrPreparationDurationMs = 0;
+  let ocrDurationMs = 0;
+  let ocrPages = 0;
+  let concurrency = 0;
+  let ocrProviderConfidence: number | null = null;
 
   // ── Step 1: File received ─────────────────────────────────────────────────
   steps.push({
@@ -353,6 +398,7 @@ export async function extractDocument(
   let pageCount = 1;
   let nativePages: DocumentPage[] = [];
 
+  const nativeStartedAt = Date.now();
   try {
     const nativeResult = await extractNative(buffer, ext, mimeType);
     nativeText = nativeResult.text;
@@ -377,6 +423,8 @@ export async function extractDocument(
       detail: err.message,
     };
   }
+  nativeExtractionDurationMs = Date.now() - nativeStartedAt;
+  input.onProgress?.({ phase: 'NATIVE_EXTRACTION', processedPages: 0, totalPages: pageCount, ocrPages: 0, percentage: 10 });
 
   // ── Step 3: Quality assessment ────────────────────────────────────────────
   const nativeQuality = assessExtractionQuality(nativeText, pageCount);
@@ -402,6 +450,8 @@ export async function extractDocument(
   let ocrStatus: ExtractionResult['ocrStatus'] = 'OCR_NOT_REQUIRED';
 
   if (!nativeQuality.sufficient) {
+    const selectedOcrPages = selectOcrPageNumbers(nativePages, pageCount);
+    ocrPages = selectedOcrPages.length;
     const canOCR = ocrAvailable(mimeType) || ocrAvailable('application/pdf');
 
     if (!canOCR) {
@@ -424,21 +474,42 @@ export async function extractDocument(
           mimeType,
           language: 'spa',
           fileName,
+          pageNumbers: selectedOcrPages,
+          totalPages: pageCount,
+          concurrency: Number(process.env.OCR_CONCURRENCY) || 2,
+          onProgress: ({ processedPages, totalPages }) => {
+            input.onProgress?.({
+              phase: 'OCR',
+              processedPages,
+              totalPages,
+              ocrPages: selectedOcrPages.length,
+              percentage: Math.min(85, 10 + Math.round((processedPages / Math.max(1, selectedOcrPages.length)) * 70)),
+            });
+          },
         });
+        ocrProviderConfidence = ocrResult.confidence;
 
         if (ocrResult.text.trim().length > 0) {
-          finalText = normalizeLegalDocumentText(ocrResult.text);
-          finalPages = ocrResult.pages.map((p: OCRPageResult) => ({
-            page: p.page,
-            text: normalizeLegalDocumentText(p.text),
-            chars: normalizeLegalDocumentText(p.text).length,
+          const nativeByPage = new Map(nativePages.map((page) => [page.page, page]));
+          const ocrByPage = new Map(ocrResult.pages.map((p: OCRPageResult) => {
+            const text = normalizeLegalDocumentText(p.text);
+            return [p.page, { page: p.page, text, chars: text.length } as DocumentPage];
           }));
           pageCount = ocrResult.pageCount || pageCount;
+          finalPages = Array.from({ length: pageCount }, (_, index) => {
+            const pageNumber = index + 1;
+            return ocrByPage.get(pageNumber) || nativeByPage.get(pageNumber) || { page: pageNumber, text: '', chars: 0 };
+          });
+          finalText = finalPages.map((page) => page.text).filter(Boolean).join('\n\n').trim();
+          input.onProgress?.({ phase: 'NORMALIZATION', processedPages: pageCount, totalPages: pageCount, ocrPages: selectedOcrPages.length, percentage: 90 });
           ocrUsed = true;
           ocrStatus = 'OCR_COMPLETED';
           extractionMethod = 'ocr';
           ocrScore = computeDocumentQualityScore(finalText, pageCount, true);
           warnings.push(...ocrResult.warnings);
+          ocrPreparationDurationMs = ocrResult.preparationDurationMs || 0;
+          ocrDurationMs = ocrResult.recognitionDurationMs || Math.max(0, ocrResult.durationMs - ocrPreparationDurationMs);
+          concurrency = ocrResult.concurrency || 0;
 
           steps[3] = {
             step: 4,
@@ -486,6 +557,7 @@ export async function extractDocument(
   // ── Step 5: Post-OCR quality validation ───────────────────────────────────
   const finalQuality = assessExtractionQuality(finalText, pageCount);
   const finalScore = computeDocumentQualityScore(finalText, pageCount, ocrUsed);
+  input.onProgress?.({ phase: 'QUALITY_VALIDATION', processedPages: pageCount, totalPages: pageCount, ocrPages, percentage: 96 });
 
   // Un proveedor OCR mock/test jamás puede acreditar una fuente verificada.
   const mockOcrUsed = ocrUsed && ocrProvider === 'mock';
@@ -493,7 +565,16 @@ export async function extractDocument(
     warnings.push('[MOCK OCR] El proveedor OCR configurado es de prueba (mock). La fuente NO se marca como verificada. Configura OCR_PROVIDER=ilovepdf con credenciales reales o =tesseract para OCR de producción.');
   }
 
-  const sourceValidated = !mockOcrUsed && finalQuality.sufficient && finalScore.status === 'READY';
+  const ocrConfidenceAcceptable = !ocrUsed || (ocrProviderConfidence !== null && ocrProviderConfidence >= 70);
+  if (ocrUsed && !ocrConfidenceAcceptable) {
+    warnings.push(`Confianza OCR insuficiente (${ocrProviderConfidence ?? 0}%). Se requiere al menos 70% para validar la fuente.`);
+  }
+  const sourceValidated = !mockOcrUsed && ocrConfidenceAcceptable && finalQuality.sufficient && finalScore.status === 'READY';
+  const sourceValidationFailureReason = mockOcrUsed
+    ? 'Proveedor OCR de prueba no acredita verificación'
+    : ocrUsed && !ocrConfidenceAcceptable
+      ? `Confianza OCR insuficiente (${ocrProviderConfidence ?? 0}%; mínimo 70%)`
+      : finalQuality.reason;
   const emptyPageRatio = finalPages.length > 0
     ? finalPages.filter((page) => page.chars < 30).length / Math.max(1, pageCount)
     : (finalText.trim() ? 0 : 1);
@@ -508,10 +589,10 @@ export async function extractDocument(
       ? `Fuente validada para IA: ${pageCount} páginas, ${finalText.length.toLocaleString()} chars, ${finalScore.confidence}%`
       : mockOcrUsed
       ? 'Fuente NO verificada: el OCR usado es un proveedor mock de prueba (configura OCR real)'
-      : `Fuente no validada: ${finalQuality.reason}`,
+      : `Fuente no validada: ${sourceValidationFailureReason}`,
     done: sourceValidated,
     status: sourceValidated ? 'ok' : 'error',
-    detail: sourceValidated ? undefined : mockOcrUsed ? 'Proveedor OCR de prueba no acredita verificación' : finalQuality.reason,
+    detail: sourceValidated ? undefined : sourceValidationFailureReason,
   });
 
   // ── Determine final status ────────────────────────────────────────────────
@@ -542,6 +623,18 @@ export async function extractDocument(
     warnings: warnings.filter((w) => !w.includes('MOCK')),
   };
   console.log('[document-extractor]', JSON.stringify(log));
+
+  const analysisMetrics: ExtractionMetrics = {
+    documentAnalysisDurationMs: Date.now() - pipelineStart,
+    nativeExtractionDurationMs,
+    ocrPreparationDurationMs,
+    ocrDurationMs,
+    ocrPages,
+    totalPages: pageCount,
+    cacheHit: input.cacheHit === true,
+    extractionStatus: status,
+    concurrency,
+  };
 
   return markDocumentAsSource({
     status,
@@ -575,5 +668,6 @@ export async function extractDocument(
     durationMs: Date.now() - pipelineStart,
     ocrProvider,
     ocrStatus,
+    analysisMetrics,
   }, fileName);
 }

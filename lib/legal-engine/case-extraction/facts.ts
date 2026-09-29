@@ -43,6 +43,8 @@ function attributionFor(candidate: ExtractionCandidate, text: string): FactAttri
  * not enter through the judicial branch.
  */
 export function isFactCandidate(candidate: ExtractionCandidate): boolean {
+  if (/^(?:CAP[ÍI]TULO\s+DE\s+)?PRUEBAS?$/i.test(candidate.rawText.trim())) return false;
+  if (/^(?:\d+[\s.)\-–—]+)?(?:DOCUMENTAL(?:\s+(?:P[ÚU]BLICA|PRIVADA))?|CONFESIONAL(?:\s+(?:DIRECTA|EXPRESA))?|TESTIMONIAL|PERICIAL|PRESUNCIONAL(?:\s+LEGAL(?:\s+Y\s+HUMANA)?)?|INSTRUMENTAL(?:\s+DE\s+ACTUACIONES)?)\s*[:.\-–—]/i.test(candidate.rawText.trim())) return false;
   return candidate.kind === 'FACT'
     || candidate.classification?.label === 'SOURCE_ASSERTION'
     || (candidate.kind === 'ASSERTION' && ESTABLISHED_CANDIDATE_RE.test(candidate.rawText));

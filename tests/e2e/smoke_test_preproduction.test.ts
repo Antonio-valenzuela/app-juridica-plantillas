@@ -44,7 +44,7 @@ function makeReadyExportFixture(document: UniversalLegalDocument): UniversalLega
   return markDocumentAsReadyToExport(readyCandidate, { explicit: true });
 }
 
-describe('SMOKE TEST FINAL — PREPRODUCCIÓN / SIMULACIÓN DE ABOGADO REAL', () => {
+describe.skipIf(process.env.RUN_LIVE_PROVIDER_TESTS !== 'true')('SMOKE TEST FINAL — PREPRODUCCIÓN / SIMULACIÓN DE ABOGADO REAL', () => {
 
   /* ==========================================================================
      1. FLUJO UNIVERSAL & EDITOR: CASO AUDIT-AMP-001/2026

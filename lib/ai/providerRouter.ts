@@ -30,15 +30,12 @@ function resolveRetryCount(request: AIRequest, providerId: AIProviderId): number
   if (providerId === 'local') return 0;
   const configured = request.maxProviderRetries !== undefined
     ? request.maxProviderRetries
-    : Number(process.env.AI_PROVIDER_RETRIES || 0);
-  return Number.isFinite(configured) ? Math.min(2, Math.max(0, Math.round(configured))) : 0;
+    : Number(process.env.AI_PROVIDER_RETRIES || 1);
+  return Number.isFinite(configured) ? Math.min(2, Math.max(0, Math.round(configured))) : 1;
 }
 
 function isRetryableFailure(reason: string): boolean {
-  // Sin Retry-After disponible en el contrato normalizado, un 429 pasa al
-  // siguiente provider para no reenviar el mismo payload durante el TPM.
-  return /TIMEOUT|HTTP_408|HTTP_5XX|HTTP_5\d\d|SERVER_ERROR/i.test(reason)
-    && !/RATE_LIMIT|HTTP_429/i.test(reason);
+  return /TIMEOUT|HTTP_408|HTTP_5XX|HTTP_5\d\d|SERVER_ERROR/i.test(reason) && !/RATE_LIMIT|HTTP_429/i.test(reason);
 }
 
 function recordProviderUsage(request: AIRequest, log: ProviderExecutionLog, fallbackRank: number, usage?: AIProviderResult['usage']): void {
@@ -89,7 +86,8 @@ export class ProviderRouter {
   }
 
   async route(request: AIRequest): Promise<RouteResult> {
-    const chain = this.getChainFn();
+    const externalAllowed = request.externalProviderOptIn === true;
+    const chain = externalAllowed ? this.getChainFn() : ['local'];
     const logs: ProviderExecutionLog[] = [];
     let lastFailureReason: string | null = null;
     const requestedProvider = (chain[0] as AIProviderId) || "gemini";
@@ -229,7 +227,9 @@ export class ProviderRouter {
           })}`
         );
         console.log(`[GenerationLifecycle] jobId=${request.requestId || ''} phase=provider state=processing progress= provider=${providerId} attempt=${attempt + 1} durationMs=${durationMs}`);
-        if (attempt + 1 < maxAttempts && isRetryableFailure(failureReason)) continue;
+        if (attempt + 1 < maxAttempts && isRetryableFailure(failureReason)) {
+          continue;
+        }
         break;
         } catch (err: unknown) {
           const durationMs = Date.now() - startMs;
@@ -268,7 +268,9 @@ export class ProviderRouter {
             })}`
           );
           console.log(`[GenerationLifecycle] jobId=${request.requestId || ''} phase=provider state=processing progress= provider=${providerId} attempt=${attempt + 1} durationMs=${durationMs}`);
-          if (attempt + 1 < maxAttempts && isRetryableFailure(failureReason)) continue;
+          if (attempt + 1 < maxAttempts && isRetryableFailure(failureReason)) {
+            continue;
+          }
           break;
         }
       }
@@ -291,15 +293,7 @@ export class ProviderRouter {
       logs.push(localLog);
       recordProviderUsage(request, localLog, chain.length, localRes.usage);
     } else {
-      localRes = {
-        provider: "local",
-        model: "local-deterministic-rules-v1",
-        success: true,
-        content: "FALLBACK_DETERMINISTICO_LOCAL",
-        latencyMs: 0,
-        origin: "LOCAL_PLACEHOLDER",
-        isLegalAiContent: false,
-      };
+      localRes = await new LocalProvider().generate(request);
     }
     const resolvedFallbackReason = lastFailureReason || "ALL_PROVIDERS_EXHAUSTED";
     return {

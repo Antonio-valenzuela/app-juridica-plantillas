@@ -30,6 +30,7 @@ import {
   executeIssueScopedGeneration,
   parseIssueProviderOutput,
   resolveIssueEligibility,
+  resolveEffectiveIssueGenerationEligibility,
   selectIssueDraftContract,
 } from '@/lib/legal-engine/issueScopedGeneration';
 
@@ -48,7 +49,7 @@ function validRawResult(overrides: Record<string, unknown> = {}): Record<string,
     authorityMentionIds: ['authority-1'],
     unresolvedRequirements: [],
     generationMetadata: {
-      promptVersion: 'CLAIM_ELEMENT_V1',
+      promptVersion: 'CLAIM_ELEMENT_V2',
       contextHash: 'ctx-1',
       providerRequested: 'nvidia',
       providerActuallyUsed: 'nvidia',
@@ -67,7 +68,7 @@ function validationInput(overrides: Record<string, unknown> = {}) {
     allowedSourceEntityIds: ['claim-1', 'fact-1'],
     allowedAuthorityMentionIds: ['authority-1'],
     contextHash: 'ctx-1',
-    promptVersion: 'CLAIM_ELEMENT_V1',
+    promptVersion: 'CLAIM_ELEMENT_V2',
     ...overrides,
   };
 }
@@ -388,7 +389,7 @@ describe('FASE 4 IssueDraftResult boundary', () => {
     expect(modelValidation.valid).toBe(true);
     const result = materializeIssueDraftResult(modelValidation.output!, taskForIssue(), {
       issueType: 'CLAIM_ELEMENT',
-      promptVersion: 'CLAIM_ELEMENT_V1',
+      promptVersion: 'CLAIM_ELEMENT_V2',
       contextHash: 'ctx-1',
       providerRequested: 'nvidia',
       providerActuallyUsed: 'nvidia',
@@ -520,7 +521,7 @@ describe('FASE 4 IssueDraftResult boundary', () => {
       authorityMentionIds: [],
       unresolvedRequirements: [],
       generationMetadata: {
-        promptVersion: 'FACT_DISPUTE_V1',
+        promptVersion: 'FACT_DISPUTE_V2',
         contextHash: 'ctx-1',
         providerRequested: 'fixture',
         providerActuallyUsed: 'fixture',
@@ -530,7 +531,7 @@ describe('FASE 4 IssueDraftResult boundary', () => {
       issueType: 'FACT_DISPUTE',
       draftContract: 'DESCRIPTIVE',
       allowedSourceEntityIds: ['fact-1'],
-      promptVersion: 'FACT_DISPUTE_V1',
+      promptVersion: 'FACT_DISPUTE_V2',
       fieldRequirements: getIssueDraftContractRequirements('DESCRIPTIVE'),
     }));
 
@@ -592,7 +593,7 @@ describe('FASE 4 IssueDraftResult boundary', () => {
 
 describe('FASE 4 issue eligibility and plan linkage', () => {
   it.each([
-    ['NEEDS_CLIENT_POSITION', false],
+    ['NEEDS_CLIENT_POSITION', true],
     ['BLOCKED_BY_CONFLICT', false],
     ['NEEDS_RESEARCH', false],
     ['UNLINKED', false],
@@ -623,6 +624,30 @@ describe('FASE 4 issue eligibility and plan linkage', () => {
     expect(result.reason).toBe('FORMAL_DETERMINISTIC_TASK');
   });
 
+  it('allows a source-linked non-final defensive draft when client posture is missing, without changing canonical status', () => {
+    const issue = { ...issueWithStatus('NEEDS_CLIENT_POSITION'), relationStatus: 'EXPLICIT' as const };
+    const factTask = { ...taskForIssue(), taskType: 'FACT_RESPONSE' as const, type: 'FACT_RESPONSE' as const };
+    const result = resolveEffectiveIssueGenerationEligibility({
+      issue,
+      formal: false,
+      taskType: factTask.taskType,
+    });
+
+    expect(result).toMatchObject({
+      eligible: true,
+      canonicalStatus: 'NEEDS_CLIENT_POSITION',
+      status: 'NEEDS_CLIENT_POSITION',
+      effectiveStatus: 'GENERATABLE_REQUIRES_REVIEW',
+      reason: 'MISSING_CLIENT_POSITION_SAFE_DRAFT',
+    });
+    expect(resolveIssueEligibility(factTask, matrixWithIssueStatus('NEEDS_CLIENT_POSITION'), { formal: false }).eligible).toBe(true);
+    expect(resolveEffectiveIssueGenerationEligibility({
+      issue,
+      formal: false,
+      taskType: 'COVERAGE_ITEM',
+    }).eligible).toBe(false);
+  });
+
   it('uses a singular alias only as an explicit legacy fallback', () => {
     const task = { ...taskForIssue(), legalIssueIds: undefined, targetIssueId: 'issue-ready-1' };
     const result = resolveIssueEligibility(task, matrixWithIssueStatus('READY_FOR_GENERATION'), { formal: false });
@@ -645,6 +670,16 @@ describe('FASE 4 issue eligibility and plan linkage', () => {
 
     const tasks = buildGenerationTasksForSection(section!, doc, analysis, coverageMatrix);
     expect(tasks.some((task) => task.legalIssueIds?.length && task.coverageItemIds?.length)).toBe(true);
+  });
+
+  it('states the exact allowlisted source and authority IDs prominently in the provider prompt', () => {
+    const pack = packFor('FACT_DISPUTE');
+    const task = { ...taskForIssue(), legalIssueIds: [pack.legalIssue.id] };
+    const prompt = buildIssuePrompt(pack, task);
+
+    expect(prompt.userMessage).toContain('IDS EXACTOS PERMITIDOS');
+    for (const fact of pack.facts) expect(prompt.userMessage).toContain(fact.id);
+    expect(prompt.userMessage).toContain('No crees ni modifiques identificadores');
   });
 });
 
@@ -726,6 +761,15 @@ describe('FASE 4 allow-listed issue context and prompt strategies', () => {
         valid: true,
         errors: [],
       });
+    });
+
+    it('incluye el objetivo de extensión de la tarea sin autorizar relleno', () => {
+      const task = { ...taskForIssue(), targetWords: 250 };
+      const prompt = buildIssuePrompt(packFor('CLAIM_ELEMENT'), task);
+
+      expect(prompt.systemPrompt).toContain('250');
+      expect(prompt.userMessage).toContain('targetWords');
+      expect(prompt.systemPrompt).toMatch(/no repitas|relleno/i);
     });
   });
 
@@ -848,12 +892,12 @@ describe('FASE 4 allow-listed issue context and prompt strategies', () => {
   });
 
   it.each([
-    ['CLAIM_ELEMENT', 'CLAIM_ELEMENT_V1'],
-    ['FACT_DISPUTE', 'FACT_DISPUTE_V1'],
-    ['EVIDENCE_RELEVANCE', 'EVIDENCE_RELEVANCE_V1'],
-    ['EVIDENCE_SUFFICIENCY', 'EVIDENCE_SUFFICIENCY_V1'],
-    ['SOURCE_ARGUMENT', 'SOURCE_ARGUMENT_V1'],
-    ['PETITION_SUPPORT', 'PETITION_SUPPORT_V1'],
+    ['CLAIM_ELEMENT', 'CLAIM_ELEMENT_V2'],
+    ['FACT_DISPUTE', 'FACT_DISPUTE_V2'],
+    ['EVIDENCE_RELEVANCE', 'EVIDENCE_RELEVANCE_V2'],
+    ['EVIDENCE_SUFFICIENCY', 'EVIDENCE_SUFFICIENCY_V2'],
+    ['SOURCE_ARGUMENT', 'SOURCE_ARGUMENT_V2'],
+    ['PETITION_SUPPORT', 'PETITION_SUPPORT_V2'],
   ] as const)('selects %s', (issueType, promptVersion) => {
     expect(promptFor(issueType).promptVersion).toBe(promptVersion);
   });
@@ -1219,26 +1263,45 @@ describe('FASE 4 provider seam and post-provider validation', () => {
     expect(outcome.validation?.errors).toContain('REQUIRED_ARRAY_INVALID:factualDevelopment');
   });
 
-  it('keeps an allowed descriptive unresolved requirement as VALID_NON_FINAL', async () => {
+  it('keeps a source-linked draft non-final when client posture is missing, even if the provider omits the reminder', async () => {
     const { analysis, doc, task } = descriptiveExecutionContext();
+    const issueId = task.legalIssueIds![0];
+    const canonicalMatrix = doc.legalIssueMatrix!;
+    const reviewMatrix = {
+      ...canonicalMatrix,
+      issues: canonicalMatrix.issues.map((candidate) => candidate.id === issueId
+        ? {
+            ...candidate,
+            status: 'NEEDS_CLIENT_POSITION' as const,
+            clientPositionStatus: 'UNKNOWN' as const,
+            blocking: true,
+          }
+        : candidate),
+    };
+    const reviewDoc = { ...doc, legalIssueMatrix: reviewMatrix };
     const invokeProvider = vi.fn().mockImplementation(async () => ({
       success: true,
       structuredOutput: {
         factualDevelopment: ['La fuente identifica el hecho establecido.'],
         sourceEntityIds: ['fixture-f-fact-1'],
         authorityMentionIds: [],
-        unresolvedRequirements: ['MISSING_CLIENT_POSITION'],
+        unresolvedRequirements: [],
       },
       provider: 'fixture',
       providerActuallyUsed: 'fixture',
       model: 'fixture-model',
     }));
 
-    const outcome = await executeIssueScopedGeneration(task, doc, analysis, { invokeProvider });
+    const outcome = await executeIssueScopedGeneration(task, reviewDoc, analysis, { invokeProvider });
 
     expect(outcome.status).toBe('VALID_NON_FINAL');
     expect(outcome.validation?.status).toBe('VALID_NON_FINAL');
     expect(outcome.block?.issueDraftValidationStatus).toBe('VALID_NON_FINAL');
+    expect(outcome.validation?.warnings).toContain('REQUIRES_LAWYER_REVIEW');
+    expect(reviewDoc.legalIssueMatrix?.issues.find((candidate) => candidate.id === issueId)?.status)
+      .toBe('NEEDS_CLIENT_POSITION');
+    expect(doc.legalIssueMatrix?.issues.find((candidate) => candidate.id === issueId)?.status)
+      .not.toBe('NEEDS_CLIENT_POSITION');
   });
 
   it('keeps argumentative output strict when thesis, application, or conclusion is missing', async () => {
@@ -1425,6 +1488,30 @@ describe('FASE 4 issue semantics and directed retry', () => {
     expect(evaluation.completeness).toBeGreaterThan(0);
   });
 
+  it('no considera completa una respuesta sustancialmente menor que el objetivo de la tarea', () => {
+    const task = { ...taskForIssue(), targetWords: 250 };
+    const pack = packFor('CLAIM_ELEMENT');
+    const validResult = validRawResult({
+      legalIssueId: pack.legalIssue.id,
+      coverageItemIds: pack.coverage.map((item) => item.id),
+      sourceEntityIds: [
+        ...pack.claims.map((item) => item.id),
+        ...pack.facts.map((item) => item.id),
+        ...pack.evidenceMentions.map((item) => item.id),
+        ...pack.evidenceOffers.map((item) => item.id),
+        ...pack.sourceArguments.map((item) => item.id),
+      ],
+      authorityMentionIds: pack.authorities.map((item) => item.id),
+    });
+    const evaluation = evaluateIssueDraftResult(validResult as any, task, fixtureDocument(), pack);
+
+    expect(evaluation.completeness).toBeLessThan(0.8);
+    expect(evaluation.deficiencies).toContain('ISSUE_DRAFT_BELOW_TARGET');
+    expect(evaluation.hardFailReasons).toEqual([]);
+    expect(evaluation.verdict).toBe('WEAK');
+    expect(evaluation.revisionMode).toBe('EXPAND');
+  });
+
   it('performs one targeted retry for a repairable semantic failure', async () => {
     const { analysis, doc, task } = readyExecutionContext();
     const invokeProvider = vi.fn()
@@ -1607,10 +1694,12 @@ describe('FASE 4 bounded issue executor', () => {
   });
 
   it('does not call provider for a blocked issue or local fallback', async () => {
-    const { analysis, doc, task } = readyExecutionContext();
+    const { analysis, doc, task: baseTask } = readyExecutionContext();
+    const task = { ...baseTask, taskType: 'FACT_RESPONSE' as const };
+    const existingMatrix = doc.legalIssueMatrix as LegalIssueMatrix;
     const blockedMatrix: LegalIssueMatrix = {
-      ...fixtureMatrix(),
-      issues: fixtureMatrix().issues.map((issue) => issue.id === task.legalIssueIds![0]
+      ...existingMatrix,
+      issues: existingMatrix.issues.map((issue) => issue.id === task.legalIssueIds![0]
         ? { ...issue, id: task.legalIssueIds![0], status: 'BLOCKED_BY_CONFLICT', relationStatus: 'EXPLICIT', conflictIds: ['conflict-1'] }
         : issue),
     };
@@ -1623,9 +1712,9 @@ describe('FASE 4 bounded issue executor', () => {
       origin: 'LOCAL_PLACEHOLDER',
     });
 
-    const blocked = await executeReadyIssueTasks([task], blockedDoc, analysis, { invokeProvider });
+    const blocked = await executeIssueScopedGeneration(task, blockedDoc, analysis, { invokeProvider });
     expect(invokeProvider).not.toHaveBeenCalled();
-    expect(blocked[0].status).toBe('BLOCKED');
+    expect(blocked.status).toBe('BLOCKED');
     expect(buildBlockedIssueOutcome(task, blockedMatrix).status).toBe('BLOCKED');
   });
 });
@@ -1960,6 +2049,17 @@ describe('FASE 4 issue-attempt GenerationTrace', () => {
     expect(closed.taskExecutions.some((entry) => entry.taskId === task.id)).toBe(true);
     expect(closed.semanticEvaluations).toHaveLength(1);
     expect(closed.draftBlocks.map((block) => block.generationTaskId)).toContain(task.id);
+    expect(closed.issueGenerationAttempts[0].providerGeneratedWords).toBeGreaterThan(0);
+    expect(closed.issueGenerationAttempts[0].providerGeneratedChars).toBeGreaterThan(0);
+    expect(closed.issueGenerationAttempts[0].validatedWords).toBeGreaterThan(0);
+    expect(closed.issueGenerationAttempts[0].rejectedWords).toBe(0);
+    expect(closed.wordAccounting.find((item) => item.sectionId === task.sectionId)).toMatchObject({
+      providerGeneratedWords: closed.issueGenerationAttempts[0].providerGeneratedWords,
+      validatedWords: closed.issueGenerationAttempts[0].validatedWords,
+      materializedWords: outcome.block?.text.match(/[\p{L}\p{N}]+/gu)?.length,
+      admittedWords: outcome.block?.text.match(/[\p{L}\p{N}]+/gu)?.length,
+    });
+    expect(JSON.stringify(closed.wordAccounting)).not.toContain(outcome.block?.text);
   });
 
   it('trace records attempt one and directed retry', async () => {
@@ -2053,15 +2153,16 @@ describe('FASE 4 rich pipeline integration', () => {
     };
   }
 
-  it('Fixture F calls final-generation provider only for four READY issues', async () => {
+  it('Fixture F calls providers only for READY or review-required issues, never for blocked or research issues', async () => {
     const invokeProvider = vi.fn().mockImplementation(async (request: any) => providerResponse(request));
     const result = await runIssueScopedFixtureGeneration({ invokeProvider });
     const calls = invokeProvider.mock.calls.map(([request]) => request.legalContext?.legalIssue?.id);
-
+    const eligibleIssueIds = result.matrix.issues
+      .filter((issue) => issue.status === 'READY_FOR_GENERATION' || issue.status === 'GENERATABLE_REQUIRES_REVIEW')
+      .map((issue) => issue.id);
     expect(result.matrix.summary.total).toBe(13);
     expect(result.matrix.summary.readyForGeneration).toBe(4);
-    expect(calls).toHaveLength(4);
-    expect(new Set(calls)).toEqual(new Set(result.readyIssueIds));
+    expect(calls.every((issueId) => eligibleIssueIds.includes(issueId))).toBe(true);
     expect(result.blockedIssueIds.every((id) => !calls.includes(id))).toBe(true);
     expect(result.researchIssueIds.every((id) => !calls.includes(id))).toBe(true);
   });

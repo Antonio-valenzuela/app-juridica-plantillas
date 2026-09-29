@@ -96,6 +96,21 @@ describe('FASE 7 Task 1 — final document materialization gate', () => {
     expectGateError(() => verifyFinalDocumentExportability(evidence));
   });
 
+  it('allows an explicit DRAFT review export when blocked assembly evidence remains traceable', () => {
+    const evidence = validEvidence();
+    evidence.assembly.readiness = 'BLOCKED';
+    evidence.assembly.validationStatus = 'REQUIRES_REVIEW';
+    evidence.assembly.assemblyStatus = 'BLOCKED';
+    evidence.assemblyGate.passed = false;
+    evidence.assemblyGate.canMarkAsReady = false;
+    evidence.assemblyGate.readiness = 'BLOCKED';
+
+    const verified = verifyFinalDocumentExportability(evidence, { exportMode: 'DRAFT' });
+
+    expect(verified.verificationMode).toBe('RICH_ASSEMBLY');
+    expect(verified.assembly.readiness).toBe('BLOCKED');
+  });
+
   it('rejects INVALID assembly readiness', () => {
     const evidence = validEvidence();
     evidence.assembly.readiness = 'INVALID';

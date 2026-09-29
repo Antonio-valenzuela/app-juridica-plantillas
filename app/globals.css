@@ -2758,8 +2758,11 @@ textarea:disabled {
 }
 
 .lex-search-icon {
-  font-size: 23px;
-  line-height: 1;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: #63758c;
 }
 
@@ -2892,7 +2895,9 @@ textarea:disabled {
 
   color: #35506e;
 
-  font-size: 21px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
   cursor: pointer;
 }
@@ -3107,6 +3112,7 @@ textarea:disabled {
 
 .lex-sidebar-icon {
   width: 22px;
+  height: 22px;
 
   display: inline-flex;
   align-items: center;
@@ -3116,6 +3122,11 @@ textarea:disabled {
 
   font-size: 18px;
   line-height: 1;
+}
+
+.lex-icon {
+  flex: 0 0 auto;
+  display: block;
 }
 
 .lex-sidebar-item.is-active .lex-sidebar-icon {
@@ -4330,6 +4341,57 @@ textarea:disabled {
   background: rgba(8, 25, 43, 0.34);
   backdrop-filter: blur(3px);
   z-index: 1140;
+}
+
+/* Workspace modules use explicit layout contracts so the legacy utility
+   compatibility layer cannot collapse desktop headers and research panels. */
+.machotes-shell .workspace-page-header {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-end !important;
+  justify-content: space-between !important;
+  gap: 1.25rem;
+}
+
+.machotes-shell .workspace-page-header > div:first-child {
+  min-width: 0;
+}
+
+.machotes-shell .workspace-page-header h1 {
+  margin: 0;
+  color: #0b2545;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.machotes-shell .workspace-research-grid > div.grid,
+.machotes-shell .workspace-library-grid > div.grid {
+  display: grid !important;
+  align-items: start;
+  gap: 1rem !important;
+}
+
+.machotes-shell .workspace-research-grid > div.grid {
+  grid-template-columns: 210px minmax(0, 1fr) 300px !important;
+}
+
+.machotes-shell .workspace-library-grid > div.grid {
+  grid-template-columns: 190px minmax(0, 1fr) 280px !important;
+}
+
+@media (max-width: 1100px) {
+  .machotes-shell .workspace-research-grid > div.grid,
+  .machotes-shell .workspace-library-grid > div.grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .machotes-shell .workspace-page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
 }
 
 /* Desktop Windows shell: preserve the workspace while the window resizes. */

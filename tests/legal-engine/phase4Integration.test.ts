@@ -34,6 +34,7 @@ describe('Fase 4: Integración End-to-End de Generación Jerárquica (4W)', () =
     {
       id: 'src-demanda-mercantil-completa',
       filename: 'demanda_ejecutiva_mercantil.txt',
+      sourceValidated: true,
       content: `H. JUZGADO DE DISTRITO EN MATERIA CIVIL Y MERCANTIL EN TURNO
 JUICIO EJECUTIVO MERCANTIL ORAL
 EXPEDIENTE: 1045/2023
@@ -61,6 +62,7 @@ PRUEBAS:
     {
       id: 'src-sentencia-amparo-revision',
       filename: 'sentencia_amparo_directo.txt',
+      sourceValidated: true,
       content: `TRIBUNAL COLEGIADO EN MATERIA CIVIL DEL PRIMER CIRCUITO
 AMPARO DIRECTO D.C. 542/2023
 QUEJOSO: Constructora e Inmobiliaria Diamante S.A. de C.V.

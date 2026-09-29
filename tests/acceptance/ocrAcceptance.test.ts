@@ -14,11 +14,12 @@
  *       * OCR_AVAILABLE_AND_FAILED
  */
 
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
+import sharp from 'sharp';
 import { NextRequest } from 'next/server';
 import { POST as POST_analyzeUpload } from '@/app/api/templates/analyze-upload/route';
 import { extractDocument } from '@/lib/pdf/documentExtractor';
-import { getOCRProvider, ocrAvailable } from '@/lib/pdf/ocrProviders';
+import { getOCRProvider, ocrAvailable, TesseractOCRProvider } from '@/lib/pdf/ocrProviders';
 import { createSourceDocument } from '@/lib/legal-engine/context';
 import { buildCaseContext } from '@/lib/legal-engine/caseContext';
 import { reconstructCaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
@@ -115,7 +116,7 @@ describe('LOOP 9.1 — Auditoría y Detección Image-Only', () => {
     expect(pdfStr).toContain('/Filter /DCTDecode');
 
     // Comprobamos que el extractor sin OCR falla la calidad nativa
-    delete process.env.OCR_PROVIDER;
+    process.env.OCR_PROVIDER = 'none';
     const result = await extractDocument({
       buffer: scannedPdf,
       fileName: 'EXP-OCR-TEST-001.pdf',
@@ -146,6 +147,43 @@ describe('LOOP 9.1 — Auditoría y Detección Image-Only', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('LOOP 9.1 — OCR Real con Tesseract en Imágenes PNG y JPEG', () => {
+  it('mantiene para revisión manual el OCR bajo 70 aunque el texto alcance la calidad estructural', async () => {
+    process.env.OCR_PROVIDER = 'tesseract';
+    const scannedPdf = await createSyntheticScannedPdfBuffer([
+      'TEXTO SINTETICO PARA VALIDAR EL NIVEL DE CONFIANZA DEL OCR.',
+    ]);
+    const recognizedText = Array.from({ length: 12 }, (_, index) =>
+      `Seccion de prueba ${index + 1}: el contenido reconocido se conserva para que el abogado lo revise. ` +
+      'Esta frase no afirma hechos de un expediente real ni acredita por si misma la exactitud de la lectura.'
+    ).join('\n');
+    const processSpy = vi.spyOn(TesseractOCRProvider.prototype, 'process').mockResolvedValue({
+      text: recognizedText,
+      pages: [{ page: 1, text: recognizedText, chars: recognizedText.length }],
+      confidence: 55,
+      provider: 'tesseract',
+      pageCount: 1,
+      durationMs: 1,
+      warnings: [],
+    });
+
+    try {
+      const result = await extractDocument({
+        buffer: scannedPdf,
+        fileName: 'ocr-low-confidence.pdf',
+        mimeType: 'application/pdf',
+      });
+
+      expect(result.text).toBe(recognizedText);
+      expect(result.ocrUsed).toBe(true);
+      expect(result.sourceValidated).toBe(false);
+      expect(result.sourceQualityStatus).toBe('NEEDS_SOURCE_REVIEW');
+      expect(result.status).toBe('NEEDS_MANUAL_REVIEW');
+      expect(result.extractionSteps.find((step) => step.step === 4)?.status).toBe('warn');
+    } finally {
+      processSpy.mockRestore();
+    }
+  });
+
   it('extrae texto jurídico desde archivo binario PNG sintético', async () => {
     process.env.OCR_PROVIDER = 'tesseract';
     const pngBuf = await createSyntheticImageBuffer('image/png', [
@@ -206,6 +244,24 @@ describe('LOOP 9.1 — OCR Real con Tesseract en Imágenes PNG y JPEG', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('LOOP 9.1 — OCR en PDF Escaneado Real y Pipeline Completo', () => {
+  it('conserva dimensiones de la imagen y escala proporcionalmente los PDFs sintéticos', async () => {
+    const sourceLines = Array.from({ length: 7 }, (_, index) => `LINEA DE PRUEBA ${index + 1}`);
+    const jpeg = await createSyntheticImageBuffer('image/jpeg', sourceLines);
+    const metadata = await sharp(jpeg).metadata();
+    const pdf = await createSyntheticScannedPdfBuffer(sourceLines);
+    const pdfText = pdf.toString('latin1');
+    const imageDimensions = pdfText.match(/\/Width (\d+) \/Height (\d+)/);
+    const imageMatrix = pdfText.match(/q ([\d.]+) 0 0 ([\d.]+) ([\d.]+) ([\d.]+) cm \/Im0 Do Q/);
+
+    expect(imageDimensions).not.toBeNull();
+    expect(Number(imageDimensions?.[1])).toBe(metadata.width);
+    expect(Number(imageDimensions?.[2])).toBe(metadata.height);
+    expect(imageMatrix).not.toBeNull();
+    const widthScale = Number(imageMatrix?.[1]) / Number(metadata.width);
+    const heightScale = Number(imageMatrix?.[2]) / Number(metadata.height);
+    expect(widthScale).toBeCloseTo(heightScale, 4);
+  });
+
   it('PDF escaneado → upload → OCR → extracción → CaseContext → pipeline → DOCX/PDF', async () => {
     process.env.OCR_PROVIDER = 'tesseract';
 
@@ -317,7 +373,7 @@ describe('LOOP 9.1 — OCR en PDF Escaneado Real y Pipeline Completo', () => {
 
 describe('LOOP 9.1 — Protocolo Fail-Closed Estricto', () => {
   it('distingue OCR_PROVIDER_NOT_CONFIGURED cuando no hay proveedor OCR activo', async () => {
-    delete process.env.OCR_PROVIDER;
+    process.env.OCR_PROVIDER = 'none';
 
     const scannedPdf = await createSyntheticScannedPdfBuffer([
       'EXP-FAIL-CLOSED-001',

@@ -15,7 +15,7 @@ export interface DocumentsAndEvidenceResult {
   reviewReasons: string[];
 }
 
-const EVIDENCE_SECTION_RE = /^(?:PRUEBAS?|MEDIOS?\s+DE\s+PRUEBA|DOCUMENTALES?|ANEXOS?|EVIDENCIA)\s*:/i;
+const EVIDENCE_SECTION_RE = /^(?:(?:CAP[ÍI]TULO\s+DE\s+)?PRUEBAS?|MEDIOS?\s+DE\s+(?:PRUEBA|CONVICCI[ÓO]N)|DOCUMENTALES?(?:\s+(?:P[ÚU]BLICA|PRIVADA))?|ANEXOS?|EVIDENCIA)\s*[:.\-–—\s]/i;
 const CONCRETE_EVIDENCE_RE = /\b(?:pruebas?\s+(?:documental(?:es)?|confesional(?:es)?|testimonial(?:es)?|pericial(?:es)?|presuncional(?:es)?|instrumental(?:es)?)|documental(?:es)?\s+de\s+informes|documental(?:es)?|confesional(?:es)?|testimonial(?:es)?|pericial(?:es)?|presuncional(?:es)?|instrumental(?:es)?\s+de\s+actuaciones|contratos?|escrituras?\s+p[úu]blicas?|pagar[eé]s?|recibos?|comprobantes?|requerimientos?|constancia(?:s)?\s+(?:de\s+[^,.;\n]+|laboral(?:es)?|de\s+notificaci[oó]n)|nombramientos?|actas?\s+de\s+[^,.;\n]+|expediente\s+(?:natural|laboral|de\s+origen))(?=\s|$|[.,;:!?])/gi;
 const CONCRETE_EVIDENCE_TEST_RE = new RegExp(CONCRETE_EVIDENCE_RE.source, 'i');
 const CONCRETE_EVIDENCE_LIST_RE = new RegExp(CONCRETE_EVIDENCE_RE.source, 'gi');
@@ -33,8 +33,8 @@ interface EvidenceSegment {
 }
 
 function stripEvidenceLabel(text: string): { body: string; type?: string } {
-  const withoutNumber = text.replace(/^\s*(?:\d+|[A-Z]|[IVXLCDM]+)[.)-]\s*/i, '');
-  const label = withoutNumber.match(/^\s*(PRUEBAS?|MEDIOS?\s+DE\s+PRUEBA|DOCUMENTAL(?:\s+(?:P[ÚU]BLICA|PRIVADA))?|ANEXOS?|EVIDENCIA)\s*[:.]\s*(.*)$/i);
+  const withoutNumber = text.replace(/^\s*(?:\d+|[A-Z]|[IVXLCDM]+)[\s.)\-–—]+\s*/i, '');
+  const label = withoutNumber.match(/^\s*(PRUEBAS?|MEDIOS?\s+DE\s+(?:PRUEBA|CONVICCI[ÓO]N)|DOCUMENTAL(?:\s+(?:P[ÚU]BLICA|PRIVADA))?|CONFESIONAL(?:\s+(?:DIRECTA|EXPRESA))?|TESTIMONIAL|PERICIAL|PRESUNCIONAL(?:\s+LEGAL(?:\s+Y\s+HUMANA)?)?|INSTRUMENTAL(?:\s+DE\s+ACTUACIONES)?|ANEXOS?|EVIDENCIA)\s*[:.\-–—\s]+(.*)$/i);
   if (!label) return { body: withoutNumber.trim() };
   return { body: label[2].trim(), type: label[1].trim().toUpperCase() };
 }
@@ -200,8 +200,9 @@ function isJurisprudenceOnly(candidate: ExtractionCandidate, section?: string): 
 
 function hasExplicitEvidenceLabel(candidate: ExtractionCandidate, section?: string): boolean {
   return candidate.kind === 'EVIDENCE'
-    || section === 'PRUEBAS'
-    || EVIDENCE_SECTION_RE.test(candidate.rawText);
+    || /PRUEBAS?/i.test(section || '')
+    || EVIDENCE_SECTION_RE.test(candidate.rawText)
+    || /^(?:\d+[\s.)\-–—]+)?(?:DOCUMENTAL(?:\s+(?:P[ÚU]BLICA|PRIVADA))?|CONFESIONAL(?:\s+(?:DIRECTA|EXPRESA))?|TESTIMONIAL|PERICIAL|PRESUNCIONAL(?:\s+LEGAL(?:\s+Y\s+HUMANA)?)?|INSTRUMENTAL(?:\s+DE\s+ACTUACIONES)?)\b/i.test(candidate.rawText.trim());
 }
 
 function isEvidenceCandidate(candidate: ExtractionCandidate): boolean {

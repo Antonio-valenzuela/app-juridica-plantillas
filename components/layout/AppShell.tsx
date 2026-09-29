@@ -5,31 +5,32 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useLegalWorkspaceContext } from '@/context/LegalWorkspaceContext';
 import { deriveProviderIndicator, type ProviderIndicator } from '@/lib/runtime/providerStatus';
+import { LexIcon, type LexIconName } from './LexIcon';
 
 type SidebarItem = {
   href?: string;
   label: string;
-  icon: string;
+  icon: LexIconName;
   tab?: string;
   disabled?: boolean;
 };
 
 const MAIN_ITEMS: SidebarItem[] = [
-  { href: '/machotes?tab=inicio', label: 'Inicio', icon: '⌂', tab: 'inicio' },
-  { href: '/machotes?tab=universal', label: 'Motor Jurídico', icon: '▣', tab: 'universal' },
-  { href: '/machotes?tab=initial_writings', label: 'Escritos Iniciales', icon: '▤', tab: 'initial_writings' },
-  { href: '/machotes?tab=responses_resources', label: 'Contestaciones', icon: '⚖', tab: 'responses_resources' },
-  { href: '/machotes?tab=my-templates', label: 'Mis Plantillas', icon: '□', tab: 'my-templates' },
-  { href: '/machotes?tab=expedientes', label: 'Expedientes', icon: '▱', tab: 'expedientes' },
-  { href: '/machotes?tab=terminos', label: 'Cómputo de Términos', icon: '◷', tab: 'terminos' },
-  { href: '/machotes?tab=jurisprudencia', label: 'Jurisprudencia SCJN', icon: '♜', tab: 'jurisprudencia' },
-  { href: '/machotes?tab=biblioteca', label: 'Biblioteca', icon: '▥', tab: 'biblioteca' },
-  { href: '/machotes?tab=alertas', label: 'Alertas DOF y Boletín', icon: '♧', tab: 'alertas' },
+  { href: '/machotes?tab=inicio', label: 'Inicio', icon: 'home', tab: 'inicio' },
+  { href: '/machotes?tab=universal', label: 'Motor Jurídico', icon: 'scale', tab: 'universal' },
+  { href: '/machotes?tab=initial_writings', label: 'Escritos Iniciales', icon: 'document', tab: 'initial_writings' },
+  { href: '/machotes?tab=responses_resources', label: 'Contestaciones', icon: 'scale', tab: 'responses_resources' },
+  { href: '/machotes?tab=my-templates', label: 'Mis Plantillas', icon: 'library', tab: 'my-templates' },
+  { href: '/machotes?tab=expedientes', label: 'Expedientes', icon: 'folder', tab: 'expedientes' },
+  { href: '/machotes?tab=terminos', label: 'Cómputo de Términos', icon: 'calendar', tab: 'terminos' },
+  { href: '/machotes?tab=jurisprudencia', label: 'Jurisprudencia SCJN', icon: 'book', tab: 'jurisprudencia' },
+  { href: '/machotes?tab=biblioteca', label: 'Biblioteca', icon: 'library', tab: 'biblioteca' },
+  { href: '/machotes?tab=alertas', label: 'Alertas DOF y Boletín', icon: 'bell', tab: 'alertas' },
 ];
 
 const BOTTOM_ITEMS: SidebarItem[] = [
-  { href: '/machotes?tab=configuracion', label: 'Configuración', icon: '⚙', tab: 'configuracion' },
-  { href: '/machotes?tab=ayuda', label: 'Ayuda', icon: '?', tab: 'ayuda' },
+  { href: '/machotes?tab=configuracion', label: 'Configuración', icon: 'settings', tab: 'configuracion' },
+  { href: '/machotes?tab=ayuda', label: 'Ayuda', icon: 'help', tab: 'ayuda' },
 ];
 
 export default function AppShell({
@@ -107,7 +108,7 @@ export default function AppShell({
           className="lex-sidebar-item lex-sidebar-item-disabled"
           title="Módulo disponible próximamente"
         >
-          <span className="lex-sidebar-icon">{item.icon}</span>
+          <span className="lex-sidebar-icon"><LexIcon name={item.icon} size={17} /></span>
           <span>{item.label}</span>
         </div>
       );
@@ -120,7 +121,7 @@ export default function AppShell({
         className={`lex-sidebar-item ${active ? 'is-active' : ''}`}
         onClick={() => setMenuOpen(false)}
       >
-        <span className="lex-sidebar-icon">{item.icon}</span>
+        <span className="lex-sidebar-icon"><LexIcon name={item.icon} size={17} /></span>
         <span>{item.label}</span>
       </Link>
     );
@@ -130,7 +131,7 @@ export default function AppShell({
     <>
       <header className="global-header lex-header">
         <div className="lex-header-search">
-          <span className="lex-search-icon">⌕</span>
+          <span className="lex-search-icon"><LexIcon name="search" size={18} /></span>
 
           <input
             type="search"
@@ -157,7 +158,7 @@ export default function AppShell({
             href="/machotes?tab=alertas"
             aria-label="Abrir alertas DOF y Boletín"
           >
-            ♧
+            <LexIcon name="bell" size={19} />
           </Link>
 
           <div className="lex-user">
@@ -177,7 +178,7 @@ export default function AppShell({
             aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}
             onClick={() => setMenuOpen((value) => !value)}
           >
-            {menuOpen ? '×' : '☰'}
+            <LexIcon name={menuOpen ? 'plus' : 'menu'} size={19} className={menuOpen ? 'rotate-45' : ''} />
           </button>
         </div>
       </header>
@@ -194,7 +195,7 @@ export default function AppShell({
       <aside className={`lex-sidebar ${menuOpen ? 'is-mobile-open' : ''}`}>
         <div className="lex-brand">
           <div className="lex-brand-mark">
-            <span>✚</span>
+            <LexIcon name="plus" size={20} />
           </div>
 
           <div className="lex-brand-copy">
@@ -214,7 +215,7 @@ export default function AppShell({
 
           <div className="lex-signature-card">
             <div className="lex-signature-icon">
-              ✓
+              <LexIcon name="check" size={15} />
             </div>
 
             <div>

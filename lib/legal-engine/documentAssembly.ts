@@ -102,8 +102,12 @@ function isManualBlock(block: ContentBlock): boolean {
   return block.isManuallyEdited === true;
 }
 
-function isFormalCandidate(block: ContentBlock): boolean {
-  return (block.generatedBy === 'DETERMINISTIC' || block.generationRequirement === 'DETERMINISTIC')
+function isFormalCandidate(block: ContentBlock, section?: PlannedSection): boolean {
+  const isFormalSection = section && (
+    ['header', 'identity', 'petition', 'signature', 'closing'].includes(section.section.type) ||
+    /proemio|comparecencia|objeto|petitorio|firma/i.test(section.section.title)
+  );
+  return (block.generatedBy === 'DETERMINISTIC' || block.generationRequirement === 'DETERMINISTIC' || Boolean(isFormalSection))
     && !isFallbackBlock(block);
 }
 
@@ -144,8 +148,31 @@ function admitBlock(
     };
   }
 
-  // 3. FAIL-CLOSED: Truncamiento o dependencias no resueltas (seed markers / [DATO PENDIENTE...])
-  if (block.generationStatus === 'truncated' || hasSeedMarkers(block.text) || hasUnresolvedFactualDependencies(block.text)) {
+  // 3. FAIL-CLOSED: Truncamiento remains excluded. A formal section with
+  // unresolved fields stays visible as a review draft, while export/readiness
+  // gates continue to reject unresolved dependencies.
+  if (block.generationStatus === 'truncated') {
+    return {
+      admitted: false,
+      classRank: 9,
+      finding: finding('UNRESOLVED_BLOCK_EXCLUDED', 'REVIEW', `El bloque ${block.id} tiene truncamiento o dependencia pendiente.`, block, [sectionId]),
+    };
+  }
+  if (hasSeedMarkers(block.text) || hasUnresolvedFactualDependencies(block.text)) {
+    if (isFormalCandidate(block, section) && !isFallbackBlock(block)) {
+      return {
+        admitted: true,
+        task: taskForBlock(block, taskById),
+        classRank: 0,
+        finding: finding(
+          'FORMAL_BLOCK_RETAINED_FOR_REVIEW',
+          'REVIEW',
+          `El bloque formal ${block.id} se conserva visible; contiene datos pendientes que deben resolverse antes de presentar o exportar el escrito.`,
+          block,
+          [sectionId],
+        ),
+      };
+    }
     return {
       admitted: false,
       classRank: 9,
@@ -163,7 +190,7 @@ function admitBlock(
   }
 
   // 5. Candidato formal determinístico válido
-  if (isFormalCandidate(block)) {
+  if (isFormalCandidate(block, section)) {
     return { admitted: true, task: taskForBlock(block, taskById), classRank: 0 };
   }
 

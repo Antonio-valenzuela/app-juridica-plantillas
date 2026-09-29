@@ -177,6 +177,7 @@ export function classifySectionClaims(text: string, packet: SectionContextPacket
 export interface SectionGenerationOptions {
   invokeProvider?: (request: AIRequest) => Promise<AIProviderResult>;
   trace?: GenerationTraceContext;
+  providerFlags?: Pick<AIRequest, 'externalProviderOptIn' | 'privateCaseContext'>;
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -190,7 +191,8 @@ function jsonRecord(value: unknown): value is Record<string, unknown> {
 function parseOutput(response: AIProviderResult): SectionGenerationOutput {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(response.content);
+    const cleaned = response.content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1').trim();
+    parsed = JSON.parse(cleaned);
   } catch {
     throw new Error('SECTION_OUTPUT_NOT_JSON');
   }
@@ -281,7 +283,7 @@ function emptySectionOutput(): SectionGenerationOutput {
   };
 }
 
-function evaluationBlock(packet: SectionContextPacket, output: SectionGenerationOutput): { block: ContentBlock; task: GenerationTask; evaluation: BlockQualityEvaluation } {
+function evaluationBlock(packet: SectionContextPacket, output: SectionGenerationOutput, effectiveProvider: string = 'nvidia'): { block: ContentBlock; task: GenerationTask; evaluation: BlockQualityEvaluation } {
   const task = buildSyntheticTask(packet, output);
   const block: ContentBlock = {
     id: `section-draft-block-${packet.section.id}`,
@@ -298,7 +300,7 @@ function evaluationBlock(packet: SectionContextPacket, output: SectionGeneration
     legalIssueIds: [...task.legalIssueIds || []],
     generationTaskIds: [`section:${packet.section.id}`, ...packet.sourceManifest.accepted.issueOutputTaskIds],
     generatedBy: 'AI',
-    provider: 'nvidia',
+    provider: effectiveProvider,
   };
   const evaluation = evaluateBlockQuality(
     block,
@@ -361,7 +363,7 @@ function baseDraft(packet: SectionContextPacket, status: SectionDraft['status'],
     generationTaskIds: [`section:${packet.section.id}`, ...packet.sourceManifest.accepted.issueOutputTaskIds],
     sourceManifest: packet.sourceManifest,
     provider: {
-      requested: 'nvidia',
+      requested: response?.providerRequested || (response?.provider ? String(response.provider) : 'nvidia'),
       actuallyUsed: response?.providerActuallyUsed || response?.provider || 'none',
       model: response?.model || null,
       calls: response ? 1 : 0,
@@ -431,7 +433,32 @@ export async function generateSectionDraft(packet: SectionContextPacket, options
   const startedAt = new Date().toISOString();
   const traceTask = buildSyntheticTask(packet, emptySectionOutput());
   options.trace?.recordTaskPlanned(traceTask, packet);
+  let parsedOutput: SectionGenerationOutput | undefined;
+  const countWords = (text: string): number => (text.match(/[\p{L}\p{N}]+/gu) || []).length;
   const recordExecution = (responseStatus: string, response?: AIProviderResult, diagnostics: string[] = [], evaluation?: BlockQualityEvaluation, fallbackUsed = false, finalBlockId?: string, taskForTrace: GenerationTask = traceTask): void => {
+    const provider = String(response?.providerActuallyUsed || response?.provider || '').toLowerCase();
+    const isExternalLegalProvider = ['nvidia', 'gemini', 'groq'].includes(provider)
+      && response?.success === true
+      && response.isLegalAiContent !== false
+      && response.origin !== 'LOCAL_PLACEHOLDER';
+    const emittedText = parsedOutput?.text || (isExternalLegalProvider ? String(response?.content || '') : '');
+    const generatedWords = isExternalLegalProvider ? countWords(emittedText) : 0;
+    const validatedWords = ['ACCEPTED', 'VALID_NON_FINAL'].includes(responseStatus) && parsedOutput
+      ? countWords(parsedOutput.text)
+      : 0;
+    const rejectedWords = generatedWords > 0 && validatedWords === 0 ? generatedWords : 0;
+    options.trace?.recordWordAccounting?.({
+      sectionId: taskForTrace.sectionId,
+      providerGeneratedWords: generatedWords,
+      providerGeneratedChars: emittedText.length,
+      validatedWords,
+      rejectedWords,
+      ...(rejectedWords > 0 ? {
+        reason: diagnostics.map((item) => item.split(':')[0]).filter(Boolean).join('; ') || 'SECTION_OUTPUT_NOT_ADMITTED',
+        lossStage: 'provider-validation',
+      } : {}),
+      taskId: taskForTrace.id,
+    });
     options.trace?.recordTaskExecution({
       taskId: taskForTrace.id,
       taskType: taskForTrace.taskType,
@@ -441,7 +468,7 @@ export async function generateSectionDraft(packet: SectionContextPacket, options
       evidenceIds: taskForTrace.evidenceIds || [],
       factIds: taskForTrace.factIds || [],
       claimIds: taskForTrace.claimIds || [],
-      providerRequested: response?.providerRequested || 'nvidia',
+      providerRequested: response?.providerRequested || String(response?.provider || 'nvidia'),
       providerActuallyUsed: traceProvider(response?.providerActuallyUsed || response?.provider),
       model: response?.model,
       startedAt,
@@ -473,6 +500,8 @@ export async function generateSectionDraft(packet: SectionContextPacket, options
     temperature: 0.2,
     legalContext: packet as unknown as Record<string, unknown>,
     requestId: `section:${packet.section.id}:${packet.contextHash}`,
+    externalProviderOptIn: options.providerFlags?.externalProviderOptIn === true,
+    privateCaseContext: options.providerFlags?.privateCaseContext ?? true,
   };
   const invokeProvider = options.invokeProvider || runFastMode;
   let response: AIProviderResult;
@@ -485,7 +514,8 @@ export async function generateSectionDraft(packet: SectionContextPacket, options
     return baseDraft(packet, 'REVIEW_REQUIRED', diagnostics);
   }
   const effectiveProvider = String(response.providerActuallyUsed || response.provider || '').toLowerCase();
-  if (!response.success || effectiveProvider !== 'nvidia' || response.origin === 'LOCAL_PLACEHOLDER' || response.isLegalAiContent === false) {
+  const allowedProviders = new Set(['nvidia', 'gemini', 'groq']);
+  if (!response.success || !allowedProviders.has(effectiveProvider) || response.origin === 'LOCAL_PLACEHOLDER' || response.isLegalAiContent === false) {
     const diagnostics = ['PROVIDER_FALLBACK_REJECTED', ...(response.warnings || []).slice(0, 2)];
     recordExecution('REVIEW_REQUIRED', response, diagnostics, undefined, true);
     return baseDraft(packet, 'REVIEW_REQUIRED', diagnostics, response);
@@ -498,6 +528,7 @@ export async function generateSectionDraft(packet: SectionContextPacket, options
   let output: SectionGenerationOutput;
   try {
     output = parseOutput(response);
+    parsedOutput = output;
   } catch (error) {
     const diagnostics = [error instanceof Error ? error.message : 'SECTION_OUTPUT_SCHEMA_INVALID'];
     recordExecution('REVIEW_REQUIRED', response, diagnostics);
@@ -530,7 +561,7 @@ export async function generateSectionDraft(packet: SectionContextPacket, options
     recordExecution('REVIEW_REQUIRED', response, diagnostics);
     return baseDraft(packet, 'REVIEW_REQUIRED', diagnostics, response, undefined, output.text.trim());
   }
-  const { block, task, evaluation } = evaluationBlock(packet, output);
+  const { block, task, evaluation } = evaluationBlock(packet, output, effectiveProvider);
   if (evaluation.verdict !== 'FAIL' && evaluation.hardFailReasons.length === 0) {
     const claimGrounding = classifySectionClaims(output.text, packet, output);
     const unsupportedClaims = claimGrounding.filter((claim) => claim.support === 'UNSUPPORTED_INFERENCE' || claim.support === 'GENERIC_FILLER');

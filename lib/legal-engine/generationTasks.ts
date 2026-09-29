@@ -14,6 +14,7 @@
  */
 
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
+import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { CaseAnalysis, LegalIssue } from './caseAnalysis';
 import type { SectionPlan, IssuePlan, ClaimPlan, FactResponsePlan } from './pipeline';
 import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } from './coverageMatrix';
@@ -251,13 +252,30 @@ export function buildGenerationTasksForSection(
     if (extension && list.length > 0) {
       const sectionTargetWords = extension.sectionWordTargets?.[sectionId]
         || Math.round(extension.targetWords / Math.max(1, 8));
-      const taskTargetWords = Math.max(250, Math.round(sectionTargetWords / list.length));
       for (const task of list) {
+        const allocatedWords = Math.round(sectionTargetWords / list.length);
+        const taskType = task.taskType || task.type;
+        // A one-fact or one-claim descriptive response is not a 250-word legal
+        // argument. Keep its semantic minimum proportionate, then let the
+        // section-level expansion develop supported depth without rejecting
+        // concise, properly scoped issue answers.
+        const taskTargetWords = taskType === 'FACT_RESPONSE'
+          ? Math.min(100, Math.max(45, Math.min(task.complexity === 'SHORT' ? 65 : 90, allocatedWords)))
+          : taskType === 'CLAIM'
+            ? Math.min(35, Math.max(30, allocatedWords))
+            : taskType === 'EVIDENCE'
+              ? Math.min(220, Math.max(70, allocatedWords))
+              : taskType === 'COVERAGE_ITEM'
+                ? Math.min(80, Math.max(35, allocatedWords))
+                : Math.max(250, allocatedWords);
         task.targetWords = taskTargetWords;
-        task.tokenBudget = Math.max(
-          task.tokenBudget,
-          calculateExtensionTokenBudget(taskTargetWords, list.length, task.tokenBudget),
-        );
+        const smallDescriptiveTask = taskType === 'FACT_RESPONSE' || taskType === 'CLAIM';
+        task.tokenBudget = smallDescriptiveTask
+          ? Math.min(task.tokenBudget, Math.max(800, taskTargetWords * 5))
+          : Math.max(
+            task.tokenBudget,
+            calculateExtensionTokenBudget(taskTargetWords, list.length, task.tokenBudget),
+          );
       }
     }
     return list;
@@ -1378,6 +1396,7 @@ export async function executeGenerationTask(
       mode: 'fast',
       maxTokens: task.tokenBudget,
       maxProviderRetries: extendedContract ? 1 : undefined,
+      ...caseProviderFlags(doc),
     });
 
     const isLegalAiResponse = Boolean(
@@ -1449,6 +1468,7 @@ export async function executeGenerationTask(
             task.tokenBudget,
           ),
           maxProviderRetries: extendedContract ? 1 : undefined,
+          ...caseProviderFlags(doc),
         });
 
         const isLegalContinuation = Boolean(
@@ -1595,6 +1615,7 @@ export async function executeGenerationTask(
         mode: 'fast',
         maxTokens: task.tokenBudget,
         maxProviderRetries: extendedContract ? 1 : undefined,
+        ...caseProviderFlags(doc),
       });
 
       if (revRes.success && revRes.content) {

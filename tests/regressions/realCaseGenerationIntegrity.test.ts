@@ -418,15 +418,21 @@ describe('Real-case generation integration contracts', () => {
   });
 
   it('Contract 11: polling/status exposes documentReadiness', async () => {
-    const job = createGenerationJob({ total: 2 });
+    // The local status route deliberately falls back to this single-workspace
+    // identity when Prisma is unavailable in development/test. Give the fixture
+    // the same owner so the authorization boundary does not turn this status
+    // contract into a JOB_NOT_FOUND test.
+    const job = createGenerationJob({
+      organizationId: 'org-local-document-analysis',
+      userId: 'user-local-document-analysis',
+      total: 2,
+    });
     const doc = createEmptyDocument();
     doc.status = 'draft';
 
     completeJob(job.jobId, doc, { documentReadiness: 'REQUIRES_REVIEW' });
 
-    const req = new NextRequest(`http://localhost/api/legal-engine/generate/status?jobId=${job.jobId}`, {
-      headers: { 'x-lawyer-token': 'dev-lawyer-token' },
-    });
+    const req = new NextRequest(`http://localhost/api/legal-engine/generate/status?jobId=${job.jobId}`);
 
     const res = await getStatusHandler(req);
     expect(res.status).toBe(200);

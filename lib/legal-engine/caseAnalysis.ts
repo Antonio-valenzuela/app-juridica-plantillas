@@ -6,10 +6,14 @@ import {
   extractAuthorityLabeled,
   extractInstitutionalAuthority,
   extractResolvingCourt,
+  trimToSentence,
+  isValidPartyName,
 } from './partyExtraction';
 import { deduplicateLegalIssues } from './coverageMatrix';
 import { extractRichCaseAnalysis, type RichExtractionOptions } from './case-extraction/orchestrator';
 import { projectRichCaseAnalysis } from './case-extraction/legacyProjection';
+import { buildSourceGrounding, type SourceGrounding } from './sourceGrounding';
+import { createSourceProvenance } from './case-extraction/provenance';
 
 export interface ProceduralTimelineEvent {
   date: string;
@@ -148,6 +152,8 @@ export interface CaseAnalysis {
   richCaseAnalysis?: RichCaseAnalysis;
   /** Ephemeral projection populated only from verified research bundles. */
   verifiedAuthorities?: import('./legal-research/types').VerifiedAuthority[];
+  /** Source/document/precedent separation produced before legacy projection. */
+  sourceGrounding?: SourceGrounding[];
 }
 
 /**
@@ -670,24 +676,39 @@ export function reconstructCaseAnalysis(
   referenceText: string = '',
   options: Pick<RichExtractionOptions, 'includeReferenceInAnalysis' | 'trace'> = {}
 ): CaseAnalysis {
+  const sourceGroundings = sources.map((source) => buildSourceGrounding(source));
+  const caseSources = sources.map((source, index) => ({
+    ...source,
+    extractedText: sourceGroundings[index]?.caseText || '',
+    content: undefined,
+    // Keep the original page boundaries while limiting each page to the
+    // source-grounded case segment. Collapsing everything to page 1 loses
+    // provenance for facts and procedural events.
+    pages: sourceGroundings[index]?.casePages || [],
+  }));
+  const authoritySources = sources.map((source, index) => ({
+    ...source,
+    id: `${source.id}:authority`,
+    filename: `${source.filename || source.name || source.id} [authority]`,
+    extractedText: sourceGroundings[index]?.authorityText || '',
+    content: undefined,
+    pages: sourceGroundings[index]?.authorityText
+      ? [{ page: 1, text: sourceGroundings[index].authorityText, chars: sourceGroundings[index].authorityText.length }]
+      : [],
+  })).filter((source) => source.extractedText);
   const combinedTexts: Array<{ text: string; filename: string; documentId: string; page?: number }> = [];
 
-  for (const src of sources) {
-    if (src.pages && src.pages.length > 0) {
-      src.pages.forEach((p) => {
-        combinedTexts.push({
-          text: p.text || '',
-          filename: src.filename || src.name || 'documento',
-          documentId: src.id,
-          page: p.page,
-        });
-      });
-    } else if (src.extractedText || src.content) {
-      combinedTexts.push({
-        text: src.extractedText || src.content || '',
+  for (const src of caseSources) {
+    if (src.extractedText) {
+      const pageTexts = src.pages?.length
+        ? src.pages.filter((page) => (page.text || '').trim()).map((page) => ({ text: page.text, page: page.page }))
+        : [{ text: src.extractedText, page: undefined }];
+      combinedTexts.push(...pageTexts.map(({ text, page }) => ({
+        text,
         filename: src.filename || src.name || 'documento',
         documentId: src.id,
-      });
+        page,
+      })));
     }
   }
 
@@ -697,11 +718,62 @@ export function reconstructCaseAnalysis(
 
   const fullCorpus = combinedTexts.map((c) => c.text).join('\n\n');
   const missingData: string[] = [];
-  const richCaseAnalysis = extractRichCaseAnalysis(sources, {
+  const richCaseAnalysis = extractRichCaseAnalysis(caseSources, {
     referenceText,
     includeReferenceInAnalysis: options.includeReferenceInAnalysis,
     trace: options.trace,
   });
+  const groundedCaseFacts = sourceGroundings.flatMap((grounding) => grounding.caseFacts);
+  const groundedCaseClaims = sourceGroundings.flatMap((grounding) => grounding.caseClaims);
+  if (richCaseAnalysis.facts.length === 0 && groundedCaseFacts.length > 0) {
+    richCaseAnalysis.facts = groundedCaseFacts.map((fact, index) => ({
+      id: `grounded-fact-${fact.sourceId}-${index + 1}`,
+      proposition: fact.text,
+      participants: [],
+      sourceRole: 'PARTE_ACTORA' as const,
+      assertionStatus: 'SOURCE_ASSERTION' as const,
+      provenance: [createSourceProvenance({
+        sourceId: fact.sourceId,
+        sourceName: fact.sourceName,
+        page: fact.page,
+        section: 'CASE_FACT',
+        excerpt: fact.text,
+        confidence: fact.confidence,
+        inferenceLevel: 'LITERAL',
+      }, 'PARAGRAPH')],
+      relatedDocumentIds: [fact.sourceId],
+    }));
+  }
+  if (richCaseAnalysis.claims.length === 0 && groundedCaseClaims.length > 0) {
+    richCaseAnalysis.claims = groundedCaseClaims.map((claim, index) => ({
+      id: `grounded-claim-${claim.sourceId}-${index + 1}`,
+      requestedRelief: claim.text,
+      factualBasisIds: [],
+      evidenceMentionIds: [],
+      provenance: [createSourceProvenance({
+        sourceId: claim.sourceId,
+        sourceName: claim.sourceName,
+        page: claim.page,
+        section: 'CASE_CLAIM',
+        excerpt: claim.text,
+        confidence: claim.confidence,
+        inferenceLevel: 'LITERAL',
+      }, 'PARAGRAPH')],
+      status: 'SOURCE_MENTIONED' as const,
+    }));
+  }
+  if (authoritySources.length > 0) {
+    const authorityAnalysis = extractRichCaseAnalysis(authoritySources, {
+      includeReferenceInAnalysis: false,
+      trace: options.trace,
+    });
+    richCaseAnalysis.authorities = [...richCaseAnalysis.authorities, ...authorityAnalysis.authorities];
+    richCaseAnalysis.arguments = [...richCaseAnalysis.arguments, ...authorityAnalysis.arguments];
+    richCaseAnalysis.decisionReasonings = [
+      ...(richCaseAnalysis.decisionReasonings || []),
+      ...(authorityAnalysis.decisionReasonings || []),
+    ];
+  }
 
   // A direct instruction to challenge the source resolution is a client
   // position about the requested work, not a factual admission about every
@@ -729,11 +801,11 @@ export function reconstructCaseAnalysis(
 
   let actor =
     extractPartyField(fullCorpus, [
-      /(?:actor|parte\s+actora|demandante)\s*[:\-]\s*([^;,\n]{2,90})/i,
+      /(?:actor|actora|parte\s+actora|demandante|promovente|accionante|trabajador(?:a)?)\s*[:\-]\s*([^;,\n]{2,90})/i,
     ]) || quejoso;
 
   let demandado = extractPartyField(fullCorpus, [
-    /(?:demandado|parte\s+demandada|tercero\s+interesado)\s*[:\-]\s*([^;,\n]{2,90})/i,
+    /(?:demandado|demandada|parte\s+demandada|fuente\s+de\s+trabajo\s+demandada|patr[oó]n\s+demandado|tercero\s+interesado)\s*[:\-]\s*([^;,\n]{2,90})/i,
     /(?:contraparte)\s*[:\-]\s*([^;,\n]{2,90})/i,
   ]);
 
@@ -746,24 +818,45 @@ export function reconstructCaseAnalysis(
     }
   }
   if (!demandado) {
-    const corpusDemandado =
-      fullCorpus.match(/(?:demandar\s+(?:la\s+nulidad[^,\n]+?a|a)|se\s+demanda\s+a)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)/i)?.[1]
-      || fullCorpus.match(/(?:demandar\s+(?:la\s+nulidad[^,\n]+?a|a)|se\s+demanda\s+a)\s+([A-ZÁÉÍÓÚÑ\s]{4,60}?)(?:\s+como\s+|\s*,\s*|\s*\n)/i)?.[1];
-    if (corpusDemandado && corpusDemandado.trim().length > 3) {
-      demandado = corpusDemandado.trim();
+    const actionAgainstMatch = fullCorpus.match(
+      /(?:vengo\s+a\s+demandar(?:\s+formalmente)?(?:\s+en\s+la\s+v[íi]a[^,\n]+?)?\s+(?:en\s+contra\s+de(?:l)?|a)|demando\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|se\s+demanda\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|demandar\s+(?:la\s+nulidad[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a))\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.,\s]{3,80}?)(?:\s+y\/o|\s*,\s*|\s+con\s+domicilio|\s+qui[eé]n|\s*\n)/i
+    )?.[1];
+    if (actionAgainstMatch) {
+      const candidate = trimToSentence(actionAgainstMatch.trim().replace(/^de(?:l)?\s+/i, ''));
+      if (isValidPartyName(candidate)) {
+        demandado = candidate;
+      }
+    }
+  }
+  if (!demandado) {
+    const contextDemandado = fullCorpus.match(
+      /(?:el\s+hoy\s+demandado|la\s+hoy\s+demandada|los\s+ahora\s+demandados|la\s+fuente\s+de\s+trabajo\s+demandada|al\s+demandado|a\s+la\s+demandada)\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.,\s]{3,80}?)(?:\s+y\/o|\s*,\s*|\s*\n|\.|\s+los\s+cuales)/i
+    )?.[1];
+    if (contextDemandado) {
+      const candidate = trimToSentence(contextDemandado.trim().replace(/^de(?:l)?\s+/i, ''));
+      if (isValidPartyName(candidate)) {
+        demandado = candidate;
+      }
     }
   }
 
   if (!actor) {
-    const proemioMatch = fullCorpus.match(/^\s*(?:C\.\s+JUEZ[^\n]+\n+)?(?:P\s*R\s*E\s*S\s*E\s*N\s*T\s*E[^\n]*\n+)?\s*([A-ZÁÉÍÓÚÑ.,\s]{4,120}?)(?:,\s*MEXICANOS?|,\s*POR\s+MI\s+PROPIO\s+DERECHO|,\s*SEÑALANDO\s+DOMICILIO|COMPAREZCO)/i)?.[1];
-    if (proemioMatch && proemioMatch.trim().length > 3 && !/^(?:PROTESTO|EXPEDIENTE|ASUNTO)/i.test(proemioMatch.trim())) {
-      actor = proemioMatch.trim();
+    const proemioMatch = fullCorpus.match(/(?:^|\n)\s*(?:C\.\s+|CIUDADAN[OA]\s+)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{3,70}?)(?:,\s*(?:mexican[oa]|mayor\s+de\s+edad|solter[oa]|casad[oa]|por\s+mi\s+propio\s+derecho|en\s+mi\s+car[aá]cter|se[ñn]alando|con\s+el\s+debido\s+respeto))/i)?.[1]
+      || fullCorpus.match(/(?:PRESENTE\.?|P\s*R\s*E\s*S\s*E\s*N\s*T\s*E\.?)\s+(?:C\.\s+|CIUDADAN[OA]\s+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{3,70}?)(?:,\s*(?:mexican[oa]|mayor\s+de\s+edad|solter[oa]|casad[oa]|por\s+mi\s+propio\s+derecho|en\s+mi\s+car[aá]cter|se[ñn]alando|con\s+el\s+debido\s+respeto))/i)?.[1];
+    if (proemioMatch && proemioMatch.trim().length > 3 && !/^(?:PROTESTO|EXPEDIENTE|ASUNTO|H\.|TRIBUNAL|JUZGADO|JUNTA)/i.test(proemioMatch.trim())) {
+      const candidate = trimToSentence(proemioMatch.trim());
+      if (isValidPartyName(candidate)) {
+        actor = candidate;
+      }
     }
   }
   if (!actor) {
-    const galarzaActorMatch = fullCorpus.match(/([A-ZÁÉÍÓÚÑ.,\s]+?DE\s+APELLIDOS\s+GALARZA\s+MEZA)/i)?.[1];
-    if (galarzaActorMatch) {
-      actor = galarzaActorMatch.trim();
+    const signatureMatch = fullCorpus.match(/(?:ATENTAMENTE|PROTESTO\s+LO\s+NECESARIO)[^_\n]*\n+[\s_—\-]{4,}\n+\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{3,70})/i)?.[1];
+    if (signatureMatch) {
+      const candidate = trimToSentence(signatureMatch.trim());
+      if (isValidPartyName(candidate)) {
+        actor = candidate;
+      }
     }
   }
 
@@ -796,14 +889,14 @@ export function reconstructCaseAnalysis(
   const toca = extractFirstMatch(fullCorpus, [
     /(?:toca|recurso\s+de\s+revisi[oó]n|revisi[oó]n|t\.r\.)\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i,
   ]);
+  const groundedExpediente = sourceGroundings
+    .map((grounding) => grounding.caseMetadata.expediente.value)
+    .find((value): value is string => Boolean(value));
   const principal =
+    groundedExpediente ||
     amparoDirecto ||
     amparoIndirecto ||
-    toca ||
-    extractFirstMatch(fullCorpus, [
-      /(?:expediente|juicio|proceso)\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i,
-      /\b(\d{1,6}\/\d{4})\b/i,
-    ]);
+    toca;
 
   if (!principal) missingData.push('Número de expediente o toca principal');
 
@@ -845,7 +938,22 @@ export function reconstructCaseAnalysis(
     });
   });
 
-  const numberedFacts = extractNumberedFacts(combinedTexts);
+  const extractedNumberedFacts = extractNumberedFacts(combinedTexts);
+  const groundedNumberedFacts: AnalyzedFact[] = groundedCaseFacts.map((fact, index) => ({
+    id: `grounded-legacy-fact-${fact.sourceId}-${index + 1}`,
+    number: String(index + 1),
+    text: fact.text,
+    sourceFact: fact.text,
+    documentId: fact.sourceId,
+    page: fact.page,
+    confidence: fact.confidence,
+    lawyerPosition: 'UNDEFINED',
+    position: 'REQUIRE_LAWYER_INPUT',
+    contestedStatus: 'UNKNOWN',
+    provenance: 'SOURCE_EXTRACTED',
+    sourceReference: { documentId: fact.sourceId, page: fact.page, textSnippet: fact.text },
+  }));
+  const numberedFacts = extractedNumberedFacts.length > 0 ? extractedNumberedFacts : groundedNumberedFacts;
   const extractedClaims = extractClaims(combinedTexts);
   const family = targetFamily(userInstruction, fullCorpus);
 
@@ -1043,5 +1151,6 @@ export function reconstructCaseAnalysis(
     ...legacyAnalysis,
     ...projection.caseAnalysis,
     richCaseAnalysis,
+    sourceGrounding: sourceGroundings,
   };
 }

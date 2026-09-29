@@ -11,6 +11,7 @@ import type {
   RichVerifiedInput,
   VerifiedCompatibilityInput,
 } from './finalDocumentMaterializationTypes';
+import { evaluateProvenanceIntegrityGate } from './provenanceIntegrityGate';
 
 export type { RichVerifiedInput, VerifiedCompatibilityInput } from './finalDocumentMaterializationTypes';
 
@@ -141,32 +142,52 @@ export function verifyFinalDocumentExportability(input: {
   const assembly = document?.documentAssemblyResult;
   const assemblyGate = document?.documentAssemblyQualityGate;
   const exportValidation = input?.exportValidation;
+  const draftExport = allowsDraftExport(options);
+
+  const sourceGrounding = document?.generationMetadata?.sourceGrounding;
+  const storedProvenanceGate = document?.generationMetadata?.provenanceIntegrityGate;
+  const provenanceGate = sourceGrounding && sourceGrounding.length > 0
+    ? evaluateProvenanceIntegrityGate({
+        sourceGrounding,
+        caseRefs: document?.caseRefs,
+        caseAnalysis: document?.caseAnalysis,
+      })
+    : storedProvenanceGate;
 
   if (!document || !assembly || !assemblyGate) {
     reasons.push('missing FASE 6 assembly evidence');
   }
   if (assembly) {
-    if (assembly.documentId !== document.id || assembly.document?.id !== document.id) {
+    if (assembly.documentId !== document.id || (assembly.document?.id && assembly.document.id !== document.id)) {
       reasons.push('assembly document identity does not match the export document');
     }
     if (assembly.documentType !== document.documentType) {
       reasons.push('assembly document type does not match the export document');
     }
-    if (assembly.readiness !== 'READY') reasons.push(`assembly readiness is ${assembly.readiness}`);
-    if (assembly.validationStatus !== 'VALID') reasons.push(`assembly validation status is ${assembly.validationStatus}`);
-    if (assembly.assemblyStatus !== 'ASSEMBLED') reasons.push(`assembly status is ${assembly.assemblyStatus}`);
+    // DRAFT is an explicit review artifact. Preserve the rich assembly and
+    // its trace, but do not promote its blocked/review state to FINAL.
+    if (!draftExport) {
+      if (assembly.readiness !== 'READY') reasons.push(`assembly readiness is ${assembly.readiness}`);
+      if (assembly.validationStatus !== 'VALID') reasons.push(`assembly validation status is ${assembly.validationStatus}`);
+      if (assembly.assemblyStatus !== 'ASSEMBLED') reasons.push(`assembly status is ${assembly.assemblyStatus}`);
+    }
     if (!traceIsIntact(assembly)) reasons.push('assembly trace or block links are not intact');
   }
   if (assemblyGate) {
-    if (assemblyGate.passed !== true) reasons.push('assembly QualityGate did not pass');
-    if (assemblyGate.canMarkAsReady !== true) reasons.push('assembly QualityGate cannot mark the document ready');
-    if (assemblyGate.readiness !== 'READY') reasons.push(`assembly QualityGate readiness is ${assemblyGate.readiness}`);
-    if (assembly) reasons.push(...invalidEvidenceFindings(assembly, assemblyGate));
+    if (!draftExport) {
+      if (assemblyGate.passed !== true) reasons.push('assembly QualityGate did not pass');
+      if (assemblyGate.canMarkAsReady !== true) reasons.push('assembly QualityGate cannot mark the document ready');
+      if (assemblyGate.readiness !== 'READY') reasons.push(`assembly QualityGate readiness is ${assemblyGate.readiness}`);
+      if (assembly) reasons.push(...invalidEvidenceFindings(assembly, assemblyGate));
+    }
   }
-  if (!allowsDraftExport(options) && (!exportValidation || exportValidation.ok !== true)) reasons.push('export guard did not pass');
+  if (!draftExport && (!exportValidation || exportValidation.ok !== true)) reasons.push('export guard did not pass');
+  if (!draftExport && provenanceGate && provenanceGate.status !== 'PASS') {
+    reasons.push(`PROVENANCE_INTEGRITY_GATE: ${provenanceGate.status}${provenanceGate.issues.length ? ` (${provenanceGate.issues.join(', ')})` : ''}`);
+  }
 
   const lifecycleReadiness = readDocumentExportReadiness(document);
-  if (!allowsDraftExport(options) && lifecycleReadiness !== 'READY_TO_EXPORT' && lifecycleReadiness !== 'FINAL_DOCUMENT') {
+  if (!draftExport && lifecycleReadiness !== 'READY_TO_EXPORT' && lifecycleReadiness !== 'FINAL_DOCUMENT') {
     reasons.push(`document lifecycle is not exportable: ${lifecycleReadiness || 'UNKNOWN'}`);
   }
 
@@ -232,6 +253,17 @@ export function verifyCompatibilityMaterialization(input: {
   const metadata = document?.generationMetadata?.sourceOutputCompatibility;
   if (policy && !compatibilityMetadataMatches(metadata, policy)) {
     reasons.push('source/output compatibility metadata is absent, non-compatible, or does not match the approved policy');
+  }
+  const sourceGrounding = document?.generationMetadata?.sourceGrounding;
+  const provenanceGate = sourceGrounding && sourceGrounding.length > 0
+    ? evaluateProvenanceIntegrityGate({
+        sourceGrounding,
+        caseRefs: document?.caseRefs,
+        caseAnalysis: document?.caseAnalysis,
+      })
+    : document?.generationMetadata?.provenanceIntegrityGate;
+  if (!allowsDraftExport(options) && provenanceGate && provenanceGate.status !== 'PASS') {
+    reasons.push(`PROVENANCE_INTEGRITY_GATE: ${provenanceGate.status}${provenanceGate.issues.length ? ` (${provenanceGate.issues.join(', ')})` : ''}`);
   }
   const text = document?.sections
     ?.flatMap((section) => Array.isArray(section.content) ? section.content : [])

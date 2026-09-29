@@ -905,6 +905,7 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
       'CONTESTACIÓN DE PRESTACIONES',
       'EXCEPCIONES Y DEFENSAS',
       'PRUEBAS',
+      'DERECHO',
       'ALEGATOS',
       'PETITORIOS',
       'FIRMA',
@@ -916,9 +917,11 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
     camposOpcionales: ['domicilio para notificaciones', 'anexos'],
     reglas: [
       'CONTESTA punto por punto los hechos (cita + admite/niega/desconoce/no corresponde + razón) y CADA prestación reclamada.',
+      'PROHIBICIÓN ESTRICTA: El artículo 39-A LFT regula exclusivamente periodo a prueba y capacitación inicial. NUNCA cites el artículo 39-A para contratos por tiempo determinado ni para terminación por vencimiento de término.',
+      'Para terminación por vencimiento de término o contratos por tiempo determinado, funda estrictamente en los artículos 35, 36, 37, 39 y 53 fracción III de la Ley Federal del Trabajo, verifica si la materia subsiste (Art. 39 LFT), considera la legislación burocrática estatal/OPD si aplica, y argumenta siempre de manera condicional / cautelar ("de acreditarse la validez del término...").',
     ],
     reglasPrueba: ['Ofrece pruebas laborales admisibles (confesional, instrumental, presuncional, testimonial, documental) vinculando cada una al hecho que pretende probar.'],
-    prohibiciones: prohibicionesContestacion(),
+    prohibiciones: [...prohibicionesContestacion(), 'Jamás citar el artículo 39-A de la LFT para fundar contratos por tiempo determinado o terminación por vencimiento de término (el 39-A regula exclusivamente periodo a prueba).'],
   }),
 
   contestacion_demanda_civil: def({

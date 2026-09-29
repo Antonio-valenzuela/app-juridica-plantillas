@@ -189,19 +189,43 @@ describe('rich source to LegalIssue relationships', () => {
 
   it('preserves a source argument relationship without promoting an authority-only seed', () => {
     const analysis = makeFixtureFCaseAnalysis();
+    const argumentText = 'La fuente sostiene una cuestión jurídica concreta.';
+    const argumentProvenance = createSourceProvenance({
+      sourceId: 'source-issue-relationship-fixture',
+      sourceName: 'synthetic-source.pdf',
+      sourceType: 'application/pdf',
+      page: 2,
+      section: 'ARGUMENTOS',
+      excerpt: argumentText,
+      extractionMethod: 'PARAGRAPH',
+      confidence: 0.95,
+      inferenceLevel: 'LITERAL',
+    });
+    const authorityText = 'Artículo citado de forma independiente.';
+    const authorityProvenance = createSourceProvenance({
+      sourceId: 'source-issue-relationship-fixture',
+      sourceName: 'synthetic-source.pdf',
+      sourceType: 'application/pdf',
+      page: 3,
+      section: 'AUTORIDADES',
+      excerpt: authorityText,
+      extractionMethod: 'PARAGRAPH',
+      confidence: 0.95,
+      inferenceLevel: 'LITERAL',
+    });
     analysis.richCaseAnalysis!.arguments = [{
       id: 'argument-explicit',
-      proposition: 'La fuente sostiene una cuestión jurídica concreta.',
-      supportingFactIds: [],
+      proposition: argumentText,
+      supportingFactIds: ['fixture-f-fact-2'],
       citedAuthorityIds: [],
-      provenance: [],
+      provenance: [argumentProvenance],
     }];
     analysis.richCaseAnalysis!.authorities = [{
       id: 'authority-only',
       authorityType: 'ARTICLE',
-      citationText: 'Artículo citado de forma independiente.',
+      citationText: authorityText,
       verificationStatus: 'SOURCE_CITED',
-      provenance: [],
+      provenance: [authorityProvenance],
     }];
 
     const document = makeFixtureDocument();
@@ -212,9 +236,35 @@ describe('rich source to LegalIssue relationships', () => {
 
     expect(sourceIssue.argumentIds).toEqual(['argument-explicit']);
     expect(sourceIssue.authorityMentionIds).toEqual([]);
+    expect(sourceIssue.factIds).toEqual(['fixture-f-fact-2']);
     expect(authorityIssue.issueType).toBe('AUTHORITY_RESEARCH');
     expect(authorityIssue.argumentIds).toEqual([]);
     expect(authorityIssue.factIds).toEqual([]);
     expect(authorityIssue.claimIds).toEqual([]);
+  });
+
+  it('does not materialize a legal issue from source text that has no explicit entity relation', () => {
+    const analysis = makeFixtureFCaseAnalysis();
+    analysis.richCaseAnalysis!.arguments = [{
+      id: 'argument-unlinked',
+      proposition: 'La fuente sostiene una cuestión jurídica concreta.',
+      supportingFactIds: [],
+      citedAuthorityIds: [],
+      provenance: [createSourceProvenance({
+        sourceId: 'source-unlinked-argument',
+        excerpt: 'La fuente sostiene una cuestión jurídica concreta.',
+        page: 2,
+        section: 'ARGUMENTOS',
+        extractionMethod: 'PARAGRAPH',
+        confidence: 1,
+        inferenceLevel: 'LITERAL',
+      })],
+    }];
+
+    const document = makeFixtureDocument();
+    const coverage = buildCoverageMatrix(analysis, document, document.sections);
+    const matrix = buildLegalIssueMatrix({ caseAnalysis: analysis, coverageMatrix: coverage });
+
+    expect(matrix.issues.some((issue) => issue.argumentIds.includes('argument-unlinked'))).toBe(false);
   });
 });

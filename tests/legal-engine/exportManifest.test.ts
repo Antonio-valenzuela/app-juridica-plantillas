@@ -102,6 +102,11 @@ describe('FASE 7 Task 6 — export manifest and fingerprints', () => {
       omittedParagraphCount: 0,
       renderedBlockIds: ['block-1', 'block-2', 'block-3'],
       omittedBlockIds: [],
+      sectionWordCounts: [
+        { sectionId: 'section-1', wordCount: 6 },
+        { sectionId: 'section-2', wordCount: 3 },
+      ],
+      totalTextWordCount: 9,
       traceStatus: 'NOT_AVAILABLE',
     });
     expect(first.manifest).toEqual(second.manifest);

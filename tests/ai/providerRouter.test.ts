@@ -39,6 +39,8 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
   const testRequest: AIRequest = {
     userMessage: "Redactar concepto de violación",
     systemPrompt: "Eres un abogado especialista en amparo",
+    externalProviderOptIn: true,
+    privateCaseContext: false,
   };
 
   it("1. Gemini OK → Groq y NVIDIA NO son llamados", async () => {
@@ -98,7 +100,7 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     const router = new ProviderRouter(providers, () => ["gemini", "groq", "nvidia", "local"]);
     const { result, executionLogs } = await router.route(testRequest);
 
-    expect(gemini.generateMock).toHaveBeenCalledTimes(1);
+    expect(gemini.generateMock).toHaveBeenCalledTimes(2); // 503 transitorio: un reintento y luego Groq
     expect(groq.generateMock).toHaveBeenCalledTimes(1);
     expect(nvidia.generateMock).not.toHaveBeenCalled();
     expect(local.generateMock).not.toHaveBeenCalled();
@@ -108,11 +110,12 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     expect(result.content).toBe("Contenido generado por groq");
     expect(result.fallbackReason).toContain("GEMINI");
 
-    expect(executionLogs).toHaveLength(2);
+    expect(executionLogs).toHaveLength(3);
     expect(executionLogs[0].success).toBe(false);
     expect(executionLogs[0].provider).toBe("gemini");
-    expect(executionLogs[1].success).toBe(true);
-    expect(executionLogs[1].provider).toBe("groq");
+    expect(executionLogs[1].success).toBe(false);
+    expect(executionLogs[2].success).toBe(true);
+    expect(executionLogs[2].provider).toBe("groq");
   });
 
   it("3. Gemini + Groq fallan → NVIDIA OK (local no llamado)", async () => {
@@ -139,8 +142,8 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     const router = new ProviderRouter(providers, () => ["gemini", "groq", "nvidia", "local"]);
     const { result, executionLogs } = await router.route(testRequest);
 
-    expect(gemini.generateMock).toHaveBeenCalledTimes(1);
-    expect(groq.generateMock).toHaveBeenCalledTimes(1);
+    expect(gemini.generateMock).toHaveBeenCalledTimes(2); // timeout: retry limitado
+    expect(groq.generateMock).toHaveBeenCalledTimes(1); // 429: pasa al siguiente proveedor sin reintento
     expect(nvidia.generateMock).toHaveBeenCalledTimes(1);
     expect(local.generateMock).not.toHaveBeenCalled();
 
@@ -149,11 +152,12 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     expect(result.content).toBe("Contenido generado por nvidia");
     expect(result.fallbackReason).toContain("GROQ");
 
-    expect(executionLogs).toHaveLength(3);
+    expect(executionLogs).toHaveLength(4);
     expect(executionLogs[0].fallbackReason).toBe("GEMINI_TIMEOUT");
-    expect(executionLogs[1].fallbackReason).toBe("GROQ_HTTP_429");
-    expect(executionLogs[2].success).toBe(true);
-    expect(executionLogs[2].provider).toBe("nvidia");
+    expect(executionLogs[1].fallbackReason).toBe("GEMINI_TIMEOUT");
+    expect(executionLogs[2].fallbackReason).toBe("GROQ_HTTP_429");
+    expect(executionLogs[3].success).toBe(true);
+    expect(executionLogs[3].provider).toBe("nvidia");
   });
 
   it("4. Todos los proveedores externos fallan → deterministic fallback (local)", async () => {
@@ -194,8 +198,8 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     const router = new ProviderRouter(providers, () => ["gemini", "groq", "nvidia", "local"]);
     const { result, executionLogs } = await router.route(testRequest);
 
-    expect(gemini.generateMock).toHaveBeenCalledTimes(1);
-    expect(groq.generateMock).toHaveBeenCalledTimes(1);
+    expect(gemini.generateMock).toHaveBeenCalledTimes(1); // error no transitorio
+    expect(groq.generateMock).toHaveBeenCalledTimes(1); // error no transitorio
     expect(nvidia.generateMock).toHaveBeenCalledTimes(1);
     expect(local.generateMock).toHaveBeenCalledTimes(1);
 
@@ -273,7 +277,7 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     expect(executionLogs[0].fallbackReason).toBe("GEMINI_NO_API_KEY");
   });
 
-  it("7. Cada provider se invoca máximo una vez por request", async () => {
+  it("7. Cada provider aparece una vez en la cadena aunque tenga un retry limitado", async () => {
     const gemini = createMockProvider("gemini", {
       generate: async () => {
         throw new Error("Gemini temporary 503");
@@ -301,8 +305,8 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     );
     const { result } = await router.route(testRequest);
 
-    expect(gemini.generateMock).toHaveBeenCalledTimes(1);
-    expect(groq.generateMock).toHaveBeenCalledTimes(1);
+    expect(gemini.generateMock).toHaveBeenCalledTimes(2); // un proveedor, dos intentos máximos
+    expect(groq.generateMock).toHaveBeenCalledTimes(1); // HTTP 429 no se reintenta
     expect(nvidia.generateMock).toHaveBeenCalledTimes(1);
     expect(local.generateMock).toHaveBeenCalledTimes(0); // NVIDIA succeeded, local not needed
     expect(result.providerActuallyUsed).toBe("nvidia");
@@ -310,8 +314,8 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
 
   it("8. Las API keys nunca aparecen en logs, errors, ni telemetría", async () => {
     const geminiKey = "AQ.SecretKey1234567890abcdef";
-    const groqKey = "gsk_SecretGroqKey1234567890abcdef";
-    const nvidiaKey = "nvapi-SecretNvidiaKey1234567890abcdef";
+    const groqKey = "test-groq-key-placeholder";
+    const nvidiaKey = "test-nvidia-key-placeholder";
     const bearerKey = "Bearer TopSecretAuthToken1234567890";
 
     const gemini = createMockProvider("gemini", {
@@ -385,5 +389,27 @@ describe("ProviderRouter — Multi-Provider Cascade & Fallback", () => {
     expect(result.providerActuallyUsed).toBe("gemini");
     expect(executionLogs[0].fallbackReason).toBe("GEMINI_HTTP_5XX");
     expect(executionLogs[1].success).toBe(true);
+  });
+
+  it('10. Un HTTP 404 no reintenta y pasa directamente al siguiente proveedor', async () => {
+    const gemini = createMockProvider('gemini', { generate: async () => { throw new Error('HTTP 404'); } });
+    const groq = createMockProvider('groq');
+    const router = new ProviderRouter(new Map<AIProviderId, LegalAIProvider>([['gemini', gemini], ['groq', groq]]), () => ['gemini', 'groq']);
+    const { result, executionLogs } = await router.route(testRequest);
+    expect(gemini.generateMock).toHaveBeenCalledTimes(1);
+    expect(groq.generateMock).toHaveBeenCalledTimes(1);
+    expect(executionLogs.map((log) => log.provider)).toEqual(['gemini', 'groq']);
+    expect(result.providerActuallyUsed).toBe('groq');
+  });
+
+  it('11. Un éxito aceptado no se vuelve a generar ni se duplica por entradas repetidas', async () => {
+    const gemini = createMockProvider('gemini');
+    const groq = createMockProvider('groq');
+    const router = new ProviderRouter(new Map<AIProviderId, LegalAIProvider>([['gemini', gemini], ['groq', groq]]), () => ['gemini', 'gemini', 'groq']);
+    const { result, executionLogs } = await router.route(testRequest);
+    expect(gemini.generateMock).toHaveBeenCalledTimes(1);
+    expect(groq.generateMock).not.toHaveBeenCalled();
+    expect(executionLogs).toHaveLength(1);
+    expect(result.content).toBe('Contenido generado por gemini');
   });
 });

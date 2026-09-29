@@ -80,7 +80,7 @@ describe('FASE 4: HARDENING, QA DE PRODUCCIÓN Y VALIDACIÓN INTEGRAL', () => {
   // FASE D — PRUEBAS CON MACHOTES REALES (CORTO, ESTRUCTURADO, IRREGULAR)
   // =========================================================================
   describe('Fase D — Pruebas con Machotes Reales', () => {
-    it('Caso 1: Machote corto (1-2 párrafos) se procesa y conserva su información', async () => {
+    it('Caso 1: Machote corto sirve de referencia sin copiar expediente ajeno', async () => {
       const shortMachote = `EXPEDIENTE: 450/2023\nJUZGADO TERCERO DE DISTRITO\nComparezco a solicitar copias certificadas del acuerdo.\nPROTESTO LO NECESARIO.`;
       
       const doc = await runGenerationPipeline({
@@ -90,7 +90,8 @@ describe('FASE 4: HARDENING, QA DE PRODUCCIÓN Y VALIDACIÓN INTEGRAL', () => {
 
       expect(doc.sections.length).toBeGreaterThan(0);
       const fullText = extractDocumentFullText(doc);
-      expect(fullText).toContain('450/2023');
+      expect(fullText).not.toContain('450/2023');
+      expect(doc.caseRefs.expediente).not.toBe('450/2023');
     });
 
     it('Caso 2: Machote estructurado conserva orden y jerarquía de secciones', async () => {

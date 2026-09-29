@@ -83,6 +83,33 @@ describe('rich Coverage contracts and legacy regressions', () => {
     expect(tasks.flatMap((task) => task.coverageItemIds || []).every((id) => ids.has(id))).toBe(true);
   });
 
+  it('does not promote legacy compatibility aliases into independent rich SectionPlan requirements', () => {
+    const analysis = makeFixtureFCaseAnalysis();
+    analysis.richCaseAnalysis!.candidates = [{ id: 'candidate-enables-legacy-aliases' } as any];
+    const doc = makeFixtureDocument();
+    const matrix = buildCoverageMatrix(analysis, doc, doc.sections);
+    const aliasIds = matrix.items.filter((item) => item.metadata?.compatibilityAlias).map((item) => item.id);
+    const plan = buildDraftingPlan(doc, 5000, analysis, matrix);
+    const plannedIds = plan.sections.flatMap((section) => section.coverageItemIds || []);
+
+    expect(aliasIds.length).toBeGreaterThan(0);
+    expect(plannedIds).not.toEqual(expect.arrayContaining(aliasIds));
+  });
+
+  it('keeps compatibility aliases out of canonical rich coverage totals and section bindings', () => {
+    const analysis = makeFixtureFCaseAnalysis();
+    analysis.richCaseAnalysis!.candidates = [{ id: 'candidate-enables-legacy-aliases' } as any];
+    const doc = makeFixtureDocument();
+    const matrix = buildCoverageMatrix(analysis, doc, doc.sections);
+    const canonicalItems = matrix.items.filter((item) => item.metadata?.compatibilityAlias !== true);
+    const aliasIds = matrix.items.filter((item) => item.metadata?.compatibilityAlias === true).map((item) => item.id);
+    const binding = bindCoverageToSections(doc.sections, matrix);
+    const boundIds = binding.sections.flatMap((section) => section.coverageItemIds || []);
+
+    expect(matrix.summary.total).toBe(canonicalItems.length);
+    expect(boundIds).not.toEqual(expect.arrayContaining(aliasIds));
+  });
+
   it('Contract 39: petition support remains separate from claim response', () => {
     const matrix = buildCoverageMatrix(makeFixtureFCaseAnalysis(), makeFixtureDocument(), makeFixtureDocument().sections);
     const claim = matrix.items.find((item) => item.category === 'CLAIM_RESPONSE')!;

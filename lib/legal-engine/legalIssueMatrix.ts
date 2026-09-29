@@ -239,7 +239,7 @@ function resolveIssueStatus(input: {
 }): { status: LegalIssueStatus; blocking: boolean; statusReason: string } {
   if (input.conflictIds.length > 0) return { status: 'BLOCKED_BY_CONFLICT', blocking: true, statusReason: 'BLOCKING_CONFLICT_REQUIRES_REVIEW' };
   if (input.clientPositionStatus === 'UNKNOWN') {
-    if (input.relationStatus === 'EXPLICIT' && input.hasDocumentarySupport) {
+    if (input.relationStatus === 'EXPLICIT') {
       return {
         status: 'GENERATABLE_REQUIRES_REVIEW',
         blocking: false,

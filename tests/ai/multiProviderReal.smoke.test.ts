@@ -7,6 +7,7 @@ import { defaultProviderRouter } from "@/lib/ai/providerRouter";
 import type { AIRequest } from "@/lib/ai/providers/types";
 
 describe("Smoke Real Providers Test — Live API calls", () => {
+  const liveEnabled = process.env.RUN_LIVE_PROVIDER_TESTS === 'true';
   const pingRequest: AIRequest = {
     userMessage: "Responde únicamente con la palabra: JURIDICO_OK",
     systemPrompt: "Eres un asistente legal preciso.",
@@ -14,14 +15,8 @@ describe("Smoke Real Providers Test — Live API calls", () => {
     temperature: 0.1,
   };
 
-  it("Gemini real call succeeds when configured", async () => {
+  it.skipIf(!liveEnabled || !process.env.GEMINI_API_KEY?.trim())("Gemini real call succeeds when configured", async () => {
     const gemini = new GeminiProvider();
-    const available = await gemini.isAvailable();
-    if (!available) {
-      console.warn("Skipping Gemini real test: GEMINI_API_KEY not present");
-      return;
-    }
-
     const res = await gemini.generate(pingRequest);
     console.log(`[TEST-REAL] Gemini: success=${res.success}, model=${res.model}, latencyMs=${res.latencyMs}, outputChars=${res.content.length}`);
     expect(res.success).toBe(true);
@@ -32,14 +27,8 @@ describe("Smoke Real Providers Test — Live API calls", () => {
     expect(resString).not.toMatch(/AQ\.[a-zA-Z0-9_-]{10,}/);
   }, 30000);
 
-  it("Groq real call succeeds when configured", async () => {
+  it.skipIf(!liveEnabled || !process.env.GROQ_API_KEY?.trim())("Groq real call succeeds when configured", async () => {
     const groq = new GroqProvider();
-    const available = await groq.isAvailable();
-    if (!available) {
-      console.warn("Skipping Groq real test: GROQ_API_KEY not present");
-      return;
-    }
-
     const res = await groq.generate(pingRequest);
     console.log(`[TEST-REAL] Groq: success=${res.success}, model=${res.model}, latencyMs=${res.latencyMs}, outputChars=${res.content.length}`);
     expect(res.success).toBe(true);
@@ -50,14 +39,8 @@ describe("Smoke Real Providers Test — Live API calls", () => {
     expect(resString).not.toMatch(/gsk_[a-zA-Z0-9_-]{10,}/);
   }, 30000);
 
-  it("NVIDIA real call succeeds when configured", async () => {
+  it.skipIf(!liveEnabled || !process.env.NVIDIA_API_KEY?.trim())("NVIDIA real call succeeds when configured", async () => {
     const nvidia = new NVIDIAProvider();
-    const available = await nvidia.isAvailable();
-    if (!available) {
-      console.warn("Skipping NVIDIA real test: NVIDIA_API_KEY not present");
-      return;
-    }
-
     const res = await nvidia.generate(pingRequest);
     console.log(`[TEST-REAL] NVIDIA: success=${res.success}, model=${res.model}, latencyMs=${res.latencyMs}, outputChars=${res.content.length}`);
     // If NVIDIA is available and succeeds, verify output
@@ -69,7 +52,7 @@ describe("Smoke Real Providers Test — Live API calls", () => {
     expect(resString).not.toMatch(/nvapi-[a-zA-Z0-9_-]{10,}/);
   }, 45000);
 
-  it("Router end-to-end live generation chooses primary Gemini", async () => {
+  it.skipIf(!liveEnabled || !process.env.GEMINI_API_KEY?.trim())("Router end-to-end live generation chooses primary Gemini", async () => {
     const { result, executionLogs } = await defaultProviderRouter.route(pingRequest);
     console.log(`[TEST-REAL] Router result (Gemini available): providerUsed=${result.providerActuallyUsed}, model=${result.model}, latencyMs=${result.latencyMs}`);
     expect(result.success).toBe(true);
@@ -79,7 +62,7 @@ describe("Smoke Real Providers Test — Live API calls", () => {
     expect(executionLogs[0].success).toBe(true);
   }, 30000);
 
-  it("Router live fallback to Groq when Gemini is unavailable", async () => {
+  it.skipIf(!liveEnabled || !process.env.GROQ_API_KEY?.trim())("Router live fallback to Groq when Gemini is unavailable", async () => {
     const origGeminiKey = process.env.GEMINI_API_KEY;
     try {
       delete process.env.GEMINI_API_KEY;
@@ -95,7 +78,7 @@ describe("Smoke Real Providers Test — Live API calls", () => {
     }
   }, 30000);
 
-  it("Router live fallback to NVIDIA when Gemini and Groq are unavailable", async () => {
+  it.skipIf(!liveEnabled || !process.env.NVIDIA_API_KEY?.trim())("Router live fallback to NVIDIA when Gemini and Groq are unavailable", async () => {
     const origGeminiKey = process.env.GEMINI_API_KEY;
     const origGroqKey = process.env.GROQ_API_KEY;
     try {
@@ -115,4 +98,3 @@ describe("Smoke Real Providers Test — Live API calls", () => {
     }
   }, 45000);
 });
-

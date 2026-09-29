@@ -8,6 +8,9 @@ import { evaluateCivilMercantileResponseQuality } from './responseQuality';
 import { evaluateCivilMercantileEvidenceArgumentQuality } from './evidenceArgumentQuality';
 import { hasSeedMarkers, hasUnresolvedFactualDependencies } from './seedMarkers';
 import { validateLegalIssueMatrix } from './legalIssueMatrix';
+import { evaluateFactualClaimGate } from './factualClaimGate';
+import { evaluateAuthorityVerificationGate } from './authorityVerificationGate';
+import { validateTextAuthorityPropositions } from './authorityPropositionGate';
 
 export interface QualityGateResult {
   passed: boolean;
@@ -40,6 +43,10 @@ export interface QualityGateResult {
     contradictoryPositionCount: number;
     duplicateFactResponseCount: number;
     unsupportedFactualClaimCount: number;
+    unverifiedFactualClaimCount?: number;
+    unsupportedLegalAuthorities?: number;
+    verifiedAuthorityCount?: number;
+    appliedAuthorityCount?: number;
     unsupportedEvidenceCount: number;
     inappropriateSectionCount: number;
     voiceInconsistencyCount: number;
@@ -81,6 +88,53 @@ function normalizedText(value: string): string {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
 }
 
+const SPANISH_MONTH_NUMBERS: Record<string, number> = {
+  enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6,
+  julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10,
+  noviembre: 11, diciembre: 12,
+};
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isDateSupportedInText(date: string, authorizedText: string): boolean {
+  const textual = normalizedText(date).match(/\b(\d{1,2})\s+(?:de|del)\s+([a-z]+)\s+(?:de|del)\s+(\d{4})\b/);
+  const numeric = normalizedText(date).match(/\b(\d{1,2})\s*[/.\-]\s*(\d{1,2})\s*[/.\-]\s*(\d{4})\b/);
+  const match = textual || numeric;
+  if (!match) return authorizedText.includes(normalizedText(date));
+
+  const day = String(Number(match[1]));
+  const monthName = textual ? match[2] : Object.entries(SPANISH_MONTH_NUMBERS)
+    .find(([, monthNumber]) => monthNumber === Number(match[2]))?.[0];
+  const monthNumber = textual ? SPANISH_MONTH_NUMBERS[match[2]] : Number(match[2]);
+  const year = match[3];
+  const dateForms: RegExp[] = [
+    new RegExp(`\\b0?${day}\\s*[/.\\-]\\s*0?${monthNumber}\\s*[/.\\-]\\s*${year}\\b`),
+  ];
+
+  if (monthName) {
+    dateForms.push(new RegExp(
+      `\\b0?${day}\\s+(?:(?:de|del)\\s+)?(?:mes\\s+de\\s+)?${escapeRegex(monthName)}\\s+(?:(?:de|del)\\s+)?${year}\\b`,
+    ));
+  }
+
+  return dateForms.some((pattern) => pattern.test(authorizedText));
+}
+
+function hasValidatedLinkedResponse(
+  section: UniversalLegalDocument['sections'][number] | undefined,
+  matchesEntity: (block: UniversalLegalDocument['sections'][number]['content'][number]) => boolean,
+): boolean {
+  return Boolean(section?.content.some((block) =>
+    block.generatedBy === 'AI'
+    && (block.issueDraftValidationStatus === 'VALID_ACCEPTED'
+      || block.issueDraftValidationStatus === 'VALID_NON_FINAL')
+    && block.text.trim().length >= 80
+    && matchesEntity(block)
+  ));
+}
+
 export function runQualityGateCheck(
   doc: UniversalLegalDocument,
   options: { referenceLength?: number } = {}
@@ -103,6 +157,10 @@ export function runQualityGateCheck(
   let contradictoryPositionCount = 0;
   let duplicateFactResponseCount = 0;
   let unsupportedFactualClaimCount = 0;
+  let unverifiedFactualClaimCount = 0;
+  let unsupportedLegalAuthorities = 0;
+  let verifiedAuthorityCount = 0;
+  let appliedAuthorityCount = 0;
   let unsupportedEvidenceCount = 0;
   let inappropriateSectionCount = 0;
   let voiceInconsistencyCount = 0;
@@ -110,6 +168,50 @@ export function runQualityGateCheck(
   let matrixNeedsResearch = false;
 
   const totalSections = doc.sections.length;
+  if (doc.generationMetadata?.draftDepth) {
+    const generatedBlocks = doc.sections.flatMap((section) => section.content
+      .filter((block) => block.generatedBy === 'AI' && block.text.trim())
+      .map((block) => ({ id: block.id, text: block.text })));
+    const factualAudit = evaluateFactualClaimGate({
+      blocks: generatedBlocks,
+      sourceGrounding: doc.generationMetadata.sourceGrounding || [],
+      claims: doc.generationMetadata.factualClaims || [],
+    });
+    unsupportedFactualClaimCount += factualAudit.unsupportedClaims;
+    unverifiedFactualClaimCount += factualAudit.unverifiedClaims;
+    if (factualAudit.issues.some((issue) => issue.startsWith('CLAIM_AUDIT_MISSING:'))) {
+      criticalErrors.push({ checkId: 'FACTUAL_CLAIM_AUDIT_MISSING', message: 'Hay afirmaciones generadas sin clasificación y trazabilidad individual a la fuente.' });
+    }
+    if (factualAudit.unsupportedClaims > 0) {
+      criticalErrors.push({ checkId: 'UNSUPPORTED_FACTUAL_CLAIM', message: `${factualAudit.unsupportedClaims} afirmación(es) factual(es) no sustentadas.` });
+    }
+    if (factualAudit.issues.some((issue) => !issue.startsWith('CLAIM_AUDIT_MISSING:')) && factualAudit.unsupportedClaims === 0) {
+      criticalErrors.push({ checkId: 'FACTUAL_CLAIM_UNVERIFIED', message: 'La trazabilidad o clasificación factual contiene afirmaciones aún no verificadas.' });
+    }
+    const authorityAudit = evaluateAuthorityVerificationGate({
+      blocks: generatedBlocks,
+      uses: doc.generationMetadata.authorityUses || [],
+      verifiedAuthorities: doc.generationMetadata.verifiedAuthorities || [],
+    });
+    unsupportedLegalAuthorities = authorityAudit.unsupportedLegalAuthorities;
+    verifiedAuthorityCount = authorityAudit.verifiedAuthorityCount;
+    appliedAuthorityCount = authorityAudit.appliedAuthorityCount;
+    if (authorityAudit.status === 'BLOCKED') {
+      criticalErrors.push({ checkId: 'AUTHORITY_VERIFICATION_FAILED', message: 'Hay citas jurídicas sin verificación oficial y aplicación trazable al issue.' });
+    }
+    const authorityPropositionCheck = validateTextAuthorityPropositions(
+      doc.sections.flatMap((s) => s.content.map((b) => b.text)).join('\n'),
+      { matter: doc.matter, isLaboral: /laboral/i.test(`${doc.matter} ${doc.documentType}`) }
+    );
+    if (!authorityPropositionCheck.isValid) {
+      authorityPropositionCheck.violations.forEach((violation, idx) => {
+        criticalErrors.push({
+          checkId: 'MISAPPLIED_AUTHORITY',
+          message: authorityPropositionCheck.details[idx] || `Cita de autoridad con proposición insostenible: ${violation}`,
+        });
+      });
+    }
+  }
   const missingRequiredSections = getMissingRequiredSectionIds(doc);
   for (const sectionId of missingRequiredSections) {
     criticalErrors.push({
@@ -444,8 +546,17 @@ export function runQualityGateCheck(
   }
 
   const facts = doc.caseAnalysis?.facts || [];
+  const factsSection = doc.sections.find((candidate) => /hechos/.test(normalizedText(candidate.title)));
+  const factCoverageIds = (factId: string) => new Set((doc.coverageMatrix?.items || [])
+    .filter((item) => item.category === 'FACT_RESPONSE' && item.sourceEntityIds?.includes(factId))
+    .map((item) => item.id));
   const factsWithResponse = isNewWriting || !isDemandContestacion ? facts.length : facts.filter((fact) => {
-    const section = doc.sections.find((candidate) => /hechos/.test(normalizedText(candidate.title)));
+    const linkedCoverageIds = factCoverageIds(fact.id);
+    if (hasValidatedLinkedResponse(factsSection, (block) =>
+      block.factIds?.includes(fact.id) === true
+      || (block.coverageItemIds || []).some((id) => linkedCoverageIds.has(id)))) return true;
+
+    const section = factsSection;
     const text = section?.content.map((block) => block.text).join('\n') || '';
     const marker = `AL HECHO ${fact.number}`;
     const start = text.indexOf(marker);
@@ -458,6 +569,12 @@ export function runQualityGateCheck(
   const claimsText = claimsSection?.content.map((block) => block.text).join('\n') || '';
   const normalizedClaimsText = normalizedText(claimsText);
   const claimsWithResponse = claims.filter((claim) => {
+    const linkedCoverageIds = new Set((doc.coverageMatrix?.items || [])
+      .filter((item) => item.category === 'CLAIM_RESPONSE' && item.sourceEntityIds?.includes(claim.id))
+      .map((item) => item.id));
+    if (hasValidatedLinkedResponse(claimsSection, (block) =>
+      (block.coverageItemIds || []).some((id) => linkedCoverageIds.has(id)))) return true;
+
     const numberedMarker = `prestacion ${normalizedText(claim.number)}`;
     const sourceClaim = normalizedText(claim.text);
     const sourceMarker = sourceClaim.slice(0, Math.min(80, sourceClaim.length));
@@ -507,13 +624,8 @@ export function runQualityGateCheck(
   // Control mínimo y auditable de hechos concretos: una fecha que aparece en
   // la salida debe existir en el corpus autorizado o en la entrada del abogado.
   const authorizedFacts = normalizedText(`${sourceText} ${doc.intake?.request || ''} ${facts.map((fact) => fact.sourceFact || fact.text).join(' ')}`);
-  const normAuthorized = authorizedFacts.replace(/\bdel\b/g, 'de');
   const generatedDates = allText.match(/\b(?:\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}\s+(?:de|del)\s+[a-záéíóúñ]+\s+(?:de|del)\s+\d{4})\b/gi) || [];
-  const unsupportedDate = generatedDates.find((date) => {
-    const norm = normalizedText(date).replace(/\bdel\b/g, 'de');
-    const unpadded = normalizedText(date.replace(/\b0(\d)/g, '$1')).replace(/\bdel\b/g, 'de');
-    return !normAuthorized.includes(norm) && !normAuthorized.includes(unpadded);
-  });
+  const unsupportedDate = generatedDates.find((date) => !isDateSupportedInText(date, authorizedFacts));
   if (unsupportedDate) {
     unsupportedFactualClaimCount++;
     criticalErrors.push({ checkId: 'UNSUPPORTED_FACTUAL_CLAIM', message: `La salida introduce la fecha no respaldada "${unsupportedDate}".` });
@@ -634,6 +746,10 @@ export function runQualityGateCheck(
       contradictoryPositionCount,
       duplicateFactResponseCount,
       unsupportedFactualClaimCount,
+      unverifiedFactualClaimCount,
+      unsupportedLegalAuthorities,
+      verifiedAuthorityCount,
+      appliedAuthorityCount,
       unsupportedEvidenceCount,
       inappropriateSectionCount,
       voiceInconsistencyCount,
