@@ -21,6 +21,8 @@ import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } f
 import { buildLegalIssueMatrix, type LegalIssueItem, type LegalIssueMatrix } from './legalIssueMatrix';
 import { buildEvidenceGroups } from './evidenceGrouping';
 import type { LawyerProfile } from '../workspace/lawyerProfileTypes';
+import { loadActiveManual } from '../operational-manual/store';
+import { retrieveManualRules, formatManualTaskContext, type ManualMatter } from '../operational-manual/core';
 import { runFastMode } from '@/lib/ai/orchestrator';
 import { sanitizeGeneratedText } from './pipeline';
 import {
@@ -1371,7 +1373,26 @@ export async function executeGenerationTask(
     }
   }
 
-  const { systemPrompt, userMessage } = buildTaskContextPack(task, doc, caseAnalysis, lawyerProfile);
+  const { systemPrompt, userMessage: baseUserMessage } = buildTaskContextPack(task, doc, caseAnalysis, lawyerProfile);
+  const activeManual = await loadActiveManual();
+  const matterKey = String(doc.matter || '').toLocaleUpperCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const manualMatter = (['CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL'] as ManualMatter[]).find((matter) => matterKey.includes(matter)) || 'GENERAL';
+  const manualSelection = activeManual ? retrieveManualRules(activeManual, { matter: manualMatter, caseType: doc.documentType, task: `${task.title || ''} ${task.objective || ''}`, stage: task.sectionTitle, budgetChars: 4500, measureContext: (rules) => formatManualTaskContext(rules).length }) : undefined;
+  const manualContext = formatManualTaskContext(manualSelection?.selected || []);
+  const userMessage = baseUserMessage + manualContext;
+  if (activeManual && manualSelection) {
+    const manualTrace = doc.generationMetadata.operationalManual ||= {
+      manualVersion: activeManual.manifest.version, manualHash: activeManual.manifest.sourceHash,
+      selectedRuleIds: [], selectedPages: [], selectedSections: [], retrievals: [], auditRuleIds: [], auditFindings: [],
+    };
+    const selectedRuleIds = manualSelection.selected.map((item) => item.stableRuleId);
+    const selectedPages = [...new Set(manualSelection.selected.map((item) => item.physicalPage))];
+    manualTrace.selectedRuleIds = [...new Set([...manualTrace.selectedRuleIds, ...selectedRuleIds])];
+    manualTrace.selectedPages = [...new Set([...manualTrace.selectedPages, ...selectedPages])];
+    manualTrace.selectedSections = [...new Set([...manualTrace.selectedSections, ...manualSelection.selected.map((item) => item.section)])];
+    manualTrace.retrievals.push({ taskId: task.id, retrievalStage: 'GENERATION_TASK', selectedRuleIds, selectedPages, selectedRules: manualSelection.selected.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, section: item.section })), discardedRulesByContextLimit: manualSelection.discardedRulesByContextLimit });
+    if (trace) trace.trace.operationalManual = manualTrace;
+  }
   trace?.recordTaskPlanned(task, { systemPrompt, userMessage });
   let accumulatedText = '';
   let finishReason: string | null = 'stop';
@@ -1882,15 +1903,17 @@ export function updateCoverageMatrixWithTaskResults(
   let unsupportedCount = 0;
   let notApplicableCount = 0;
 
-  coverageMatrix.items.forEach((item) => {
-    if (item.required) requiredCount++;
-    if (item.status === 'pending') pendingCount++;
-    else if (item.status === 'generated') generatedCount++;
-    else if (item.status === 'covered') coveredCount++;
-    else if (item.status === 'weak') weakCount++;
-    else if (item.status === 'unsupported') unsupportedCount++;
-    else if (item.status === 'not_applicable') notApplicableCount++;
-  });
+  coverageMatrix.items
+    .filter((item) => item.metadata?.compatibilityAlias !== true)
+    .forEach((item) => {
+      if (item.required) requiredCount++;
+      if (item.status === 'pending') pendingCount++;
+      else if (item.status === 'generated') generatedCount++;
+      else if (item.status === 'covered') coveredCount++;
+      else if (item.status === 'weak') weakCount++;
+      else if (item.status === 'unsupported') unsupportedCount++;
+      else if (item.status === 'not_applicable') notApplicableCount++;
+    });
 
   coverageMatrix.summary.required = requiredCount;
   coverageMatrix.summary.pending = pendingCount;
@@ -1976,15 +1999,17 @@ export function applySemanticEvaluationToCoverageMatrix(
   let unsupportedCount = 0;
   let notApplicableCount = 0;
 
-  coverageMatrix.items.forEach((item) => {
-    if (item.required) requiredCount++;
-    if (item.status === 'pending') pendingCount++;
-    else if (item.status === 'generated') generatedCount++;
-    else if (item.status === 'covered') coveredCount++;
-    else if (item.status === 'weak') weakCount++;
-    else if (item.status === 'unsupported') unsupportedCount++;
-    else if (item.status === 'not_applicable') notApplicableCount++;
-  });
+  coverageMatrix.items
+    .filter((item) => item.metadata?.compatibilityAlias !== true)
+    .forEach((item) => {
+      if (item.required) requiredCount++;
+      if (item.status === 'pending') pendingCount++;
+      else if (item.status === 'generated') generatedCount++;
+      else if (item.status === 'covered') coveredCount++;
+      else if (item.status === 'weak') weakCount++;
+      else if (item.status === 'unsupported') unsupportedCount++;
+      else if (item.status === 'not_applicable') notApplicableCount++;
+    });
 
   coverageMatrix.summary.required = requiredCount;
   coverageMatrix.summary.pending = pendingCount;

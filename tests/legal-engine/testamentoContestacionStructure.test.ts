@@ -7,13 +7,11 @@ import { buildContestacionSkeleton, resolveContestacionRoles } from '../../lib/l
 import { createEmptyDocument, type UploadedSourceDocument } from '../../lib/legal-engine/types';
 
 describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', () => {
-  const docxPath = 'C:/Users/yahir/Desktop/BECA/DEMANDA DE LA FAMILIA GALARZA/NULIDAD DE TESTAMENTO/DEMANDA DE NULIDAD DEL TESTAMENTO.docx';
+  // Historical contract has no approved equivalent fixture. Never read a personal case.
+  // NOT_REPRODUCIBLE_WITH_APPROVED_FIXTURES; retain >=6 until equivalence is established.
+  const docxPath = path.resolve('tests/fixtures/testamento-historical-contract.docx');
 
-  it('1. Extrae correctamente los hechos y partes de DEMANDA DE NULIDAD DEL TESTAMENTO.docx sin contaminar con jurisprudencia', async () => {
-    if (!fs.existsSync(docxPath)) {
-      console.warn('Documento no encontrado en ruta local, saltando test:', docxPath);
-      return;
-    }
+  it.skip('1. NOT_REPRODUCIBLE_WITH_APPROVED_FIXTURES: historical extraction contract', async () => {
     const buffer = fs.readFileSync(docxPath);
     const extracted = await extractDocument({
       buffer,
@@ -160,11 +158,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
     expect(fullText).not.toMatch(/DESARROLLO F[ÁA]CTICO:/);
   });
 
-  it('5. E2E: Genera la Contestación completa de 11 secciones canónicas y exporta DOCX para el caso Familia Galarza (evitando PDF)', async () => {
-    if (!fs.existsSync(docxPath)) {
-      console.warn('Documento no encontrado en ruta local, saltando test:', docxPath);
-      return;
-    }
+  it.skip('5. NOT_REPRODUCIBLE_WITH_APPROVED_FIXTURES: historical document contract', async () => {
 
     const { exportUniversalToDocx } = await import('../../lib/legal-engine/exportDocxUniversal');
     const buffer = fs.readFileSync(docxPath);

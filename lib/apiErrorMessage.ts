@@ -17,6 +17,7 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   SECTION_GENERATION_FAILED: 'No fue posible generar el apartado.',
   DOCX_EXPORT_FAILED: 'No se pudo crear el archivo DOCX. El borrador se conserva para revisión.',
   PDF_EXPORT_FAILED: 'No fue posible exportar el documento PDF.',
+  DRAFT_PERSISTENCE_REQUIRED: 'No se pudo guardar el borrador; la exportación se detuvo y el archivo no fue solicitado. Reintenta cuando el guardado esté disponible.',
   UPLOAD_PROCESSING_FAILED: 'No fue posible procesar el archivo.',
 };
 

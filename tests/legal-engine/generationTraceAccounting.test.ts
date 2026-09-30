@@ -96,6 +96,7 @@ describe('generation trace task accounting', () => {
 
     expect(traceContext.trace.wordAccounting).toEqual([{
       sectionId: 'sec-one',
+      accountingSchemaVersion: 2,
       plannedWords: 120,
       providerGeneratedWords: 5,
       providerGeneratedChars: 31,
@@ -107,8 +108,8 @@ describe('generation trace task accounting', () => {
       assembledWords: 4,
       exportedWords: 4,
       losses: [
-        { stage: 'provider-validation', reason: 'UNKNOWN_SOURCE_ENTITY_ID', words: 5, taskId: 'word-task' },
-        { stage: 'deduplication', reason: 'DUPLICATE_BLOCK', words: 3, taskId: 'word-task' },
+        { lossId: 'sec-one:1', stage: 'provider-validation', reason: 'UNKNOWN_SOURCE_ENTITY_ID', words: 5, taskId: 'word-task' },
+        { lossId: 'sec-one:2', stage: 'deduplication', reason: 'DUPLICATE_BLOCK', words: 3, taskId: 'word-task' },
       ],
     }]);
     expect(JSON.stringify(traceContext.trace.wordAccounting)).not.toContain('contenido admitido');

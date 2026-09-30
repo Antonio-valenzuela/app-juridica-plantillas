@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { defaultWorkspaceManager } from '@/lib/workspace/legalWorkspace';
 import { scanLocalImportSource } from '@/lib/workspace/localImportSource';
 import { LocalImportStore } from '@/lib/workspace/localImportStore';
@@ -22,6 +23,9 @@ function publicSource(source: { kind: 'DIRECTORY' | 'ZIP'; path: string; limited
 }
 
 export async function POST(request: NextRequest) {
+  const access = await requireLawyerAccess(request);
+  if (!access.ok) return access.response;
+
   try {
     const body = await request.json() as {
       action?: 'analyze' | 'import';
@@ -61,6 +65,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  const access = await requireLawyerAccess(request);
+  if (!access.ok) return access.response;
+
   try {
     const query = new URL(request.url).searchParams.get('q') || '';
     return NextResponse.json({ ok: true, items: await store.listImportedRecords(query) });

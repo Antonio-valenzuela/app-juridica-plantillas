@@ -9,7 +9,7 @@ import { CIVIL_DEMAND_REQUIRED_SECTION_IDS, COMMERCIAL_ENFORCEMENT_REQUIRED_SECT
 import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { hasSeedMarkers, hasUnresolvedFactualDependencies } from './seedMarkers';
-import { DRAFT_EXPORT_NOTICE, resolveExportMode, type ExportMode } from './exportModes';
+import { DRAFT_EXPORT_NOTICE, UNSAVED_DRAFT_EXPORT_NOTICE, resolveExportMode, type ExportMode } from './exportModes';
 import { evaluateProvenanceIntegrityGate } from './provenanceIntegrityGate';
 import { evaluateAuthorityVerificationGate } from './authorityVerificationGate';
 
@@ -912,6 +912,8 @@ export interface PrepareUniversalDocumentForExportOptions {
   exportMode?: ExportMode;
   /** Backward-compatible alias for older callers; true maps only to DRAFT. */
   allowReviewOverride?: boolean;
+  /** Visible marker for a local transient DRAFT that was not saved to its case. */
+  unsavedDraft?: boolean;
 }
 
 const REVIEW_OVERRIDE_ERROR_PATTERNS = [
@@ -935,6 +937,7 @@ const DRAFT_HARD_BLOCKING_QUALITY_CHECKS = new Set([
   'FACTUAL_CLAIM_AUDIT_MISSING',
   'UNSUPPORTED_FACTUAL_CLAIM',
   'FACTUAL_CLAIM_UNVERIFIED',
+  'FACTUAL_CLAIM_CONTRADICTORY',
   'MISAPPLIED_AUTHORITY',
   'CONTRADICTORY_POSITION',
   'UNSUPPORTED_EVIDENCE',
@@ -1077,6 +1080,24 @@ function guardFailure(
   throw new ExportGuardError({ ok: false, errors, warnings });
 }
 
+function assertExportDocumentShape(doc: unknown): asserts doc is UniversalLegalDocument {
+  const sections = doc && typeof doc === 'object' && !Array.isArray(doc)
+    ? (doc as Record<string, unknown>).sections
+    : undefined;
+  const invalidShape = !Array.isArray(sections) || sections.some((section) => {
+    if (!section || typeof section !== 'object' || Array.isArray(section)) return true;
+    const content = (section as Record<string, unknown>).content;
+    return !Array.isArray(content) || content.some((block) => (
+      !block || typeof block !== 'object' || Array.isArray(block)
+      || typeof (block as Record<string, unknown>).text !== 'string'
+    ));
+  });
+
+  if (invalidShape) {
+    guardFailure(['INVALID_DOCUMENT_SHAPE: el documento debe contener secciones y bloques de contenido válidos.']);
+  }
+}
+
 /**
  * Single export contract shared by HTTP routes and low-level binary exporters.
  * It deliberately returns a sanitized clone and never mutates the caller's document.
@@ -1085,8 +1106,12 @@ export async function prepareUniversalDocumentForExport(
   doc: UniversalLegalDocument,
   options: PrepareUniversalDocumentForExportOptions = {},
 ): Promise<PreparedExportDocument> {
+  assertExportDocumentShape(doc);
   const exportMode = resolveExportMode(options.exportMode)
     || (options.allowReviewOverride === true ? 'DRAFT' : 'FINAL');
+  if (options.unsavedDraft && exportMode !== 'DRAFT') {
+    guardFailure(['UNSAVED_DRAFT_EXPORT_REQUIRES_DRAFT: una exportación no guardada solo puede usar el modo DRAFT.']);
+  }
   const allowReviewOverride = exportMode === 'DRAFT';
   const reviewOverrideWarnings: string[] = [];
   const formatting = normalizeInlineMarkdownFormatting(doc);
@@ -1117,7 +1142,9 @@ export async function prepareUniversalDocumentForExport(
     generationMetadata: {
       ...metadataWithoutNotice,
       exportMode,
-      ...(exportMode === 'DRAFT' ? { exportNotice: DRAFT_EXPORT_NOTICE } : {}),
+      ...(exportMode === 'DRAFT'
+        ? { exportNotice: options.unsavedDraft ? UNSAVED_DRAFT_EXPORT_NOTICE : DRAFT_EXPORT_NOTICE }
+        : {}),
     },
   } as UniversalLegalDocument;
   if (exportMode === 'DRAFT') {

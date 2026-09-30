@@ -25,6 +25,9 @@ import { createContentBlock, stripTrustMarkers } from './trustLayer';
 import { LawyerProfile, DEFAULT_LAWYER_PROFILE } from '../workspace/lawyerProfileTypes';
 import { applyStyleToSectionText, evaluateStyleMatch } from './styleEngine';
 import { runQualityGateCheck } from './qualityGate';
+import { loadActiveManual } from '../operational-manual/store';
+import { auditOperationalManual, retrieveManualRules, formatManualTaskContext, type ManualMatter } from '../operational-manual/core';
+import { populateDeterministicFactualClaimAudit } from './factualClaimGate';
 import { applyInstructionSupportedRichFields, reconstructCaseAnalysis, CaseAnalysis, CaseTheory, ArgumentAxis } from './caseAnalysis';
 import { buildCaseContext, formatCaseContextField, isLaboralDocumentType, isAmparoDocumentType, isAdministrativoDocumentType, isFiscalDocumentType, isPenalDocumentType, isAgrarioDocumentType, isInmobiliarioDocumentType, isCorporativoDocumentType, isContractualDocumentType, isPropiedadIntelectualDocumentType, isTramiteGeneralDocumentType } from './caseContext';
 import { normalizeUnresolvedFieldMarkers } from './pendingFields';
@@ -1697,16 +1700,18 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       if (isPenal) {
         const carpStr = penalCtx?.carpetaInvestigacion?.value ? `carpeta de investigación ${penalCtx.carpetaInvestigacion.value}` : '[DATO PENDIENTE: Carpeta de investigación]';
         const causaStr = penalCtx?.causaPenal?.value ? ` y causa penal ${penalCtx.causaPenal.value}` : '';
-        const delitoStr = penalCtx?.delitoImputado?.value ? `delito de ${penalCtx.delitoImputado.value}` : '[DATO PENDIENTE: Delito investigado]';
+        const delitoStr = penalCtx?.delitoImputado?.value ? `Clasificación atribuida en la fuente, no acreditada: ${penalCtx.delitoImputado.value}` : '[DATO PENDIENTE: Delito investigado]';
         return `NARRACIÓN DE HECHOS Y ANTECEDENTES PENALES:\n\n` +
-          `BAJO PROTESTA DE DECIR VERDAD, se exponen los hechos que motivan la presente promoción penal dentro de la ${carpStr}${causaStr}:\n\n` +
+          `REFERENCIA DEL PROCEDIMIENTO: ${carpStr}${causaStr}.\n` +
+          `CALIDAD DEL REPRESENTADO: ${penalCtx?.calidadPersona?.value || '[DATO PENDIENTE: Calidad procesal del representado]'}.\n` +
+          `ETAPA: ${penalCtx?.etapaProcesal?.value || '[DATO PENDIENTE: Etapa procesal penal]'}.\n\n` +
           (numberedFacts
             ? numberedFacts
             : caseAnalysis?.proceduralTimeline && caseAnalysis.proceduralTimeline.length > 0
             ? caseAnalysis.proceduralTimeline.slice(0, 5).map((e, idx) => `${idx + 1}. Con fecha ${e.date}: ${e.event}.`).join('\n\n')
-            : `1. Se investigan hechos con apariencia del ${delitoStr}, cometidos en agravio de la víctima ${penalCtx?.victimaUOfendido?.value || firmanteName}.\n\n` +
-              `2. Se señala como probable partícipe a ${penalCtx?.imputado?.value || demandadoName}.\n\n` +
-              `3. [DATO PENDIENTE: Circunstancias de modo, tiempo y lugar de los hechos delictivos].`);
+            : `1. ${delitoStr}.\n\n` +
+              `2. [DATO PENDIENTE: Hechos individualizados y constancias de soporte; no se afirma participación ni calidad de víctima].\n\n` +
+              `3. [DATO PENDIENTE: Circunstancias de modo, tiempo y lugar respaldadas por la fuente].`);
       }
       if (isAgrario) {
         const ejido = agrarioCtx?.ejidoOComunidad?.value ? `del núcleo agrario ${agrarioCtx.ejidoOComunidad.value}` : '';
@@ -1949,6 +1954,14 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       return `PRUEBAS:\n\n${confirmedEvidence.map((item, index) => `${index + 1}. ${item.type ? `${item.type}: ` : ''}${item.description}${item.page ? ` (página ${item.page})` : ''}`).join('\n')}`;
     }
     case 'petition':
+      if (doc.flow === 'DOCUMENT_ANALYSIS' && ['apelacion_civil', 'apelacion_penal', 'demanda_amparo_indirecto'].includes(doc.documentType)) {
+        // Filing language must not certify opportunity or invent a requested
+        // merits outcome when the verified contract has not supplied it.
+        return 'PUNTOS PETITORIOS:\n\n' +
+          'PRIMERO. Tener por presentado el escrito en el carácter cuya acreditación confirme el abogado.\n' +
+          'SEGUNDO. [DATO PENDIENTE: Verificar vía, procedencia, recurribilidad y oportunidad con las constancias y fuentes oficiales].\n' +
+          'TERCERO. [REQUIERE INSTRUCCIÓN DEL ABOGADO: Petición concreta congruente con cada agravio o concepto y su constancia; no se presume un resultado de fondo].';
+      }
       if (isNewWriting) {
         return `PUNTOS PETITORIOS:\n\n${writingObjective ? `PRIMERO. Tener por formulada la solicitud consistente en: ${writingObjective}.` : 'PRIMERO. Tener por formulada la solicitud en los términos y extremos expuestos en el presente escrito.'}`;
       }
@@ -2894,6 +2907,7 @@ export async function generateSection(
       tasks.forEach((task) => trace?.recordTaskPlanned(task));
 
       if (caseAnalysis?.richCaseAnalysis && doc.legalIssueMatrix) {
+        const taskManualIndex = await loadActiveManual();
         const researchInputs = { researchBundlesByIssueId, derivedReadinessByIssueId };
         const eligibleTasks = tasks.filter((task) => {
           const issueId = task.legalIssueIds?.[0] || task.issueId || task.targetIssueId;
@@ -2921,6 +2935,7 @@ export async function generateSection(
           invokeProvider: issueProviderInvoker,
           maxConcurrency: maxIssueConcurrency ?? 3,
           trace,
+          operationalManualIndex: taskManualIndex || undefined,
           ...researchInputs,
         });
         const blockedOutcomes = tasks
@@ -3818,6 +3833,32 @@ export async function runGenerationPipeline(
     }
     doc.templateId = plan.templateId;
     traceContext?.snapshotDocumentPlan(plan);
+    // Record contextual operational criteria at planning even if substantive
+    // issues cannot be generated. Retrieval is not legal verification, client
+    // adoption or coverage satisfaction; the canonical manual is read-only.
+    const planningManual = await loadActiveManual();
+    if (planningManual) {
+      const matterKey = String(doc.matter || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      const matter = (['CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL'] as ManualMatter[]).find(m => matterKey.includes(m)) || 'GENERAL';
+      const selection = retrieveManualRules(planningManual, {
+        matter, caseType: doc.documentType, stage: 'ANALISIS', task: doc.sections.map(s => s.title).join(' '),
+        budgetChars: 4500, measureContext: rules => formatManualTaskContext(rules).length,
+      });
+      const selected = selection.selected;
+      const manualTrace: NonNullable<UniversalLegalDocument['generationMetadata']['operationalManual']> = {
+        manualVersion: planningManual.manifest.version, manualHash: planningManual.manifest.sourceHash,
+        selectedRuleIds: selected.map(r => r.stableRuleId), selectedPages: [...new Set(selected.map(r => r.physicalPage))],
+        selectedSections: [...new Set(selected.map(r => r.section))], retrievals: [], auditRuleIds: [], auditFindings: [],
+      };
+      manualTrace.retrievals.push({
+        taskId: `plan-${generationId}`, retrievalStage: 'DOCUMENT_PLAN', selectedRuleIds: manualTrace.selectedRuleIds,
+        selectedPages: manualTrace.selectedPages, selectedRules: selected.map(r => ({ id: r.stableRuleId, physicalPage: r.physicalPage, section: r.section, category: r.category })),
+        categories: [...new Set(selected.map(r => r.category))], contextCharacters: formatManualTaskContext(selected).length,
+        discardedRulesByContextLimit: selection.discardedRulesByContextLimit,
+      });
+      doc.generationMetadata.operationalManual = manualTrace;
+      if (traceContext) traceContext.trace.operationalManual = manualTrace;
+    }
     const workflowMode: GenerationMode = input.workflow?.selection.mode || 'automatic';
     doc.generationMetadata.generationMode = workflowMode;
     doc.generationMetadata.selectedTemplateId = input.workflow?.selection.templateId || null;
@@ -4543,6 +4584,22 @@ export async function runGenerationPipeline(
     doc.validation = validateDocument(doc);
     doc.validation.warnings.push(...roleIntegrityWarnings);
 
+    populateDeterministicFactualClaimAudit(doc);
+    const operationalManual = await loadActiveManual();
+    const operationalText = doc.sections.flatMap((section) => section.content.map((block) => block.text)).join('\n\n');
+    const operationalMatterName = String(doc.matter || '').toLocaleUpperCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const operationalMatter = (['CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL'] as const).find((matter) => operationalMatterName.includes(matter)) || 'GENERAL';
+    const operationalFindings = operationalManual ? auditOperationalManual(operationalManual, operationalText, { matter: operationalMatter }) : [];
+    if (operationalManual) {
+      const manualTrace = doc.generationMetadata.operationalManual || traceContext?.trace.operationalManual || {
+        manualVersion: operationalManual.manifest.version, manualHash: operationalManual.manifest.sourceHash,
+        selectedRuleIds: [], selectedPages: [], selectedSections: [], retrievals: [], auditRuleIds: [], auditFindings: [],
+      };
+      manualTrace.auditRuleIds = operationalFindings.map((finding) => finding.ruleId);
+      manualTrace.auditFindings = operationalFindings;
+      if (traceContext) traceContext.trace.operationalManual = manualTrace;
+      doc.generationMetadata.operationalManual = manualTrace;
+    }
     const qgResult = runQualityGateCheck(doc, { referenceLength: input.referenceDocumentText?.length || 0 });
     traceContext?.recordQualityGate(qgResult);
     traceContext?.snapshotCoverageAfter(doc.coverageMatrix);
@@ -4693,6 +4750,7 @@ export async function runGenerationPipeline(
     const hasCriticalQgErrors = (qgResult.criticalErrors && qgResult.criticalErrors.length > 0) || !qgResult.passed || !qgResult.canMarkAsFinal;
 
     const isDocumentTrulyComplete =
+      !operationalFindings.some((finding) => finding.status === 'REVIEW_REQUIRED') &&
       !hasAnySeedMarker &&
       !hasAnyUnresolvedDeps &&
       !hasAnyTruncatedSection &&

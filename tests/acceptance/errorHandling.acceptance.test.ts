@@ -379,8 +379,8 @@ describe('§16 — Contratos HTTP de error en endpoints de la API', () => {
   it('POST /api/legal-engine/export/docx con documento inválido devuelve HTTP 422', async () => {
     const req = new NextRequest('http://localhost/api/legal-engine/export/docx', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document: { id: 'doc-invalido', title: 'Inválido' } }),
+      headers: { 'Content-Type': 'application/json', origin: 'http://localhost', 'x-unsaved-draft-export': 'true' },
+      body: JSON.stringify({ document: { id: 'doc-invalido', title: 'Inválido' }, exportMode: 'DRAFT' }),
     });
     const res = await POST_exportDocx(req);
     expect(res.status).toBe(422);
@@ -391,8 +391,8 @@ describe('§16 — Contratos HTTP de error en endpoints de la API', () => {
   it('POST /api/legal-engine/export/pdf con documento inválido devuelve HTTP 422', async () => {
     const req = new NextRequest('http://localhost/api/legal-engine/export/pdf', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document: { id: 'doc-invalido', title: 'Inválido' } }),
+      headers: { 'Content-Type': 'application/json', origin: 'http://localhost', 'x-unsaved-draft-export': 'true' },
+      body: JSON.stringify({ document: { id: 'doc-invalido', title: 'Inválido' }, exportMode: 'DRAFT' }),
     });
     const res = await POST_exportPdf(req);
     expect(res.status).toBe(422);

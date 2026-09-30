@@ -197,7 +197,8 @@ describe('LegalResearchPlan foundation', () => {
     const eligibility = resolveEffectiveIssueGenerationEligibility({ issue, formal: false, taskType: 'ISSUE' });
 
     expect(eligibility.eligible).toBe(false);
-    expect(eligibility.reason).toBe('BLOCKED_BY_CLIENT_POSITION');
+    expect(eligibility.effectiveStatus).toBe('BLOCKED');
+    expect(eligibility.reason).toBe('ISSUE_STATUS_NEEDS_CLIENT_POSITION');
     expect(JSON.stringify(issue)).toBe(before);
   });
 

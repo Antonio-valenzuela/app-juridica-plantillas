@@ -14,6 +14,7 @@ import { extractRichCaseAnalysis, type RichExtractionOptions } from './case-extr
 import { projectRichCaseAnalysis } from './case-extraction/legacyProjection';
 import { buildSourceGrounding, type SourceGrounding } from './sourceGrounding';
 import { createSourceProvenance } from './case-extraction/provenance';
+import { explicitDecisionStatements as sourceDecisionStatements } from './case-extraction/decisionReasoning';
 
 export interface ProceduralTimelineEvent {
   date: string;
@@ -470,6 +471,12 @@ function extractEvidenceFromSources(
   return result;
 }
 
+function explicitDecisionStatements(text: string): string[] {
+  // Only a decision label at a sentence/line boundary. "Solicito resolución"
+  // is a requested future act and cannot become a challenged decision.
+  return sourceDecisionStatements(text).map(statement => statement.proposition);
+}
+
 function extractChallengedReasonings(
   entries: Array<{ text: string; filename: string; documentId: string; page?: number }>
 ): ChallengedReasoning[] {
@@ -498,6 +505,17 @@ function extractChallengedReasonings(
           page: entry.page,
           textSnippet: raw.slice(0, 240),
         },
+      });
+    }
+  }
+
+  if (result.length === 0) {
+    for (const entry of entries) for (const statement of explicitDecisionStatements(entry.text)) {
+      result.push({
+        id: `cr-${result.length + 1}`, number: `FUENTE-${result.length + 1}`,
+        topic: 'Decisión expresamente descrita en la fuente (sin considerando numerado)',
+        rulingText: statement, page: entry.page,
+        sourceReference: { documentId: entry.documentId, page: entry.page, textSnippet: statement },
       });
     }
   }
@@ -582,6 +600,16 @@ function extractDynamicLegalIssues(params: {
         excerpt: cr.rulingText.slice(0, 200),
         relatedChallengedReasoningIds: [cr.id],
       };
+
+      // A source decision statement establishes what was decided, not that it
+      // is illegal, what rights were affected, or which unverified norm applies.
+      if (cr.number.startsWith('FUENTE-')) {
+        issue.title = `Análisis de la decisión descrita: ${cr.rulingText.slice(0, 90)}`;
+        issue.parameter = '[DATO PENDIENTE: Norma o cuestión jurídica y verificación oficial]';
+        issue.contradiction = '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Error atribuido a esta decisión]';
+        issue.affectation = '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Perjuicio o afectación concreta]';
+        issue.consequence = '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Efecto solicitado]';
+      }
 
       if (isConst) constitutionalIssues.push(issue);
       else legalityIssues.push(issue);
@@ -971,6 +999,15 @@ export function reconstructCaseAnalysis(
     }
   });
 
+  if (challengedActs.length === 0 && (family === 'RECURSO' || family === 'AMPARO')) {
+    for (const entry of combinedTexts) for (const statement of explicitDecisionStatements(entry.text)) {
+      challengedActs.push({
+        authority: autoridadResponsable || '[DATO PENDIENTE: Autoridad Emisora]',
+        actDescription: statement, page: entry.page, excerpt: statement,
+      });
+    }
+  }
+
   // Some judicial PDFs identify the challenged act with a standalone heading
   // (for example, "SENTENCIA DEFINITIVA") instead of an "acto impugnado"
   // label. The heading is sufficient to identify the type of resolution, but
@@ -1053,9 +1090,15 @@ export function reconstructCaseAnalysis(
       issue: issue.contradiction || issue.title,
       facts: proceduralTimeline.slice(0, 3).map((e) => `${e.date}: ${e.event}`),
       rules: issue.parameter ? [issue.parameter] : ['Legislación aplicable a la materia'],
-      reasoning: `Se controvierte la determinación en cuanto a ${issue.title.toLowerCase()}, dado que afecta los derechos fundamentales o procesales del promovente.`,
-      counterargument: 'La autoridad u órgano emisor consideró satisfechos los extremos legales en el acto impugnado.',
-      rebuttal: 'Dicho razonamiento resulta incongruente y vulnera el principio de debida motivación y legalidad.',
+      reasoning: issue.title.startsWith('Análisis de la decisión descrita:')
+        ? '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Razonamiento que vincule el error, constancia y perjuicio; la decisión fuente no acredita ilegalidad]'
+        : `Se controvierte la determinación en cuanto a ${issue.title.toLowerCase()}, dado que afecta los derechos fundamentales o procesales del promovente.`,
+      counterargument: issue.title.startsWith('Análisis de la decisión descrita:')
+        ? '[DATO PENDIENTE: Contraargumento respaldado por la fuente]'
+        : 'La autoridad u órgano emisor consideró satisfechos los extremos legales en el acto impugnado.',
+      rebuttal: issue.title.startsWith('Análisis de la decisión descrita:')
+        ? '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Refutación y soporte; no se presume incongruencia]'
+        : 'Dicho razonamiento resulta incongruente y vulnera el principio de debida motivación y legalidad.',
       requestedConsequence: issue.consequence || 'Revocar o dejar insubsistente la determinación impugnada ordenando emitir una nueva resolución apegada a derecho.',
       requestedEffectProvenance: issue.sourceDoc
         ? [{ documentId: issue.sourceDoc, ...(issue.page !== undefined ? { page: issue.page } : {}), ...(issue.excerpt ? { textSnippet: issue.excerpt } : {}) }]

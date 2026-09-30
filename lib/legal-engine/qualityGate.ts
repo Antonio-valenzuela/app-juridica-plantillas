@@ -44,6 +44,7 @@ export interface QualityGateResult {
     duplicateFactResponseCount: number;
     unsupportedFactualClaimCount: number;
     unverifiedFactualClaimCount?: number;
+    contradictoryFactualClaimCount?: number;
     unsupportedLegalAuthorities?: number;
     verifiedAuthorityCount?: number;
     appliedAuthorityCount?: number;
@@ -158,6 +159,7 @@ export function runQualityGateCheck(
   let duplicateFactResponseCount = 0;
   let unsupportedFactualClaimCount = 0;
   let unverifiedFactualClaimCount = 0;
+  let contradictoryFactualClaimCount = 0;
   let unsupportedLegalAuthorities = 0;
   let verifiedAuthorityCount = 0;
   let appliedAuthorityCount = 0;
@@ -179,11 +181,15 @@ export function runQualityGateCheck(
     });
     unsupportedFactualClaimCount += factualAudit.unsupportedClaims;
     unverifiedFactualClaimCount += factualAudit.unverifiedClaims;
+    contradictoryFactualClaimCount += factualAudit.contradictoryClaims;
     if (factualAudit.issues.some((issue) => issue.startsWith('CLAIM_AUDIT_MISSING:'))) {
       criticalErrors.push({ checkId: 'FACTUAL_CLAIM_AUDIT_MISSING', message: 'Hay afirmaciones generadas sin clasificación y trazabilidad individual a la fuente.' });
     }
     if (factualAudit.unsupportedClaims > 0) {
       criticalErrors.push({ checkId: 'UNSUPPORTED_FACTUAL_CLAIM', message: `${factualAudit.unsupportedClaims} afirmación(es) factual(es) no sustentadas.` });
+    }
+    if (factualAudit.contradictoryClaims > 0) {
+      criticalErrors.push({ checkId: 'FACTUAL_CLAIM_CONTRADICTORY', message: `${factualAudit.contradictoryClaims} afirmación(es) contradicen spans identificables de la fuente.` });
     }
     if (factualAudit.issues.some((issue) => !issue.startsWith('CLAIM_AUDIT_MISSING:')) && factualAudit.unsupportedClaims === 0) {
       criticalErrors.push({ checkId: 'FACTUAL_CLAIM_UNVERIFIED', message: 'La trazabilidad o clasificación factual contiene afirmaciones aún no verificadas.' });
@@ -747,6 +753,7 @@ export function runQualityGateCheck(
       duplicateFactResponseCount,
       unsupportedFactualClaimCount,
       unverifiedFactualClaimCount,
+      contradictoryFactualClaimCount,
       unsupportedLegalAuthorities,
       verifiedAuthorityCount,
       appliedAuthorityCount,

@@ -512,6 +512,7 @@ export interface GenerationMetadata {
   generationId?: string;
   /** Trace transitorio de desarrollo/auditoría; se elimina antes de persistir. */
   auditTrace?: GenerationTrace;
+  operationalManual?: NonNullable<GenerationTrace['operationalManual']>;
   proceduralIdentity?: ProceduralIdentity;
   routing?: DocumentRoutingMetadata;
   /** Compatibilidad auditable entre la fuente cargada y la salida seleccionada. */

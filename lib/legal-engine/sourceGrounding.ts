@@ -145,7 +145,37 @@ function linesFor(source: UploadedSourceDocument, text: string): SourceLine[] {
     start += raw.length;
     if (start >= text.length) break;
   }
-  return lines.filter((line) => line.text.trim().length > 0);
+  return lines.filter((line) => line.text.trim().length > 0).flatMap(splitInlineSections);
+}
+
+/** Layout recovery only: slice the original text, never rewrite source spans.
+ * Explicit uppercase colon headings also occur on one OCR line. Ordinary
+ * prose mentioning "hechos" is not a heading. Numbered splitting is confined
+ * to an explicit facts section and requires consecutive integer labels.
+ */
+function splitInlineSections(line: SourceLine): SourceLine[] {
+  const headings = [...line.text.matchAll(/\b(?:HECHOS|ANTECEDENTES|PRESTACIONES|PRETENSIONES|PRUEBAS|DERECHO|FUNDAMENTOS|PETITORIOS|EXCEPCIONES|DEFENSAS)\s*:/g)];
+  if (!headings.length) return [line];
+  const pieces: SourceLine[] = [];
+  const add = (start: number, end: number) => {
+    if (line.text.slice(start, end).trim()) pieces.push({ ...line, text: line.text.slice(start, end), start: line.start + start, end: line.start + end });
+  };
+  add(0, headings[0].index!);
+  headings.forEach((heading, index) => {
+    const start = heading.index!;
+    const bodyStart = start + heading[0].length;
+    const end = headings[index + 1]?.index ?? line.text.length;
+    add(start, bodyStart);
+    if (!/^(?:HECHOS|ANTECEDENTES)\b/.test(heading[0])) { add(bodyStart, end); return; }
+    const body = line.text.slice(bodyStart, end);
+    const items = [...body.matchAll(/(?:^\s*|[.;]\s+)(\d{1,3})[.)]\s+/g)];
+    if (items.length > 0 && items[0][1] === '1' && items.every((item, n) => Number(item[1]) === n + 1)) {
+      const starts = items.map(item => bodyStart + item.index! + item[0].indexOf(item[1]));
+      add(bodyStart, starts[0]);
+      starts.forEach((itemStart, n) => add(itemStart, starts[n + 1] ?? end));
+    } else add(bodyStart, end);
+  });
+  return pieces;
 }
 
 function normalizeMatter(value: string): string {
@@ -306,11 +336,12 @@ function groundedValue(value: string, sourceSpan: SourceGroundedSpan, category: 
 
 function extractCaseMetadata(source: UploadedSourceDocument, lines: SourceLine[], caseEndIndex: number): { field: SourceGroundedField; candidates: SourceGroundedValue[] } {
   const candidates: SourceGroundedValue[] = [];
-  const explicitPattern = /\b(?:expediente|n[uú]mero\s+de\s+expediente|expediente\s+judicial)\s*(?:n[uú]m(?:ero)?\.?\s*)?[:#-]?\s*([0-9]{1,6}\s*[\/-]\s*[0-9]{2,4})\b/gi;
+  const explicitPattern = /\b(?:expediente|n[uú]mero\s+de\s+expediente|expediente\s+judicial)\s*(?:n[uú]m(?:ero)?\.?\s*)?[:#-]?\s*([0-9]{1,6}\s*[\/-]\s*[0-9]{2,4}|[A-Z][A-Z0-9]*(?:[-/][A-Z0-9]+)+)\b/gi;
   const caseLines = lines.slice(0, caseEndIndex);
   for (const line of caseLines) {
     for (const match of line.text.matchAll(explicitPattern)) {
       const value = match[1].replace(/\s+/g, '');
+      if (!/\d/.test(value)) continue;
       candidates.push(groundedValue(value, span(source, line, 'CASE_METADATA', 'Número identificado mediante etiqueta explícita de expediente.', { canUseAsCaseMetadata: true }), 'CASE_METADATA', { canUseAsCaseMetadata: true }));
     }
   }

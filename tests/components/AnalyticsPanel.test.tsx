@@ -57,4 +57,34 @@ describe('AnalyticsPanel', () => {
     await waitFor(() => expect(screen.getByText('No fue posible cargar las analíticas.')).toBeInTheDocument());
     expect(screen.queryByText('Cargando analíticas…')).not.toBeInTheDocument();
   });
+
+  it('identifies an unavailable analytics route without trying to parse its HTML 404 page', async () => {
+    const json = vi.fn().mockRejectedValue(new Error('Unexpected token <'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, json }));
+
+    render(<AnalyticsPanel />);
+
+    expect(await screen.findByText('El servidor local devolvió HTTP 404 al solicitar las analíticas. Reinicia la aplicación y vuelve a intentarlo.')).toBeInTheDocument();
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it('explains that real metrics are unavailable when workspace persistence is disconnected', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ ok: false, error: 'WORKSPACE_UNAVAILABLE' }),
+    }));
+
+    render(<AnalyticsPanel />);
+
+    expect(await screen.findByText('Las métricas reales no se cargaron porque la base de datos del despacho no está disponible (HTTP 503). No se mostrarán datos de ejemplo.')).toBeInTheDocument();
+  });
+
+  it('describes an expired or unauthorized session in grammatically correct Spanish', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, json: vi.fn() }));
+
+    render(<AnalyticsPanel />);
+
+    expect(await screen.findByText('La sesión no permite consultar las analíticas (HTTP 401).')).toBeInTheDocument();
+  });
 });

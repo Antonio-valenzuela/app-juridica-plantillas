@@ -50,11 +50,20 @@ describe('Generation progress — single visible surface', () => {
         percentage: 33,
         stage: 'Generando escrito…',
         aiProvider: 'fallback',
+        currentBlock: 'sec-hechos',
       },
       onCancel: () => undefined,
     }));
 
     expect(markup.match(/data-testid="generation-status-bar"/g)).toHaveLength(1);
+    expect(markup).toContain('data-layout="compact"');
+    expect(markup).toContain('data-testid="generation-status-summary"');
+    expect(markup).toContain('aria-valuenow="33"');
+    expect(markup).toContain('33%');
+    expect(markup).toContain('1/3');
+    expect(markup).toContain('Generando escrito…');
+    expect(markup).toContain('Bloque actual: sec-hechos');
+    expect(markup).toContain('Modo local seguro para esta sección');
     expect(markup.match(/Cancelar/g)).toHaveLength(1);
   });
 

@@ -189,6 +189,8 @@ function buildRichContestacionSkeleton(
           : '[DATO PENDIENTE DE EXPEDIENTE: Menciones probatorias]'));
   const derechoSeed = isLaborContestacion
     ? 'FUNDAMENTOS DE DERECHO:\nLa fundamentación normativa y de autoridad requiere verificar el régimen aplicable y las fuentes oficiales, y relacionarlas con hechos y pruebas identificados en el expediente. No se incorpora cita ni conclusión jurídica que no haya sido verificada; la regla, aplicación y conclusión quedan sujetas a revisión del abogado.'
+    : isCivilContestacion
+      ? 'FUNDAMENTOS DE DERECHO:\n[DATO PENDIENTE: Fundamentos aplicables y verificación en fuente oficial]. No se afirma vigencia ni aplicabilidad sin investigación jurídica verificable.'
     : hasParties
       ? `FUNDAMENTOS DE DERECHO:\nSon aplicables las disposiciones sustantivas y adjetivas que rigen la materia procesal y la personería de la parte demandada ${roles.contesta}.`
       : 'Fundamentos de derecho pendientes de verificación y confirmación por el abogado.';
@@ -197,6 +199,8 @@ function buildRichContestacionSkeleton(
     hasParties
       ? `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\nSe solicita la total absolución frente a las pretensiones de ${roles.contraparte}, al haberse desvirtuado la procedencia de la acción principal y acreditarse las defensas opuestas.`
       : 'Contenido pendiente de instrucción expresa del abogado.');
+  const argumentosSection = mkSection(templateId, 'sec-con-argumentos', 'argument', 'ARGUMENTOS', 8.5,
+    '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Argumentos vinculados a las posturas, hechos y pruebas identificados; no se presume absolución ni defensas acreditadas].');
   const petitoriosSection = mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', isLaborContestacion ? 10 : 9,
     hasParties
       ? `PUNTOS PETITORIOS:\n\nPRIMERO. Tener por reconocida la personalidad de la parte demandada ${roles.contesta}, y por contestada en tiempo y forma la demanda promovida por ${roles.contraparte}.\nSEGUNDO. Tener por contestados los hechos y prestaciones, admitiendo las excepciones y defensas opuestas.\nTERCERO. Previos los trámites de ley, absolver a la parte demandada.`
@@ -225,7 +229,7 @@ function buildRichContestacionSkeleton(
     ...(isCivilContestacion ? [prestacionesSection, hechosSection] : [hechosSection, prestacionesSection]),
     excepcionesSection,
     pruebasSection,
-    ...(isCivilContestacion ? [derechoSection] : isLaborContestacion ? [derechoSection, { ...alegatosSection, order: 9 }] : [alegatosSection]),
+    ...(isCivilContestacion ? [derechoSection, argumentosSection] : isLaborContestacion ? [derechoSection, { ...alegatosSection, order: 9 }] : [alegatosSection]),
     petitoriosSection,
     firmaSection,
   ];

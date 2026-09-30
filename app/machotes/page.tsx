@@ -44,6 +44,7 @@ import { formatExportIssues } from '@/lib/legal-engine/exportErrors';
 import { extractDownloadFilename, resolveDocumentOutputFilename } from '@/lib/legal-engine/outputFilename';
 import { persistDocumentBeforeExport } from '@/lib/legal-engine/exportPersistence';
 import type { ExportMode } from '@/lib/legal-engine/exportModes';
+import { UNSAVED_DRAFT_EXPORT_HEADER } from '@/lib/security/localDraftExport';
 import { analyzePersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
 import { markTemplateAsUserOwned } from '@/lib/templates/templateOrigin';
 import type { ProfessionalTemplate } from '@/lib/templates/templateTypes';
@@ -2109,11 +2110,27 @@ export default function MachotesPage() {
   const handleExportDocx = async (exportMode: ExportMode = 'FINAL') => {
     if (!universalDoc) return;
     try {
-      const res = await persistDocumentBeforeExport(universalDoc, handleSaveDraft, (document) => fetch('/api/legal-engine/export/docx', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const sendUnsavedDraftExport = exportMode === 'DRAFT'
+        ? (document: UniversalLegalDocument) => fetch('/api/legal-engine/export/docx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [UNSAVED_DRAFT_EXPORT_HEADER]: 'true' },
+          body: JSON.stringify({ document, exportMode: 'DRAFT' }),
+        })
+        : undefined;
+      const res = await persistDocumentBeforeExport(
+        universalDoc,
+        handleSaveDraft,
+        (document) => fetch('/api/legal-engine/export/docx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ document, exportMode }),
-      }));
+        }),
+        {
+          exportMode,
+          sendUnsavedDraftExport,
+          isPersistenceUnavailableResponse: (response) => [401, 404, 503].includes(response.status),
+        },
+      );
       const ct = res.headers.get('Content-Type') || '';
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -2136,7 +2153,10 @@ export default function MachotesPage() {
         || resolveDocumentOutputFilename(universalDoc, 'docx');
       a.click();
       URL.revokeObjectURL(url);
-      notify('success', 'Documento DOCX exportado exitosamente.');
+      const unsaved = res.headers.get('X-Export-Persistence') === 'UNSAVED_LOCAL_DRAFT';
+      notify(unsaved ? 'warning' : 'success', unsaved
+        ? 'DOCX descargado como BORRADOR NO GUARDADO. No quedó en el expediente; guarda una copia y revisa su contenido antes de presentarlo.'
+        : 'Documento DOCX exportado exitosamente.');
     } catch (err: any) {
       notify('error', `Error al exportar DOCX: ${getSafeApiErrorMessage(err, 'No fue posible exportar el DOCX.')}`);
     }
@@ -2145,11 +2165,27 @@ export default function MachotesPage() {
   const handleExportPdf = async (exportMode: ExportMode = 'FINAL') => {
     if (!universalDoc) return;
     try {
-      const res = await persistDocumentBeforeExport(universalDoc, handleSaveDraft, (document) => fetch('/api/legal-engine/export/pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const sendUnsavedDraftExport = exportMode === 'DRAFT'
+        ? (document: UniversalLegalDocument) => fetch('/api/legal-engine/export/pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [UNSAVED_DRAFT_EXPORT_HEADER]: 'true' },
+          body: JSON.stringify({ document, exportMode: 'DRAFT' }),
+        })
+        : undefined;
+      const res = await persistDocumentBeforeExport(
+        universalDoc,
+        handleSaveDraft,
+        (document) => fetch('/api/legal-engine/export/pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ document, exportMode }),
-      }));
+        }),
+        {
+          exportMode,
+          sendUnsavedDraftExport,
+          isPersistenceUnavailableResponse: (response) => [401, 404, 503].includes(response.status),
+        },
+      );
       const ct = res.headers.get('Content-Type') || '';
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -2177,7 +2213,10 @@ export default function MachotesPage() {
         || resolveDocumentOutputFilename(universalDoc, 'pdf');
       a.click();
       URL.revokeObjectURL(url);
-      notify('success', 'PDF Real descargado.');
+      const unsaved = res.headers.get('X-Export-Persistence') === 'UNSAVED_LOCAL_DRAFT';
+      notify(unsaved ? 'warning' : 'success', unsaved
+        ? 'PDF descargado como BORRADOR NO GUARDADO. No quedó en el expediente; guarda una copia y revisa su contenido antes de presentarlo.'
+        : 'PDF Real descargado.');
     } catch (error: any) {
       notify('error', getSafeApiErrorMessage(error, 'No fue posible exportar el PDF.'));
     }

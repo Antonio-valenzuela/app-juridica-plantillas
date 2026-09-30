@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { AnalyticsDataset, AnalyticsRangeDays, AnalyticsStatus } from '@/lib/workspace/analytics';
+import { describeWorkspaceHttpError } from '@/lib/workspace/httpErrors';
 
 const ranges: AnalyticsRangeDays[] = [7, 30, 90];
 
@@ -110,17 +111,22 @@ function AnalyticsContent({ data }: { data: AnalyticsDataset }) {
 
 export function AnalyticsPanel({ endpoint = '/api/workspace/analytics' }: { endpoint?: string }) {
   const [rangeDays, setRangeDays] = useState<AnalyticsRangeDays>(30);
-  const [state, setState] = useState<{ status: 'loading' | 'ready' | 'error'; data: AnalyticsDataset | null }>({ status: 'loading', data: null });
+  const [state, setState] = useState<{ status: 'loading' | 'ready' | 'error'; data: AnalyticsDataset | null; errorMessage?: string }>({ status: 'loading', data: null });
 
   const load = useCallback(async (range: AnalyticsRangeDays) => {
     setState({ status: 'loading', data: null });
     try {
       const response = await fetch(`${endpoint}?rangeDays=${range}`, { cache: 'no-store' });
+      if (!response.ok) {
+        const message = await describeWorkspaceHttpError(response, 'analíticas');
+        setState({ status: 'error', data: null, errorMessage: message });
+        return;
+      }
       const payload = await response.json() as AnalyticsDataset & { ok?: boolean };
-      if (!response.ok || payload.ok === false) throw new Error('ANALYTICS_LOAD_FAILED');
+      if (payload.ok === false) throw new Error('ANALYTICS_LOAD_FAILED');
       setState({ status: 'ready', data: payload });
     } catch {
-      setState({ status: 'error', data: null });
+      setState({ status: 'error', data: null, errorMessage: 'No se recibió una respuesta válida del servidor local.' });
     }
   }, [endpoint]);
 
@@ -134,7 +140,7 @@ export function AnalyticsPanel({ endpoint = '/api/workspace/analytics' }: { endp
     <section className="mt-5" aria-labelledby="analytics-title">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="text-[11px] font-bold uppercase tracking-[.16em] text-[#B58A5A]">Control del despacho</p><h2 id="analytics-title" className="mt-1 text-xl font-extrabold text-[#0B2545]">Analíticas</h2><p className="mt-1 text-xs text-slate-500">Actividad, calidad y extensión derivados de registros reales.</p></div><div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="Periodo de analíticas">{ranges.map((range) => <button key={range} type="button" aria-pressed={rangeDays === range} onClick={() => setRangeDays(range)} className={`min-h-9 min-w-[68px] whitespace-nowrap rounded-lg px-3 text-xs font-bold transition ${rangeDays === range ? 'bg-[#0B2545] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>{range} días</button>)}</div></div>
       {state.status === 'loading' ? <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500" aria-live="polite">Cargando analíticas…</div> : null}
-      {state.status === 'error' ? <div className="rounded-xl border border-red-100 bg-red-50 p-6 text-center" role="alert"><p className="text-sm font-bold text-red-700">No fue posible cargar las analíticas.</p><button type="button" onClick={() => void load(rangeDays)} className="mt-3 min-h-10 rounded-lg bg-[#0B2545] px-4 text-xs font-bold text-white">Reintentar</button></div> : null}
+      {state.status === 'error' ? <div className="rounded-xl border border-red-100 bg-red-50 p-6 text-center" role="alert"><p className="text-sm font-bold text-red-700">No fue posible cargar las analíticas.</p>{state.errorMessage && <p className="mt-2 text-xs text-red-800">{state.errorMessage}</p>}<button type="button" onClick={() => void load(rangeDays)} className="mt-3 min-h-10 rounded-lg bg-[#0B2545] px-4 text-xs font-bold text-white">Reintentar</button></div> : null}
       {state.status === 'ready' && state.data && !hasActivity ? <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Aún no hay suficiente actividad.</div> : null}
       {state.status === 'ready' && state.data && hasActivity ? <AnalyticsContent data={state.data} /> : null}
     </section>

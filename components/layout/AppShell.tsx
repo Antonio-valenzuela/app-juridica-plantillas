@@ -130,18 +130,6 @@ export default function AppShell({
   return (
     <>
       <header className="global-header lex-header">
-        <div className="lex-header-search">
-          <span className="lex-search-icon"><LexIcon name="search" size={18} /></span>
-
-          <input
-            type="search"
-            placeholder="Buscar expedientes, documentos, plantillas..."
-            aria-label="Buscar expedientes, documentos y plantillas"
-          />
-
-          <kbd>Ctrl K</kbd>
-        </div>
-
         <div className="lex-header-right">
           <div className={`lex-build-status ${providerIndicator.tone === 'danger' ? 'is-error' : providerIndicator.tone === 'warning' ? 'is-warning' : ''}`}>
             <span className="lex-status-dot" />

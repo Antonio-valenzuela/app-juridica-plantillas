@@ -99,6 +99,7 @@ export function WorkspaceDocumentEditor({
   const [activeMatch, setActiveMatch] = useState(0);
   const [editingBlock, setEditingBlock] = useState<{ sectionId: string; blockId: string; text: string } | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [actionError, setActionError] = useState<string | null>(null);
   const [reopenState, setReopenState] = useState<'idle' | 'loading'>('idle');
   const [isTemplateSaving, setIsTemplateSaving] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -115,6 +116,8 @@ export function WorkspaceDocumentEditor({
   // History stack for Undo/Redo
   const [history, setHistory] = useState<UniversalLegalDocument[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDocumentId, setHistoryDocumentId] = useState<string | undefined>(document?.id);
+  const hasCurrentHistory = historyDocumentId === document?.id;
 
   useEffect(() => {
     if (!document) return;
@@ -246,7 +249,7 @@ export function WorkspaceDocumentEditor({
 
   // Undo / Redo
   const handleUndo = () => {
-    if (historyIndex > 0) {
+    if (hasCurrentHistory && historyIndex > 0) {
       const prev = history[historyIndex - 1];
       setHistoryIndex((i) => i - 1);
       onUpdateDocument(prev);
@@ -254,11 +257,20 @@ export function WorkspaceDocumentEditor({
   };
 
   const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
+    if (hasCurrentHistory && historyIndex < history.length - 1) {
       const next = history[historyIndex + 1];
       setHistoryIndex((i) => i + 1);
       onUpdateDocument(next);
     }
+  };
+
+  const commitDocumentEdit = (updatedDoc: UniversalLegalDocument) => {
+    if (!document) return;
+    const retainedHistory = !hasCurrentHistory || historyIndex < 0 ? [document] : history.slice(0, historyIndex + 1);
+    setHistoryDocumentId(document.id);
+    setHistory([...retainedHistory, updatedDoc]);
+    setHistoryIndex(retainedHistory.length);
+    onUpdateDocument(updatedDoc);
   };
 
   // Update block content with history
@@ -278,32 +290,41 @@ export function WorkspaceDocumentEditor({
       sections: updatedSections,
       updatedAt: new Date().toISOString(),
     };
-    setHistory((prev) => [...prev.slice(0, historyIndex + 1), updatedDoc]);
-    setHistoryIndex((i) => i + 1);
-    onUpdateDocument(updatedDoc);
+    commitDocumentEdit(updatedDoc);
     setEditingBlock(null);
   };
 
   const handleSaveTitle = () => {
     if (document && docTitle.trim()) {
-      onUpdateDocument({ ...document, title: docTitle.trim(), updatedAt: new Date().toISOString() });
+      commitDocumentEdit({ ...document, title: docTitle.trim(), updatedAt: new Date().toISOString() });
     }
     setIsEditingTitle(false);
   };
 
   const handleSave = async () => {
-    if (!onSaveDraft) return;
+    if (!onSaveDraft || saveState === 'saving') return;
+    setActionError(null);
     setSaveState('saving');
-    const ok = await onSaveDraft();
-    setSaveState(ok ? 'saved' : 'idle');
-    if (ok) window.setTimeout(() => setSaveState('idle'), 3000);
+    try {
+      const ok = await onSaveDraft();
+      setSaveState(ok ? 'saved' : 'idle');
+      if (!ok) setActionError('No se pudo guardar el borrador. Tus cambios siguen en el editor; reintenta el guardado.');
+      if (ok) window.setTimeout(() => setSaveState('idle'), 3000);
+    } catch {
+      setSaveState('idle');
+      setActionError('No se pudo guardar el borrador. Tus cambios siguen en el editor; reintenta el guardado.');
+    }
   };
 
   const handleReopen = async () => {
     if (!onReopenDraft || reopenState === 'loading') return;
     setReopenState('loading');
+    setActionError(null);
     try {
-      await onReopenDraft();
+      const ok = await onReopenDraft();
+      if (!ok) setActionError('No se pudo reabrir el borrador guardado. El documento actual no se ha sustituido.');
+    } catch {
+      setActionError('No se pudo reabrir el borrador guardado. El documento actual no se ha sustituido.');
     } finally {
       setReopenState('idle');
     }
@@ -312,8 +333,11 @@ export function WorkspaceDocumentEditor({
   const handleSaveMachoteTemplate = async () => {
     if (!document || !onSaveAsTemplate) return;
     setIsTemplateSaving(true);
+    setActionError(null);
     try {
       await onSaveAsTemplate(document);
+    } catch {
+      setActionError('No se pudo guardar la plantilla. El documento sigue en el editor; reintenta el guardado.');
     } finally {
       setIsTemplateSaving(false);
     }
@@ -487,7 +511,7 @@ export function WorkspaceDocumentEditor({
             <span>{editLocked ? '🔒' : '✎'}</span>
             <span>{editLocked ? 'Editar contestación' : 'Bloquear edición'}</span>
           </button>
-          {!editLocked && history.length > 1 && (
+          {!editLocked && hasCurrentHistory && history.length > 1 && (
             <button
               onClick={() => {
                 const original = history[0];
@@ -506,7 +530,7 @@ export function WorkspaceDocumentEditor({
             <div className="hidden sm:flex items-center gap-1">
               <button
                 onClick={handleUndo}
-                disabled={historyIndex <= 0}
+                disabled={!hasCurrentHistory || historyIndex <= 0}
                 title="Deshacer"
                 className="w-7 h-7 bg-white hover:bg-slate-50 disabled:opacity-30 rounded-lg border border-[#ded8c9] flex items-center justify-center text-xs font-bold text-slate-700 shadow-xs"
               >
@@ -514,7 +538,7 @@ export function WorkspaceDocumentEditor({
               </button>
               <button
                 onClick={handleRedo}
-                disabled={historyIndex >= history.length - 1}
+                disabled={!hasCurrentHistory || historyIndex >= history.length - 1}
                 title="Rehacer"
                 className="w-7 h-7 bg-white hover:bg-slate-50 disabled:opacity-30 rounded-lg border border-[#ded8c9] flex items-center justify-center text-xs font-bold text-slate-700 shadow-xs"
               >
@@ -640,6 +664,7 @@ export function WorkspaceDocumentEditor({
                 <option value="100">100%</option>
                 <option value="125">125%</option>
                 <option value="150">150%</option>
+                {![75, 100, 125, 150].includes(zoomLevel) && <option value={String(zoomLevel)}>{zoomLevel}%</option>}
               </select>
               <button
                 onClick={() => { setZoomLevel((z) => Math.min(160, z + 10)); setZoomMode('custom'); }}
@@ -686,8 +711,9 @@ export function WorkspaceDocumentEditor({
           {/* Botón Subir Machote */}
           <button
             onClick={onTriggerUpload}
+            disabled={!onTriggerUpload}
             className="py-1.5 px-3 rounded-xl bg-white border border-[#ded8c9] hover:bg-[#ede8dd] text-[#0B2545] text-xs font-bold shadow-xs transition flex items-center gap-1"
-            title="Subir documento real PDF o DOCX"
+            title={onTriggerUpload ? 'Subir documento real PDF o DOCX' : 'Carga no disponible en esta vista'}
           >
             <span>📥</span>
             <span>Subir Machote</span>
@@ -878,6 +904,7 @@ export function WorkspaceDocumentEditor({
         </div>
       </div>
 
+      {actionError && <div role="alert" className="shrink-0 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800">{actionError}</div>}
       {document && (
         <div
           role="status"
@@ -1214,6 +1241,17 @@ export function WorkspaceDocumentEditor({
           )}
         </div>
       </div>
+
+      {document?.generationMetadata.operationalManual && <details className="absolute bottom-4 left-4 z-30 max-h-[45vh] w-[min(34rem,calc(100%-2rem))] overflow-auto rounded-xl border border-slate-200 bg-white p-3 shadow-lg font-sans">
+        <summary className="cursor-pointer text-sm font-bold text-[#0B2545]">Criterios aplicados · Manual LEX PLANTILLAS v{document.generationMetadata.operationalManual.manualVersion}</summary>
+        <p className="mt-2 text-xs text-slate-500">Guía interna; no es autoridad jurídica oficial. La revisión no desbloquea FINAL.</p>
+        {document.generationMetadata.operationalManual.retrievals.map((entry, index) => <div key={`${entry.taskId}-${index}`} className="mt-3 border-t border-slate-100 pt-2 text-xs">
+          <p className="font-semibold">Tarea {entry.taskId} · {entry.retrievalStage}</p>
+          {(entry.selectedRules || entry.selectedRuleIds.map((id) => ({ id, physicalPage: Number(id.match(/-p(\d{3})-/)?.[1] || 0), section: 'Sección por consultar' }))).map((rule) => <a key={rule.id} href={`/api/operational-manual?ruleId=${encodeURIComponent(rule.id)}`} target="_blank" rel="noreferrer" className="mt-1 block break-all text-[#0B5ED7]">Página {rule.physicalPage} · {rule.section} · {rule.id} · ver texto original</a>)}
+        </div>)}
+        {document.generationMetadata.operationalManual.auditFindings.map((finding, index) => <p key={`${finding.ruleId}-${index}`} className="mt-2 text-xs text-slate-600">Auditoría: {finding.status} · regla {finding.ruleId} · página {finding.physicalPage} · {finding.code}</p>)}
+        <a href="/api/operational-manual/original" target="_blank" rel="noreferrer" className="mt-3 block text-xs font-bold text-[#0B5ED7]">Abrir PDF original</a>
+      </details>}
 
       {/* Modal de Calidad / Quality Gate */}
       {showReviewModal && qualityGate && (

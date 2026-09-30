@@ -150,7 +150,8 @@ export interface TaskExecutionTrace {
 }
 
 export interface SectionWordAccountingLoss {
-  stage: 'provider-validation' | 'semantic-review' | 'deduplication' | 'assembly' | 'export';
+  lossId: string;
+  stage: 'provider-validation' | 'semantic-review' | 'deduplication' | 'block-admission' | 'assembly' | 'export';
   reason: string;
   words: number;
   taskId?: string;
@@ -158,6 +159,7 @@ export interface SectionWordAccountingLoss {
 
 export interface SectionWordAccounting {
   sectionId: string;
+  accountingSchemaVersion: 2;
   plannedWords: number;
   providerGeneratedWords: number;
   providerGeneratedChars: number;
@@ -307,6 +309,16 @@ export interface GenerationTrace {
   model?: string | null;
   providerFallbackReason?: string | null;
   sourceIds: string[];
+  operationalManual?: {
+    manualVersion: string;
+    manualHash: string;
+    selectedRuleIds: string[];
+    selectedPages: number[];
+    selectedSections: string[];
+    retrievals: Array<{ taskId: string; retrievalStage: string; selectedRuleIds: string[]; selectedPages: number[]; selectedRules?: Array<{ id: string; physicalPage: number; section: string; category?: string }>; categories?: string[]; contextCharacters?: number; discardedRulesByContextLimit: string[] }>;
+    auditRuleIds: string[];
+    auditFindings: import('../operational-manual/core').ManualFinding[];
+  };
   caseAnalysisSnapshot?: CaseAnalysisSnapshot;
   documentPlanSnapshot?: DocumentPlanSnapshot;
   coverageMatrixBeforeGeneration?: CoverageTraceSnapshot;
@@ -481,6 +493,7 @@ function sectionWordAccounting(trace: GenerationTrace, sectionId: string): Secti
   if (existing) return existing;
   const created: SectionWordAccounting = {
     sectionId,
+    accountingSchemaVersion: 2,
     plannedWords: 0,
     providerGeneratedWords: 0,
     providerGeneratedChars: 0,
@@ -510,10 +523,12 @@ function applyWordAccountingUpdate(trace: GenerationTrace, update: WordAccountin
     accounting[stage] = mode === 'SET' ? Math.max(0, value) : accounting[stage] + Math.max(0, value);
   }
   if (update.reason && update.lossStage && (update.rejectedWords || update.dedupRemovedWords)) {
+    const words = Math.max(0, update.dedupRemovedWords || update.rejectedWords || 0);
     accounting.losses.push({
+      lossId: `${update.sectionId}:${accounting.losses.length + 1}`,
       stage: update.lossStage,
       reason: update.reason,
-      words: Math.max(0, update.rejectedWords ?? update.dedupRemovedWords ?? 0),
+      words,
       ...(update.taskId ? { taskId: update.taskId } : {}),
     });
   }

@@ -416,6 +416,8 @@ export function isPenalDocumentType(documentType?: string): boolean {
 
 export interface PenalContext {
   documentType: string;
+  calidadPersona?: CaseContextField;
+  etapaProcesal?: CaseContextField;
   victimaUOfendido: CaseContextField;
   imputado: CaseContextField;
   denuncianteOQuerellante?: CaseContextField;
@@ -1554,10 +1556,26 @@ export function buildPenalContext(
     causaVal = causaMatch[1].trim().replace(/[\.\,\;\:]+$/, '');
   }
 
-  let delitoVal: string | undefined = undefined;
-  const delitoMatch = textToScan.match(/(?:delito(?:\s+de)?|hechos?\s+con\s+apariencia\s+de\s+delito\s+de)\s+([a-záéíóúñ\s]{3,40})(?=[,\.\;\n]|$)/i);
-  if (delitoMatch) {
-    delitoVal = delitoMatch[1].trim().replace(/[\.\,\;\:]+$/, '');
+  // The offence must originate in an explicit source label, never a role
+  // ("delito imputado") or an analysis-generated assertion. A missing or
+  // negated attribution remains missing; this is not proof of commission.
+  const offenceSourceText = sources.map(s => s.extractedText ?? s.content ?? s.pages?.map(p => p.text).join('\n') ?? '').join('\n');
+  const roleMatches = [...offenceSourceText.matchAll(/\b(?:representad[oa](?:\s+fictici[oa])?|calidad(?:\s+(?:de\s+la\s+persona|procesal))?)\s*:\s*([^.;\n]+)/gi)]
+    .filter(match => !/\b(?:no|sin|pendiente|desconoc\w*)\b/i.test(match[1]))
+    .flatMap(match => [...match[1].matchAll(/\b(imputad[oa]|acusad[oa]|sentenciad[oa]|v[ií]ctima|ofendid[oa]|denunciante)\b/gi)].map(role => role[1].toLowerCase().replace(/^(imputad|acusad|sentenciad|ofendid)a$/, '$1o')));
+  const roles = [...new Set(roleMatches)];
+  const stageMatches = [...offenceSourceText.matchAll(/(?:^|[.\n]\s*)etapa(?:\s+procesal)?\s*:\s*(investigaci[oó]n\s+(?:inicial|complementaria)|intermedia|juicio|ejecuci[oó]n)\b/gi)]
+    .map(match => match[1].toLowerCase().replace(/investigacion/, 'investigación').replace(/ejecucion/, 'ejecución'));
+  const stages = [...new Set(stageMatches)];
+  let delitoVal: string | undefined;
+  for (const sentence of offenceSourceText.split(/[.\n;]+/)) {
+    if (/\b(?:no|sin|desconoc\w*|pendiente)\b/i.test(sentence)) continue;
+    const match = sentence.match(/\bdelito(?:\s+(?:investigado|imputado))?\s*(?:de\s+|:\s*)([a-záéíóúñ][a-záéíóúñ\s-]*)/i);
+    if (!match) continue;
+    const value = match[1].split(/\s+(?:cometido|atribuido|en\s+agravio|por\s+(?:el|la)|previsto|tipificado)\b/i)[0].trim();
+    if (!value || /\b(?:imputad[oa]|acusad[oa]|sentenciad[oa]|v[ií]ctima|ofendido|denunciante|desconocido|pendiente)\b/i.test(value)) continue;
+    delitoVal = value;
+    break;
   }
 
   const agraviosPenales: string[] = (analysis.arguments || [])
@@ -1566,6 +1584,8 @@ export function buildPenalContext(
 
   return {
     documentType,
+    calidadPersona: field('calidadPersona', 'Calidad procesal del representado', roles.length === 1 ? roles[0] : undefined, false, roles.length === 1 ? 'SOURCE_EXTRACTED' : undefined),
+    etapaProcesal: field('etapaProcesal', 'Etapa procesal penal', stages.length === 1 ? stages[0] : undefined, false, stages.length === 1 ? 'SOURCE_EXTRACTED' : undefined),
     victimaUOfendido,
     imputado,
     denuncianteOQuerellante,
@@ -1576,7 +1596,7 @@ export function buildPenalContext(
     juezEjecucion,
     carpetaInvestigacion: field('carpetaInvestigacion', 'Carpeta de investigación', carpetaVal, Boolean(carpetaVal)),
     causaPenal: field('causaPenal', 'Causa penal', causaVal, Boolean(causaVal)),
-    delitoImputado: field('delitoImputado', 'Delito investigado / imputado', delitoVal, Boolean(delitoVal)),
+    delitoImputado: field('delitoImputado', 'Delito investigado / imputado', delitoVal, false, delitoVal ? 'SOURCE_EXTRACTED' : undefined),
     medidaCautelar: field('medidaCautelar', 'Medida cautelar', undefined, false),
     medidaProteccion: field('medidaProteccion', 'Medida de protección', undefined, false),
     actosInvestigacion: [],

@@ -7,6 +7,7 @@ import { materializeDocumentForPageMeasurement } from '@/lib/legal-engine/finalD
 import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
 import { runQualityGateCheck } from '@/lib/legal-engine/qualityGate';
+import { populateDeterministicFactualClaimAudit } from '@/lib/legal-engine/factualClaimGate';
 import { readDocxPackage } from '../helpers/docxPackageReader';
 
 function reviewDocument() {
@@ -58,6 +59,21 @@ describe('exportMode DRAFT | FINAL', () => {
     expect(prepared.document.generationMetadata.exportMode).toBe('DRAFT');
     expect(prepared.document.generationMetadata.exportNotice).toBe(DRAFT_EXPORT_NOTICE);
     expect(prepared.reviewOverrideApplied).toBe(true);
+  });
+
+  it('marca el DRAFT efímero como no guardado y rechaza esa marca en FINAL', async () => {
+    const prepared = await prepareUniversalDocumentForExport(reviewDocument(), {
+      exportMode: 'DRAFT',
+      unsavedDraft: true,
+    });
+
+    expect(prepared.document.generationMetadata.exportNotice)
+      .toBe('BORRADOR NO GUARDADO EN EL EXPEDIENTE - NO PRESENTAR SIN REVISIÓN DEL ABOGADO');
+
+    await expect(prepareUniversalDocumentForExport(readyDocument(), {
+      exportMode: 'FINAL',
+      unsavedDraft: true,
+    })).rejects.toThrow(/UNSAVED_DRAFT_EXPORT_REQUIRES_DRAFT/);
   });
 
   it('permite exportar DRAFT con expediente pendiente y conserva el marcador sin habilitar FINAL', async () => {
@@ -131,6 +147,8 @@ describe('exportMode DRAFT | FINAL', () => {
 
     await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
       .rejects.toThrow(/UNSUPPORTED_FACTUAL_CLAIM/);
+    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT', unsavedDraft: true }))
+      .rejects.toThrow(/UNSUPPORTED_FACTUAL_CLAIM/);
   });
 
   it('bloquea DRAFT cuando una autoridad material está aplicada a una proposición incorrecta', async () => {
@@ -144,6 +162,8 @@ describe('exportMode DRAFT | FINAL', () => {
     };
 
     await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
+      .rejects.toThrow(/MISAPPLIED_AUTHORITY/);
+    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT', unsavedDraft: true }))
       .rejects.toThrow(/MISAPPLIED_AUTHORITY/);
   });
 
@@ -235,6 +255,35 @@ describe('exportMode DRAFT | FINAL', () => {
     expect(runQualityGateCheck(document).criticalErrors.map((issue) => issue.checkId)).toContain('FACTUAL_CLAIM_AUDIT_MISSING');
     await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
       .rejects.toThrow(/FACTUAL_CLAIM_AUDIT_MISSING/);
+  });
+
+  it('bloquea DRAFT cuando la auditoría determinística detecta una contradicción factual', async () => {
+    const document = readyDocument();
+    document.generationMetadata.draftDepth = 'EXTENSIVE_40';
+    const sourceSentence = 'La jornada inició a las 16:30 horas.';
+    const generatedSentence = 'La jornada inició a las 16:00 horas.';
+    const body = document.sections.find((section) => section.id === 'body')!;
+    body.content[0] = {
+      ...body.content[0],
+      generatedBy: 'AI',
+      text: generatedSentence,
+    } as any;
+    document.generationMetadata.sourceGrounding = [{
+      sourceId: 'source-time',
+      sourceText: sourceSentence,
+      container: { documentFamily: 'CONTESTACION' },
+      segments: [{ role: 'CASE_DOCUMENT', startOffset: 0, endOffset: sourceSentence.length, text: sourceSentence }],
+      provenanceIntegrity: { issues: [] },
+      caseMetadata: { expediente: { value: '' }, status: 'VERIFIED' },
+      caseFacts: [],
+      values: [],
+      precedentFacts: [],
+    }] as any;
+    populateDeterministicFactualClaimAudit(document);
+
+    expect(runQualityGateCheck(document).criticalErrors.map((issue) => issue.checkId)).toContain('FACTUAL_CLAIM_CONTRADICTORY');
+    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
+      .rejects.toThrow(/FACTUAL_CLAIM_CONTRADICTORY/);
   });
 
   it('bloquea DRAFT cuando el abogado no confirmó la postura del hecho que la respuesta niega', async () => {
@@ -330,5 +379,19 @@ describe('exportMode DRAFT | FINAL', () => {
     expect(pdf.byteLength).toBeGreaterThan(500);
     expect(pdf.toString('latin1')).toContain('BORRADOR PARA REVISIÓN DEL ABOGADO');
     expect(document.generationMetadata.aiProvider).toBe(providerBefore);
+  });
+
+  it('incluye en el DOCX y PDF una advertencia visible cuando el borrador no se guardó', async () => {
+    const document = reviewDocument();
+    const [docx, pdf] = await Promise.all([
+      exportUniversalToDocx(document, undefined, undefined, { exportMode: 'DRAFT', unsavedDraft: true }),
+      exportUniversalToPdf(document, undefined, { exportMode: 'DRAFT', unsavedDraft: true }),
+    ]);
+    const packageReader = await readDocxPackage(docx);
+    const header = await packageReader.readText('word/header1.xml');
+    const notice = 'BORRADOR NO GUARDADO EN EL EXPEDIENTE';
+
+    expect(header).toContain(notice);
+    expect(pdf.toString('latin1')).toContain(notice);
   });
 });

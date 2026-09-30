@@ -15,6 +15,7 @@ import type {
   SourceProvenance,
 } from './case-extraction/types';
 import { runFastMode } from '@/lib/ai/orchestrator';
+import { retrieveManualRules, type ManualIndex, type ManualMatter } from '../operational-manual/core';
 import type { AIProviderResult, AIRequest } from '@/lib/ai/providers/types';
 import {
   draftBlockFromIssueResult,
@@ -337,6 +338,7 @@ export interface IssueContextPack {
   clientPosition?: { status: string; propositionIds: string[] };
   provenance: SourceProvenance[];
   contextHash: string;
+  operationalManual?: { manualVersion: string; manualHash: string; rules: Array<{ id: string; physicalPage: number; originalText: string }> };
   verifiedResearch?: VerifiedResearchContext;
 }
 
@@ -741,6 +743,7 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
     'Escapa correctamente las cadenas para producir JSON válido.',
     'Usa ÚNICAMENTE el contexto allowlisted recibido.',
     'No inventes derecho, hechos materiales, autoridades, evidencia, EvidenceOffer ni postura de cliente.',
+    'operationalManual es guía interna de metodología: nunca sirve como hecho del expediente, postura del cliente, autoridad jurídica verificada ni ID de cobertura.',
     'Conserva SOURCE_CITED como no verificado y usa REQUIRES_LEGAL_RESEARCH cuando corresponda.',
     'Si falta información, declara el requisito pendiente en lugar de completarlo.',
     ...lengthDirective,
@@ -834,6 +837,7 @@ export interface IssueExecutorOptions extends IssueResearchExecutionInputs {
   invokeProvider?: IssueProviderInvoker;
   maxConcurrency?: number;
   trace?: import('./generationTrace').GenerationTraceContext;
+  operationalManualIndex?: ManualIndex;
 }
 
 function researchTraceFor(
@@ -1330,9 +1334,40 @@ export async function executeIssueScopedGeneration(
   if (!eligibility.eligible) return traceOutcome(localIssueOutcome(task, eligibility.reason, 'BLOCKED'));
 
   const coverageMatrix = doc.coverageMatrix || requireCoverageMatrix(caseAnalysis, doc);
-  const pack = buildIssueContextPack(task, { ...doc, coverageMatrix }, caseAnalysis, matrix!, {
+  const basePack = buildIssueContextPack(task, { ...doc, coverageMatrix }, caseAnalysis, matrix!, {
     verifiedResearch: eligibility.verifiedResearch,
   });
+  const manual = options.operationalManualIndex;
+  const matterName = String(doc.matter || '').toLocaleUpperCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const manualMatter = (['CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL'] as ManualMatter[]).find((matter) => matterName.includes(matter)) || 'GENERAL';
+  const selection = manual ? retrieveManualRules(manual, {
+    matter: manualMatter, caseType: doc.documentType, stage: task.sectionTitle,
+    task: `${task.title || ''} ${task.objective || ''} ${basePack.legalIssue.question}`, budgetChars: 4500,
+    measureContext: (rules) => JSON.stringify({ operationalManual: {
+      manualVersion: manual.manifest.version, manualHash: manual.manifest.sourceHash,
+      rules: rules.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, originalText: item.originalText })),
+    } }).length,
+  }) : undefined;
+  const operationalManual = manual && selection?.selected.length ? {
+    manualVersion: manual.manifest.version, manualHash: manual.manifest.sourceHash,
+    rules: selection.selected.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, originalText: item.originalText })),
+  } : undefined;
+  const pack: IssueContextPack = operationalManual
+    ? { ...basePack, operationalManual, contextHash: contextHash({ ...basePack, contextHash: undefined, operationalManual }) }
+    : basePack;
+  if (manual && selection) {
+    const manualTrace = doc.generationMetadata.operationalManual ||= {
+      manualVersion: manual.manifest.version, manualHash: manual.manifest.sourceHash,
+      selectedRuleIds: [], selectedPages: [], selectedSections: [], retrievals: [], auditRuleIds: [], auditFindings: [],
+    };
+    const selectedRuleIds = selection.selected.map((item) => item.stableRuleId);
+    const selectedPages = [...new Set(selection.selected.map((item) => item.physicalPage))];
+    manualTrace.selectedRuleIds = [...new Set([...manualTrace.selectedRuleIds, ...selectedRuleIds])];
+    manualTrace.selectedPages = [...new Set([...manualTrace.selectedPages, ...selectedPages])];
+    manualTrace.selectedSections = [...new Set([...manualTrace.selectedSections, ...selection.selected.map((item) => item.section)])];
+    manualTrace.retrievals.push({ taskId: task.id, retrievalStage: 'ISSUE_SCOPED', selectedRuleIds, selectedPages, selectedRules: selection.selected.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, section: item.section })), discardedRulesByContextLimit: selection.discardedRulesByContextLimit });
+    if (options.trace) options.trace.trace.operationalManual = manualTrace;
+  }
   const draftContract = selectIssueDraftContract(pack, task);
   if (!draftContract) return traceOutcome(localIssueOutcome(task, 'ISSUE_DRAFT_CONTRACT_UNRESOLVED', 'BLOCKED'));
   const prompt = buildIssuePrompt(pack, task);
