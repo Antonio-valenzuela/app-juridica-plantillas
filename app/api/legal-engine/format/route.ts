@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { UploadedSourceDocument } from '@/lib/legal-engine/types';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess } from '@/lib/security/workspaceExecutionAccess';
+import { DesktopProfileRepository } from '@/lib/workspace/desktopProfileRepository';
 import { analyzeLegalDocumentFormatting } from '@/lib/legal-engine/legalFormatAnalyzer';
 import { buildFormattedDocument, validateFormattingIntegrity } from '@/lib/legal-engine/legalFormatter';
 import { loadLawyerProfile } from '@/lib/workspace/lawyerProfileStore';
@@ -21,7 +22,7 @@ const formatSchema = z.object({
 export async function POST(req: NextRequest) {
   const requestId = generateRequestId();
   const start = Date.now();
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req);
   if (!auth.ok) return auth.response;
 
   const body = await req.json().catch(() => ({}));
@@ -51,7 +52,9 @@ export async function POST(req: NextRequest) {
 
     // Perfil del abogado: SOLO referencia de estilo (nunca altera contenido). Mismo
     // fallback que generate: body → DB → DEFAULT.
-    const { profile } = await loadLawyerProfile(auth.context.organizationId, auth.context.lawyerId);
+    const { profile } = auth.context.kind === 'DESKTOP_LOCAL'
+      ? await new DesktopProfileRepository().load()
+      : await loadLawyerProfile(auth.context.organizationId, auth.context.lawyerId);
 
     // CAPA 2 — formateador determinístico
     const document = buildFormattedDocument(analysis, sources, {

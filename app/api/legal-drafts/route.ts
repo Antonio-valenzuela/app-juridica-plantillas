@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireCaseAccess } from '@/lib/cases/access';
 import { markDocumentAsDraft, markDocumentAsSource } from '@/lib/legal-engine/documentLifecycle';
 import { stripTransientAuditTrace } from '@/lib/legal-engine/legalDocumentSanitizer';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +65,9 @@ function stripAuditTraceFromMetadata(value: unknown): unknown {
 
 export async function GET(request: NextRequest) {
   try {
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    if (local?.ok) return NextResponse.json({ ok: true, drafts: await local.store.list(), storage: 'DESKTOP_LOCAL' });
     const access = await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };
@@ -87,7 +91,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const access = await requireCaseAccess(request);
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    const access = local?.ok ? { ok: true as const, context: { organizationId: undefined, userId: undefined } } : await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };
 
@@ -96,8 +102,7 @@ export async function POST(request: NextRequest) {
     const structuredDoc = normalizeDraftDocument(parsed.structuredDoc);
     const sourceDocuments = normalizeSourceDocuments(parsed.sourceDocuments) ?? null;
 
-    const draft = await prisma.legalDraft.create({
-      data: {
+    const data = {
         organizationId: identity.organizationId,
         userId: identity.userId,
         templateId: parsed.templateId || null,
@@ -114,8 +119,8 @@ export async function POST(request: NextRequest) {
         validationResults: (parsed.validationResults || null) as any,
         generationMetadata: stripAuditTraceFromMetadata(parsed.generationMetadata || null) as any,
         status: parsed.status,
-      },
-    });
+      };
+    const draft = local?.ok ? await local.store.create(data) : await prisma.legalDraft.create({ data: data as any });
 
     return NextResponse.json({ ok: true, draft }, { status: 201 });
   } catch (error: any) {

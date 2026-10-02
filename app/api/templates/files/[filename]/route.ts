@@ -4,6 +4,8 @@ import path from 'path';
 import { requireCaseAccess } from '@/lib/cases/access';
 import { prisma } from '@/lib/prisma';
 import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { desktopTemplates } from '@/lib/workspace/desktopTemplateRepository';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +28,9 @@ export async function GET(
   { params }: { params: Promise<{ filename: string }> }
 ) {
   try {
-    const access = await requireCaseAccess(request);
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    const access = local?.ok ? { ok: true as const, context: { organizationId: undefined, userId: undefined } } : await requireCaseAccess(request);
     if (!access.ok) return access.response;
 
     const { filename } = await params;
@@ -45,7 +49,8 @@ export async function GET(
       return NextResponse.json({ ok: false, error: 'Archivo no encontrado.' }, { status: 404 });
     }
 
-    const template = await prisma.legalTemplate.findFirst({
+    const template = local?.ok ? (await desktopTemplates().list()).find(template =>
+      (template.structureJson as { storage?: { savedFileName?: string } })?.storage?.savedFileName === sanitized) : await prisma.legalTemplate.findFirst({
       where: {
         organizationId: access.context.organizationId,
         createdBy: access.context.userId,

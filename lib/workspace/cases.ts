@@ -1,4 +1,8 @@
 export interface WorkspaceCaseSummary {
+  kind?: 'LOCAL_CASE';
+  notes?: string;
+  draftIds?: string[];
+  draftRecordId?: string | null;
   id: string;
   title: string;
   expediente: string | null;

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { UniversalLegalDocument, DocumentNode, ContentBlock, BlockStyle } from '@/lib/legal-engine/types';
 import { runQualityGateCheck, QualityGateResult } from '@/lib/legal-engine/qualityGate';
 import { normalizeUnresolvedFieldMarkers, extractUnresolvedFieldMarkers } from '@/lib/legal-engine/pendingFields';
@@ -97,12 +98,13 @@ export function WorkspaceDocumentEditor({
   const [showPagesPanel, setShowPagesPanel] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMatch, setActiveMatch] = useState(0);
-  const [editingBlock, setEditingBlock] = useState<{ sectionId: string; blockId: string; text: string } | null>(null);
+  const [editingBlock, setEditingBlock] = useState<{ documentId: string; sectionId: string; blockId: string; text: string } | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [actionError, setActionError] = useState<string | null>(null);
   const [reopenState, setReopenState] = useState<'idle' | 'loading'>('idle');
   const [isTemplateSaving, setIsTemplateSaving] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportMenuPosition, setExportMenuPosition] = useState({ top: 0, left: 0 });
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [zoomMode, setZoomMode] = useState<'custom' | 'fit-width' | 'fit-page'>('custom');
@@ -458,7 +460,7 @@ export function WorkspaceDocumentEditor({
              A Identificación · B Edición global · C Formato · D Navegación ·
              E Vista · F Documento · G IA/Calidad/Exportación · Volver ── */}
       <div data-testid="editor-toolbar" className="sticky top-0 z-40 shrink-0 bg-[#fbf9f5] border-b border-[#ded8c9] px-3 py-2 shadow-xs font-sans">
-        <div data-testid="editor-toolbar-row-primary" className="flex min-w-max flex-nowrap items-center gap-x-2 overflow-x-auto pb-1">
+        <div data-testid="editor-toolbar-row-primary" className="flex min-w-0 w-full flex-nowrap items-center gap-x-2 overflow-x-auto pb-1">
         {/* ── ZONA A · IDENTIFICACIÓN (título truncable, nunca empuja botones) ── */}
         <div className="flex items-center gap-1.5 min-w-[140px] max-w-[240px] xl:max-w-[340px] min-w-0 grow shrink basis-[160px]">
           {document ? (
@@ -623,6 +625,7 @@ export function WorkspaceDocumentEditor({
 
               <span className="inline-block min-w-[9rem] text-center font-semibold text-slate-700 px-2 font-mono text-xs tabular-nums select-none">
                 Pág. <span className="text-[#0B2545] font-extrabold text-sm">{viewPage}</span> / {totalPages}
+                <span className="block text-[9px] font-sans text-slate-500">Paginación estimada; el PDF puede variar</span>
               </span>
 
               <button
@@ -707,7 +710,7 @@ export function WorkspaceDocumentEditor({
         </div>
 
         {/* ── FILA 2 · DOCUMENTO + IA/CALIDAD/EXPORTACIÓN (+ Volver) ── */}
-        <div data-testid="editor-toolbar-row-secondary" className="flex min-w-max flex-nowrap items-center gap-1.5 overflow-x-auto pt-1 font-sans whitespace-nowrap">
+        <div data-testid="editor-toolbar-row-secondary" className="flex min-w-0 w-full flex-nowrap items-center gap-1.5 overflow-x-auto pt-1 font-sans whitespace-nowrap">
           {/* Botón Subir Machote */}
           <button
             onClick={onTriggerUpload}
@@ -817,7 +820,11 @@ export function WorkspaceDocumentEditor({
               {/* Menú Exportar */}
               <div className="relative">
                 <button
-                  onClick={() => setShowExportMenu((open) => !open)}
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setExportMenuPosition({ top: rect.bottom + 6, left: Math.max(8, Math.min(rect.right - 256, window.innerWidth - 264)) });
+                    setShowExportMenu((open) => !open);
+                  }}
                   className="py-1.5 px-3 rounded-xl border text-xs font-bold shadow-xs transition flex items-center gap-1.5 bg-[#0B2545] hover:bg-[#081d39] text-white border-transparent"
                   title="Elegir exportación de borrador o final"
                 >
@@ -826,8 +833,8 @@ export function WorkspaceDocumentEditor({
                   <span className="text-[9px]">▼</span>
                 </button>
 
-                {showExportMenu && (
-                  <div className="absolute right-0 top-9 w-64 bg-white border border-[#ded8c9] rounded-xl shadow-xl z-50 py-1.5 text-xs text-slate-800 font-semibold animate-in fade-in zoom-in-95">
+                {showExportMenu && createPortal(
+                  <div style={exportMenuPosition} className="fixed w-64 max-h-[70vh] overflow-y-auto bg-white border border-[#ded8c9] rounded-xl shadow-xl z-[100] py-1.5 text-xs text-slate-800 font-semibold animate-in fade-in zoom-in-95">
                     <div className="px-3.5 pt-2 pb-1 text-[10px] uppercase tracking-wide text-amber-800">Exportar borrador</div>
                     {onExportDocx && (
                       <button
@@ -885,7 +892,7 @@ export function WorkspaceDocumentEditor({
                         Disponible cuando se resuelvan los pendientes de revisión.
                       </div>
                     )}
-                  </div>
+                  </div>, window.document.body
                 )}
               </div>
 
@@ -1120,7 +1127,7 @@ export function WorkspaceDocumentEditor({
                           {/* Párrafos del documento */}
                           <div className="space-y-2.5 w-full max-w-full overflow-hidden break-words">
                             {section.content.map((block) => {
-                              const isEditing = editingBlock?.blockId === block.id;
+                              const isEditing = editingBlock?.documentId === document.id && editingBlock?.blockId === block.id;
 
                               const blockInlineStyle: React.CSSProperties = {
                                 fontFamily: block.style?.fontFamily || 'inherit',
@@ -1141,8 +1148,9 @@ export function WorkspaceDocumentEditor({
                                 >
                                   {isEditing ? (
                                     <div className="relative font-sans w-full" data-block-editor>
-                                      {/* Acciones flotantes: NO alteran el flujo ni la altura de la hoja */}
-                                      <div className="absolute right-0 -top-7 z-10 flex justify-end gap-1.5">
+                                      {/* Mantener acciones dentro del bloque: el overflow de la hoja
+                                          recortaba la fila flotante y el título interceptaba el clic. */}
+                                      <div className="flex justify-end gap-1.5 mb-2">
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -1207,7 +1215,7 @@ export function WorkspaceDocumentEditor({
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            setEditingBlock({ sectionId: section.id, blockId: block.id, text: block.text });
+                                            setEditingBlock({ documentId: document.id, sectionId: section.id, blockId: block.id, text: block.text });
                                           }}
                                           className="font-sans opacity-0 group-hover/block:opacity-100 p-1 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 text-xs rounded shadow-xs shrink-0"
                                           title="Editar texto directamente"

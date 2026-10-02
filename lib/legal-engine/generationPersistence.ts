@@ -3,6 +3,9 @@ import { stripTransientAuditTrace } from './legalDocumentSanitizer';
 import { buildReviewRequest } from './reviewRequest';
 import { stampDocumentVersions, upgradeDocumentVersions } from './documentVersioning';
 import type { UniversalLegalDocument } from './types';
+import { DesktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import type { ExecutionOwner } from '@/lib/security/workspaceExecutionAccess';
+import { getRuntimeMode } from '@/lib/security/desktopLocalAccess';
 
 export interface GenerationArtifactSnapshot {
   draftRecordId?: string;
@@ -154,9 +157,7 @@ function persistenceMetadata(snapshot: GenerationArtifactSnapshot): Record<strin
   };
 }
 
-export async function saveGenerationArtifact(input: {
-  organizationId: string;
-  userId: string;
+export async function saveGenerationArtifact(input: ExecutionOwner & {
   draftRecordId?: string | null;
   document: UniversalLegalDocument;
   jobId?: string | null;
@@ -165,6 +166,25 @@ export async function saveGenerationArtifact(input: {
   warnings?: string[];
 }): Promise<GenerationArtifactSnapshot> {
   const snapshot = buildGenerationArtifactSnapshot(input);
+  if (input.desktopOwnerId) {
+    if (getRuntimeMode() !== 'DESKTOP_LOCAL') throw new Error('DESKTOP_ARTIFACT_WRONG_RUNTIME');
+    const store = new DesktopDraftRepository();
+    const existing = findPersistedArtifact(await store.list(), snapshot.documentId);
+    if (input.draftRecordId && existing?.id !== input.draftRecordId) throw new Error('DESKTOP_ARTIFACT_DOCUMENT_MISMATCH');
+    const metadata = { ...record(snapshot.checkpointDocument.generationMetadata), persistence: persistenceMetadata(snapshot) };
+    const data = { title: snapshot.checkpointDocument.title, documentType: snapshot.documentType,
+      matter: snapshot.checkpointDocument.matter || null, jurisdiction: snapshot.checkpointDocument.jurisdiction || null,
+      structuredDoc: snapshot.checkpointDocument, sourceDocuments: snapshot.checkpointDocument.sourceDocuments,
+      pendingMarkers: snapshot.pendingItems, pipelineState: snapshot.documentState.pipelineState,
+      validationResults: snapshot.verificationState.validation, generationMetadata: metadata, status: 'DRAFT',
+      desktopOwnerId: input.desktopOwnerId };
+    const saved = existing ? await store.update(existing.id!, data) : await store.create({ ...data,
+      formData: { generationArtifact: true, documentId: snapshot.documentId }, renderedText: '' });
+    if (!saved) throw new Error('DESKTOP_ARTIFACT_SAVE_FAILED');
+    snapshot.draftRecordId = saved.id;
+    return snapshot;
+  }
+  if (!input.organizationId || !input.userId) throw new Error('GENERATION_OWNER_MISSING');
   const existing = input.draftRecordId
     ? { id: input.draftRecordId }
     : findPersistedArtifact(await prisma.legalDraft.findMany({
@@ -229,4 +249,18 @@ export async function loadGenerationArtifact(organizationId: string, userIdOrDoc
   });
   const match = findPersistedArtifact(records, documentId);
   return hydrateGenerationArtifact(match);
+}
+
+/** Caller must authenticate the workspace capability before loading local artifacts. */
+export async function loadWorkspaceGenerationArtifact(owner: ExecutionOwner, documentId: string): Promise<UniversalLegalDocument | null> {
+  if (owner.desktopOwnerId) {
+    if (getRuntimeMode() !== 'DESKTOP_LOCAL') throw new Error('DESKTOP_ARTIFACT_WRONG_RUNTIME');
+    const match = findPersistedArtifact(await new DesktopDraftRepository().list(), documentId);
+    if (!match) return null;
+    const storedOwner = (match as unknown as Record<string, unknown>).desktopOwnerId;
+    if (storedOwner && storedOwner !== owner.desktopOwnerId) return null;
+    return hydrateGenerationArtifact(match);
+  }
+  if (!owner.organizationId || !owner.userId) throw new Error('GENERATION_OWNER_MISSING');
+  return loadGenerationArtifact(owner.organizationId, owner.userId, documentId);
 }

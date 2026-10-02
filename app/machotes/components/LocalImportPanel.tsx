@@ -41,6 +41,19 @@ function formatCount(value: number | undefined): string {
 }
 
 export function LocalImportPanel() {
+  const [localCases, setLocalCases] = useState<Array<{ id: string; title: string }>>([]);
+  const [desktop, setDesktop] = useState(false);
+  const [caseId, setCaseId] = useState('');
+  useEffect(() => {
+    void fetch('/api/workspace/cases').then(async response => {
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (payload.storage === 'DESKTOP_LOCAL') {
+        setDesktop(true);
+        setLocalCases((payload.cases || []).filter((item: { kind?: string }) => item.kind === 'LOCAL_CASE'));
+      }
+    }).catch(() => undefined);
+  }, []);
   const [sourcePath, setSourcePath] = useState('');
   const [sampleLimit, setSampleLimit] = useState('');
   const [scanId, setScanId] = useState<string | null>(null);
@@ -114,7 +127,7 @@ export function LocalImportPanel() {
       const response = await fetch('/api/workspace/local-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'import', scanId, recordIds: [...selectedIds] }),
+        body: JSON.stringify({ action: 'import', scanId, recordIds: [...selectedIds], ...(desktop && caseId ? { caseId } : {}) }),
       });
       const payload = await response.json() as { ok: boolean; error?: string; imported?: LocalImportRecord[]; skipped?: Array<{ id: string; reason: string }> };
       if (!response.ok || !payload.ok) throw new Error(payload.error || 'No fue posible incorporar los documentos.');
@@ -152,6 +165,12 @@ export function LocalImportPanel() {
       </div>
       <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold text-emerald-700">Procesamiento local</span>
     </div>
+    {desktop && <label className="mt-4 block text-xs font-bold text-slate-600">Expediente de destino
+      <select value={caseId} onChange={event => setCaseId(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2">
+        <option value="">Biblioteca, sin expediente asociado</option>
+        {localCases.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+      </select>
+    </label>}
 
     {importedRecords.length > 0 && <div className="mt-4 rounded-xl border border-slate-200 bg-[#fbfaf7] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-wide text-[#B58A5A]">Contenido privado del despacho</p><h3 className="mt-1 text-sm font-extrabold text-[#0B2545]">Documentos del despacho</h3><p className="mt-1 text-[11px] text-slate-500">Separados del catálogo de fuentes oficiales y disponibles sólo en este equipo.</p></div><span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-600">{formatCount(importedRecords.length)} incorporados</span></div><input value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Buscar por nombre, categoría o materia…" className="mt-3 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 outline-none focus:border-[#0B2545]" /><div className="mt-3 grid gap-2 md:grid-cols-2">{filteredImportedRecords.map((record) => <div key={record.id} className="rounded-lg border border-slate-200 bg-white p-3"><div className="flex items-start justify-between gap-2"><p className="truncate text-xs font-bold text-[#0B2545]" title={record.relativePath}>{record.name}</p><span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Incorporado</span></div><p className="mt-1 truncate text-[10px] text-slate-500">{record.category.replaceAll('_', ' ')} · {record.matter.replaceAll('_', ' ')}</p></div>)}</div></div>}
 

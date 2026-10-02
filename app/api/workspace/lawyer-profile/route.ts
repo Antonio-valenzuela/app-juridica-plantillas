@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { loadLawyerProfile, saveLawyerProfile } from '@/lib/workspace/lawyerProfileStore';
 import { getProviderDisclosure } from '@/lib/ai/providerDisclosure';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { DesktopProfileRepository } from '@/lib/workspace/desktopProfileRepository';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -9,6 +11,17 @@ export const runtime = 'nodejs';
 // GET /api/workspace/lawyer-profile
 // Retorna el perfil del org actual; si no existe en DB retorna DEFAULT_LAWYER_PROFILE (sin persistirlo).
 export async function GET(req: NextRequest) {
+  const local = desktopDraftRepository(req);
+  if (local) {
+    if (!local.ok) return local.response;
+    try {
+      const owner = await new DesktopProfileRepository().load();
+      return NextResponse.json({ ok: true, profile: owner.profile, ownerId: owner.ownerId,
+        isDefault: false, configurationRequired: !owner.profile.lawyerName.trim(), storage: 'DESKTOP_LOCAL', aiDisclosure: getProviderDisclosure() });
+    } catch {
+      return NextResponse.json({ ok: false, error: 'PROFILE_LOAD_FAILED' }, { status: 500 });
+    }
+  }
   const auth = await requireLawyerAccess(req);
   if (!auth.ok) return auth.response;
 
@@ -27,6 +40,18 @@ export async function GET(req: NextRequest) {
 // PUT /api/workspace/lawyer-profile
 // Guarda/actualiza el perfil del org autenticado (upsert por organizationId).
 export async function PUT(req: NextRequest) {
+  const local = desktopDraftRepository(req);
+  if (local) {
+    if (!local.ok) return local.response;
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ ok: false, error: 'INVALID_BODY' }, { status: 400 });
+    try {
+      const owner = await new DesktopProfileRepository().save(body);
+      return NextResponse.json({ ok: true, profile: owner.profile, ownerId: owner.ownerId, configurationRequired: !owner.profile.lawyerName.trim() });
+    } catch (error) {
+      return NextResponse.json({ ok: false, error: error instanceof TypeError ? 'INVALID_PROFILE_FIELD' : 'PROFILE_SAVE_FAILED' }, { status: error instanceof TypeError ? 400 : 500 });
+    }
+  }
   const auth = await requireLawyerAccess(req);
   if (!auth.ok) return auth.response;
 

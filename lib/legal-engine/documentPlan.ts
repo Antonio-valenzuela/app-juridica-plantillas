@@ -378,7 +378,14 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
       _provenance: 'CANONICAL_GENERATED' as const,
     }));
     const agraviosSection = sections.find((section) => normalizeTitleKey(section.title) === 'agravios');
-    const appealAxes = caseAnalysis?.argumentAxes || [];
+    // Rich drafting units already represent these source decisions. Adding
+    // the legacy projection too creates an orphan, empty second grievance.
+    // Keep the legacy path unchanged if prior child sections have human edits.
+    const hasManualChild = previous.some(s => /agravio/i.test(s.title)
+      && (s.isManuallyEdited || s.content.some(b => b.isManuallyEdited)
+        || s.children?.some(c => c.isManuallyEdited || c.content.some(b => b.isManuallyEdited))));
+    const appealAxes = caseAnalysis?.richCaseAnalysis?.draftingProjection?.challenges.length && !hasManualChild
+      ? [] : caseAnalysis?.argumentAxes || [];
     if (agraviosSection && appealAxes.length > 0) {
       agraviosSection.children = appealAxes.map((axis, index) => ({
         ...createDocumentNode({

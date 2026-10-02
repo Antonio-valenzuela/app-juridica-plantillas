@@ -11,8 +11,11 @@ export interface AgendaEvent {
   priority: AgendaPriority;
   status: AgendaStatus;
   needsReview: boolean;
-  source: 'DOCUMENT';
+  source: 'DOCUMENT' | 'MANUAL';
   sourceText: string;
+  time?: string;
+  notes?: string;
+  eventType?: string;
   createdAt: string;
   updatedAt: string;
 }

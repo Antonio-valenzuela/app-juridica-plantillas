@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { UploadedSourceDocument, UniversalLegalDocument, CaseWorkflow } from '@/lib/legal-engine/types';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess, executionOwnerKey, ownsExecution } from '@/lib/security/workspaceExecutionAccess';
+import { DesktopProfileRepository } from '@/lib/workspace/desktopProfileRepository';
 import { LawyerProfile } from '@/lib/workspace/lawyerProfileTypes';
 import { loadLawyerProfile } from '@/lib/workspace/lawyerProfileStore';
 import { buildFingerprint } from '@/lib/legal-engine/generationLock';
@@ -92,13 +93,13 @@ async function withGenerationDeadline<T>(promise: Promise<T>, deadlineMs: number
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req, true);
   if (!auth.ok) return auth.response;
   const rateLimit = checkRequestRateLimit(
     req,
     'generation',
     10,
-    `${auth.context.organizationId}:${auth.context.userId}`,
+    executionOwnerKey(auth.context),
   );
   if (!rateLimit.ok) {
     return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas solicitudes de generación. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
@@ -106,6 +107,7 @@ export async function POST(req: NextRequest) {
   const owner = {
     organizationId: auth.context.organizationId,
     userId: auth.context.userId,
+    desktopOwnerId: auth.context.desktopOwnerId,
   };
   const admission = await checkGenerationAdmission(owner);
   if (!admission.ok) {
@@ -149,8 +151,7 @@ export async function POST(req: NextRequest) {
     const reviewRequest = buildReviewRequest(result.document);
     (result.document.generationMetadata as any).reviewRequest = reviewRequest;
     await saveGenerationArtifact({
-      organizationId: auth.context.organizationId,
-      userId: auth.context.userId,
+      ...owner,
       document: result.document,
       jobId: typeof body.jobId === 'string' ? body.jobId : null,
       progress: 100,
@@ -231,7 +232,9 @@ export async function POST(req: NextRequest) {
   // tal cual (compatibilidad con el flujo existente).
   const bodyProfile = lawyerProfile as LawyerProfile | undefined;
   let effectiveLawyerProfile = bodyProfile && typeof bodyProfile === 'object' ? bodyProfile : undefined;
-  if (!effectiveLawyerProfile) {
+  if (auth.context.kind === 'DESKTOP_LOCAL') {
+    effectiveLawyerProfile = (await new DesktopProfileRepository().load()).profile;
+  } else if (!effectiveLawyerProfile) {
     try {
       const loaded = await loadLawyerProfile(auth.context.organizationId, auth.context.lawyerId);
       effectiveLawyerProfile = loaded.profile;
@@ -276,6 +279,8 @@ export async function POST(req: NextRequest) {
         draftDepth,
         externalProviderOptIn,
       }, {} as any);
+      if (owner.desktopOwnerId) await saveGenerationArtifact({ ...owner, document: doc, progress: 100,
+        terminalStatus: doc.status === 'draft' ? 'NEEDS_REVIEW' : 'COMPLETED' });
       return NextResponse.json({ ok: true, document: doc });
     } catch (err: any) {
       if ([
@@ -313,8 +318,7 @@ export async function POST(req: NextRequest) {
   // 2. Crear job y responder INMEDIATAMENTE (sin esperar pipeline)
   console.log('[generate:POST] Creando job...');
   const job = createGenerationJob({
-    organizationId: auth.context.organizationId,
-    userId: auth.context.userId,
+    ...owner,
     fingerprint,
     idempotencyKey: scopedIdempotencyKey,
     total: 0,
@@ -329,11 +333,11 @@ export async function POST(req: NextRequest) {
     let terminalError: any = null;
     let persistenceChain: Promise<void> = Promise.resolve();
     let persistedDraftRecordId: string | null = null;
+    let localPersistenceFailure: Error | null = null;
     const persistCheckpoint = async (document: UniversalLegalDocument, progress?: number, terminalStatus?: string | null) => {
       try {
         const snapshot = await saveGenerationArtifact({
-          organizationId: auth.context.organizationId,
-          userId: auth.context.userId,
+          ...owner,
           draftRecordId: persistedDraftRecordId,
           document,
           jobId: job.jobId,
@@ -344,6 +348,7 @@ export async function POST(req: NextRequest) {
         persistedDraftRecordId = snapshot.draftRecordId || persistedDraftRecordId;
       } catch (error: any) {
         console.error('[generation:persistence] checkpoint failed:', error?.message || error);
+        if (owner.desktopOwnerId) localPersistenceFailure = Object.assign(new Error('No se pudo guardar el borrador en el workspace local.'), { code: 'DESKTOP_ARTIFACT_PERSISTENCE_FAILED' });
       }
     };
     const queueCheckpoint = (document: UniversalLegalDocument, progress?: number, terminalStatus?: string | null) => {
@@ -430,6 +435,8 @@ export async function POST(req: NextRequest) {
       terminalError = err;
       console.error(`[pipeline:job] Job ${job.jobId} fallido:`, err?.code || 'GENERATION_FAILED');
     } finally {
+      await persistenceChain;
+      if (localPersistenceFailure) terminalError = localPersistenceFailure;
       const checkpointTerminalStatus = !latestCheckpoint
         ? 'FAILED' as const
         : !terminalError
@@ -448,6 +455,7 @@ export async function POST(req: NextRequest) {
       if (finalJob?.document) {
         await persistenceChain;
         await persistCheckpoint(finalJob.document, finalJob.percentage, finalJob.terminalStatus || null);
+        if (localPersistenceFailure && !finalJob.warnings.includes('DESKTOP_ARTIFACT_PERSISTENCE_FAILED')) finalJob.warnings.push('DESKTOP_ARTIFACT_PERSISTENCE_FAILED');
       }
       console.log(`[GenerationLifecycle] jobId=${job.jobId} phase=terminal state=${finalJob?.status || 'failed'} progress=${finalJob?.percentage ?? 100} provider=${finalJob?.aiProvider || ''} attempt= durationMs=${Date.now() - job.startedAt}`);
     }
@@ -470,14 +478,14 @@ export async function POST(req: NextRequest) {
 // y legacy sync para tests que hacen POST y esperan document directo: si cliente envía ?sync=1, se ejecuta sync
 export async function GET(req: NextRequest) {
   // El job contiene el documento completo — exige la MISMA identidad que POST/status.
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req);
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const jobId = url.searchParams.get('jobId');
   if (jobId) {
     const job = getGenerationJob(jobId) || await recoverGenerationJob(jobId);
-    if (!job || job.organizationId !== auth.context.organizationId || job.userId !== auth.context.userId) {
+    if (!job || !ownsExecution(job, auth.context)) {
       return NextResponse.json({ ok: false, error: 'JOB_NOT_FOUND' }, { status: 404 });
     }
     return NextResponse.json({

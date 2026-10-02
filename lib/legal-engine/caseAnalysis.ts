@@ -1,5 +1,6 @@
 import { AnalyzedClaim, AnalyzedFact, SourceReference, UploadedSourceDocument } from './types';
 import type { RichCaseAnalysis } from './case-extraction/types';
+import { buildDraftingProjection } from './draftingPropagation';
 import {
   extractAnonymizedField,
   extractPartyField,
@@ -165,7 +166,28 @@ export interface CaseAnalysis {
 export function applyInstructionSupportedRichFields(
   richCaseAnalysis: RichCaseAnalysis,
   userInstruction: string,
+  sources: UploadedSourceDocument[] = [],
 ): RichCaseAnalysis {
+  richCaseAnalysis = {
+    ...richCaseAnalysis,
+    draftingProjection: buildDraftingProjection(richCaseAnalysis, userInstruction, sources),
+  };
+  const explicitFacts = richCaseAnalysis.draftingProjection!.factResponses.filter(f =>
+    f.clientPosition && f.responseScope === 'FACT' && (f.responseType === 'ADMIT' || f.responseType === 'DENY'));
+  if (explicitFacts.length) {
+    const previousConfirmed = richCaseAnalysis.clientPosition.status === 'CONFIRMED';
+    richCaseAnalysis = {
+      ...richCaseAnalysis,
+      clientPosition: {
+        status:'CONFIRMED', source:'CLIENT_POSITION',
+        propositionIds:[...new Set([...(previousConfirmed ? richCaseAnalysis.clientPosition.propositionIds : []), ...explicitFacts.map(f => f.sourceFactId)])],
+        provenance:[...(previousConfirmed ? richCaseAnalysis.clientPosition.provenance : []), ...explicitFacts.map(f => createSourceProvenance({
+          sourceId:f.clientPosition!.sourceId, sourceType:'ATTORNEY_INSTRUCTION', excerpt:f.clientPosition!.text,
+          extractionMethod:'MANUAL_INPUT', confidence:1, inferenceLevel:'LITERAL',
+        }))],
+      },
+    };
+  }
   if (richCaseAnalysis.clientPosition.status !== 'UNKNOWN'
     || !/\b(?:combat\w*|impugn\w*|apelaci[oó]n|recurr\w*)\b/i.test(userInstruction)
     || !/\b(?:sentencia|resoluci[oó]n|auto|determinaci[oó]n)\b/i.test(userInstruction)) {
@@ -807,10 +829,11 @@ export function reconstructCaseAnalysis(
   // position about the requested work, not a factual admission about every
   // extracted fact. Preserve it so the pending-data resolver does not ask for
   // a posture that the user already supplied.
-  const instructionSupportedRich = applyInstructionSupportedRichFields(richCaseAnalysis, userInstruction);
+  const instructionSupportedRich = applyInstructionSupportedRichFields(richCaseAnalysis, userInstruction, sources);
   if (instructionSupportedRich !== richCaseAnalysis) {
     richCaseAnalysis.clientPosition = instructionSupportedRich.clientPosition;
     richCaseAnalysis.missingData = instructionSupportedRich.missingData;
+    richCaseAnalysis.draftingProjection = instructionSupportedRich.draftingProjection;
   }
 
   // 1. Partes procesales reales

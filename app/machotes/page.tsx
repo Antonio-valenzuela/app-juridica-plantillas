@@ -31,6 +31,7 @@ import { extractPartyField, extractAuthorityLabeled, extractInstitutionalAuthori
 import { useLegalWorkspaceContext } from '@/context/LegalWorkspaceContext';
 import { buildWorkspaceSnapshot, applyLegalEdits } from '@/lib/workspace/legalEditContract';
 import { extractAgendaEvents, readAgendaEvents, synchronizeDocumentAgenda, writeAgendaEvents } from '@/lib/workspace/agenda';
+import { synchronizeWorkspaceAgenda } from '@/lib/workspace/agendaClient';
 import { MATTERS, JURISDICTIONS, DOCUMENT_TYPES, CUSTOM_VALUE_MAX_LENGTH, sanitizeCustomValue } from '@/lib/legal-taxonomy';
 import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
@@ -1904,6 +1905,21 @@ export default function MachotesPage() {
       let lastId: string | null = null;
       try { lastId = localStorage.getItem('jr_last_draft_id'); } catch { /* noop */ }
 
+      if (lastId) {
+        const savedResponse = await fetch(`/api/legal-drafts/${encodeURIComponent(lastId)}`);
+        if (savedResponse.status === 404) {
+          lastId = null;
+        } else {
+          if (!savedResponse.ok) throw new Error('No se pudo comprobar el borrador anterior antes de guardar.');
+          const saved = await savedResponse.json();
+          const savedDocumentId = saved?.draft?.structuredDoc?.id;
+          if (!saved?.ok || typeof savedDocumentId !== 'string') throw new Error('El borrador anterior no tiene identidad documental verificable.');
+          // A new generation/source has its own document id. Never PATCH a
+          // previous case just because its browser persistence pointer remains.
+          if (savedDocumentId !== draftDocument.id) lastId = null;
+        }
+      }
+
       // P1-2: no-op si el draft existe y el contenido es idéntico al último guardado.
       // La primera persistencia (sin draftId) siempre puede crear el draft vía POST.
       const signature = computeDraftSignature(draftDocument);
@@ -2010,6 +2026,9 @@ export default function MachotesPage() {
       }
       setUniversalViewMode('editor');
       setActiveNavTab('universal');
+      // An explicit case selection becomes the save target only after a
+      // successful, structurally valid reopen. Do not keep another case's id.
+      try { localStorage.setItem('jr_last_draft_id', data.draft.id); } catch { /* noop */ }
       setHasSavedDraft(true);
       lastSavedSignatureRef.current = computeDraftSignature(reopened);
       notify('success', `Borrador reabierto: "${data.draft.title}".`);
@@ -2046,14 +2065,12 @@ export default function MachotesPage() {
     const documentText = universalDoc.sections
       .flatMap((section) => section.content.map((block) => block.text))
       .join('\n');
-    const extracted = extractAgendaEvents(documentText, {
+    void synchronizeWorkspaceAgenda(documentText, {
       documentId: universalDoc.id,
       caseId: activeCase?.caseId,
       expediente: activeCase?.expedienteNumber || universalDoc.caseRefs?.expediente,
       referenceDate: universalDoc.updatedAt?.slice(0, 10),
-    });
-    const synchronized = synchronizeDocumentAgenda(readAgendaEvents(), universalDoc.id, extracted);
-    writeAgendaEvents(synchronized);
+    }).catch(error => setFeedback({ tone: 'warning', message: error.message }));
   }, [activeCase, universalDoc]);
 
   useEffect(() => () => { clearActiveDocument(); }, [clearActiveDocument]);
@@ -2588,7 +2605,11 @@ export default function MachotesPage() {
                   demandado: summary.counterparty || undefined,
                   matter: summary.matter || undefined,
                 });
-                await handleReopenDraft(summary.id);
+                if (summary.kind === 'LOCAL_CASE' && !summary.draftRecordId) {
+                  window.alert('Este expediente todavía no tiene borradores asociados. Puedes asociarlos desde Editar expediente.');
+                  return;
+                }
+                await handleReopenDraft(summary.draftRecordId || summary.id);
               }}
             />
           </div>

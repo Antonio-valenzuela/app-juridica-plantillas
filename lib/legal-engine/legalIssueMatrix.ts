@@ -6,6 +6,8 @@ import type {
 } from './coverageMatrix';
 import type { CaseAnalysis, LegalIssue } from './caseAnalysis';
 import type { RichCaseAnalysis, SourceProvenance } from './case-extraction/types';
+import type { LegalDraftingContract } from './draftingPropagation';
+import { createSourceProvenance } from './case-extraction/provenance';
 
 export type LegalIssueType =
   | 'CLAIM_ELEMENT'
@@ -32,7 +34,7 @@ export type LegalResearchStatus = 'NOT_REQUIRED' | 'NEEDS_RESEARCH' | 'SOURCE_CI
 export type ClientPositionStatus = 'NOT_REQUIRED' | 'CONFIRMED' | 'UNKNOWN';
 
 export interface LegalIssueSource {
-  mode: 'RICH_COVERAGE' | 'LEGACY_FALLBACK';
+  mode: 'RICH_COVERAGE' | 'LEGACY_FALLBACK' | 'SOURCE_REVIEW';
   coverageItemId: string;
   coverageCategory: CoverageCategory;
   sourceEntityType?: CoverageEntityType;
@@ -40,6 +42,9 @@ export interface LegalIssueSource {
 }
 
 export interface LegalIssueItem {
+  /** Review-only plan input. Does not create or satisfy substantive Coverage. */
+  planningOnly?: boolean;
+  legalDraftingContract?: LegalDraftingContract;
   id: string;
   issueType: LegalIssueType;
   question: string;
@@ -451,6 +456,35 @@ function buildRichLegalIssueMatrix(rich: RichCaseAnalysis, coverageMatrix: Cover
     .filter((issue): issue is LegalIssueItem => Boolean(issue))
     .map((issue) => enrichIssueDependencies(issue, coverageMatrix, rich, documentId))
     .sort((left, right) => left.id.localeCompare(right.id));
+  for (const issue of issues) {
+    if (issue.issueType === 'FACT_DISPUTE') {
+      issue.legalDraftingContract = rich.draftingProjection?.factResponses.find(f => issue.factIds.includes(f.sourceFactId));
+    } else if (issue.issueType === 'CLAIM_ELEMENT') {
+      const claim = rich.draftingProjection?.claimResponses.find(c => issue.claimIds.includes(c.claimId));
+      if (claim) issue.legalDraftingContract = {...claim, legalIssueIds:[issue.id]};
+    }
+  }
+  // Canonical decisions/acts must not vanish merely because they cannot yet
+  // satisfy Coverage. Keep a separately identified, blocked planning issue.
+  for (const challenge of rich.draftingProjection?.challenges || []) {
+    const provenance = createSourceProvenance({
+      sourceId: challenge.sourceSpan.sourceId, page: challenge.sourceSpan.page,
+      excerpt: challenge.sourceSpan.text, extractionMethod: 'MANUAL_INPUT',
+      confidence: 1, inferenceLevel: 'LITERAL',
+    });
+    issues.push({
+      id: `issue-review-${challenge.id}`, issueType: 'PROCEDURAL_ISSUE', question: challenge.proceduralQuestion,
+      planningOnly: true, legalDraftingContract: challenge,
+      source: { mode: 'SOURCE_REVIEW', coverageItemId: '', coverageCategory: 'PROCEDURAL_REQUIREMENT', sourceEntityIds: [challenge.decisionId] },
+      coverageItemIds: [], claimIds: [], factIds: [], evidenceMentionIds: [], evidenceOfferIds: [],
+      argumentIds: [], authorityMentionIds: [], conflictIds: [], missingDataIds: [],
+      challengedReasoningIds: (rich.decisionReasonings || []).some(d => d.id === challenge.decisionId) ? [challenge.decisionId] : [],
+      clientPositionStatus: challenge.clientPosition ? 'CONFIRMED' : 'UNKNOWN',
+      required: true, blocking: true, status: 'NEEDS_RESEARCH', researchStatus: 'NEEDS_RESEARCH',
+      provenance: [provenance], relationStatus: 'EXPLICIT',
+      statusReason: `NOT_GENERATABLE_DUE_TO_MISSING_INPUT:${challenge.missingData.join(',')}`,
+    });
+  }
   return {
     documentId,
     documentType: coverageMatrix.documentType || 'unknown',
@@ -544,6 +578,11 @@ export function validateLegalIssueMatrix(
   const issuesByCoverageId = new Set(matrix.issues.flatMap((issue) => issue.coverageItemIds));
 
   for (const issue of matrix.issues) {
+    if (issue.planningOnly && (issue.source.mode !== 'SOURCE_REVIEW'
+      || issue.coverageItemIds.length !== 0 || !issue.blocking || issue.status !== 'NEEDS_RESEARCH'
+      || !issue.legalDraftingContract || issue.provenance.length === 0)) {
+      errors.push(`INVALID_REVIEW_ONLY_ISSUE:${issue.id}`);
+    }
     const hasOrphanCoverage = issue.coverageItemIds.some((coverageId) => !coverageIds.has(coverageId));
     if (hasOrphanCoverage) {
       orphanIssueIds.push(issue.id);

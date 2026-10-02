@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireCaseAccess } from '@/lib/cases/access';
 import { markDocumentAsDraft, markDocumentAsSource } from '@/lib/legal-engine/documentLifecycle';
 import { stripTransientAuditTrace } from '@/lib/legal-engine/legalDocumentSanitizer';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,12 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    if (local?.ok) {
+      const draft = await local.store.find(id);
+      return NextResponse.json(draft ? { ok: true, draft } : { ok: false, error: 'Borrador no encontrado.' }, { status: draft ? 200 : 404 });
+    }
     const access = await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };
@@ -94,14 +101,16 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const access = await requireCaseAccess(request);
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    const access = local?.ok ? { ok: true as const, context: { organizationId: undefined, userId: undefined } } : await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };
 
     const body = await request.json();
     const parsed = updateDraftSchema.parse(body);
 
-    const existing = await prisma.legalDraft.findFirst({
+    const existing = local?.ok ? await local.store.find(id) : await prisma.legalDraft.findFirst({
       where: { id, organizationId: identity.organizationId, userId: identity.userId },
     });
 
@@ -116,9 +125,7 @@ export async function PATCH(
       ? normalizeSourceDocuments(parsed.sourceDocuments)
       : undefined;
 
-    const draft = await prisma.legalDraft.update({
-      where: { id },
-      data: {
+    const data = {
         ...(parsed.title ? { title: parsed.title.trim() } : {}),
         ...(parsed.templateId !== undefined ? { templateId: parsed.templateId } : {}),
         ...(parsed.matter !== undefined ? { matter: parsed.matter } : {}),
@@ -132,8 +139,17 @@ export async function PATCH(
         ...(parsed.validationResults !== undefined ? { validationResults: parsed.validationResults as any } : {}),
         ...(parsed.generationMetadata !== undefined ? { generationMetadata: stripAuditTraceFromMetadata(parsed.generationMetadata) as any } : {}),
         ...(parsed.status ? { status: parsed.status } : {}),
-      },
-    });
+      };
+    if (local?.ok && parsed.generationMetadata !== undefined && isRecord(existing.generationMetadata)
+      && isRecord(existing.generationMetadata.persistence)) {
+      // Editing the nested document does not create a new generation, nor erase
+      // the original recorded activity. Quality/readiness remain the new values.
+      data.generationMetadata = {
+        ...(isRecord(data.generationMetadata) ? data.generationMetadata : {}),
+        persistence: existing.generationMetadata.persistence,
+      };
+    }
+    const draft = local?.ok ? await local.store.update(id, data) : await prisma.legalDraft.update({ where: { id }, data });
 
     return NextResponse.json({ ok: true, draft });
   } catch (error: any) {
@@ -162,6 +178,12 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    if (local?.ok) {
+      const removed = await local.store.remove(id);
+      return NextResponse.json({ ok: removed }, { status: removed ? 200 : 404 });
+    }
     const access = await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const identity = { organizationId: access.context.organizationId, userId: access.context.userId };

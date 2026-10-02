@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess, ownsExecution } from '@/lib/security/workspaceExecutionAccess';
 import { cancelJob, getGenerationJob } from '@/lib/legal-engine/generationJobs';
 import { recoverGenerationJob } from '@/lib/legal-engine/generationJobPersistence';
 import { logger, generateRequestId } from '@/lib/logger';
@@ -14,7 +14,7 @@ const cancelSchema = z.object({
 
 export async function POST(req: NextRequest) {
   const requestId = generateRequestId();
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req);
   if (!auth.ok) return auth.response;
 
   const body = await req.json().catch(() => ({}));
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
 
   const job = getGenerationJob(parsed.data.jobId) || await recoverGenerationJob(parsed.data.jobId);
-  if (!job || job.organizationId !== auth.context.organizationId || job.userId !== auth.context.userId) {
+  if (!job || !ownsExecution(job, auth.context)) {
     return NextResponse.json({ ok: false, error: 'JOB_NOT_FOUND' }, { status: 404 });
   }
 

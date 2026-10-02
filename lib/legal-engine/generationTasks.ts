@@ -16,6 +16,7 @@
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
 import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { CaseAnalysis, LegalIssue } from './caseAnalysis';
+import type { LegalDraftingContract } from './draftingPropagation';
 import type { SectionPlan, IssuePlan, ClaimPlan, FactResponsePlan } from './pipeline';
 import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } from './coverageMatrix';
 import { buildLegalIssueMatrix, type LegalIssueItem, type LegalIssueMatrix } from './legalIssueMatrix';
@@ -76,6 +77,7 @@ export type GenerationTaskStatus =
   | 'fallback';
 
 export interface GenerationTask {
+  legalDraftingContract?: LegalDraftingContract;
   id: string;
   documentId?: string;
   sectionId: string;
@@ -243,6 +245,14 @@ export function buildGenerationTasksForSection(
   const tasks: GenerationTask[] = [];
   const sourceDocIds = doc.sourceDocuments?.map((s) => s.id).filter(Boolean);
   const finalizeTasks = (list: GenerationTask[]): GenerationTask[] => {
+    for (const task of list) {
+      task.legalDraftingContract = task.issuePlan?.legalDraftingContract
+        || task.factResponsePlan?.legalDraftingContract || task.claimPlan?.legalDraftingContract
+        || legalIssueMatrix?.issues.find(i => task.legalIssueIds?.includes(i.id))?.legalDraftingContract;
+      if (task.legalDraftingContract && 'claimId' in task.legalDraftingContract) {
+        task.legalDraftingContract = {...task.legalDraftingContract, legalIssueIds:[...(task.legalIssueIds || [])]};
+      }
+    }
     if (sourceDocIds && sourceDocIds.length > 0) {
       for (const t of list) {
         if (!t.sourceDocIds) {
@@ -365,7 +375,7 @@ export function buildGenerationTasksForSection(
         status: 'pending',
         order: (idx + 1) * 10,
         orderInParent: (idx + 1) * 10,
-        coverageItemIds: matchedCovIds.length > 0 ? matchedCovIds : (secPlan.coverageItemIds || [issueId]),
+        coverageItemIds: canonicalIssue?.planningOnly ? [] : matchedCovIds.length > 0 ? matchedCovIds : (secPlan.coverageItemIds || [issueId]),
         factIds: relatedFacts,
         evidenceIds: relatedEv,
         authorityIds,

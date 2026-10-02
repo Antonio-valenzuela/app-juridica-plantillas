@@ -8,6 +8,7 @@
 
 import type { UniversalLegalDocument } from './types';
 import { enqueueGenerationJobPersistence } from './generationJobPersistence';
+import { ownsExecution, type ExecutionOwner } from '@/lib/security/workspaceExecutionAccess';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -19,8 +20,9 @@ export type GenerationTerminalStatus = 'COMPLETED' | 'COMPLETED_WITH_WARNINGS' |
 
 export interface GenerationJob {
   jobId: string;
-  organizationId: string;
-  userId: string;
+  organizationId?: string;
+  userId?: string;
+  desktopOwnerId?: string;
   status: GenerationJobStatus;
   /** Compatibilidad legacy: status conserva completed/failed/cancelled. */
   terminalStatus?: GenerationTerminalStatus;
@@ -81,15 +83,16 @@ import { randomUUID as nodeRandomUUID } from 'crypto';
 function genId(): string {
   try { return (globalThis as any).crypto?.randomUUID?.() || nodeRandomUUID(); } catch { return `${Date.now()}-${Math.random().toString(36).slice(2,8)}`; }
 }
-export function createGenerationJob(input: { organizationId?: string; userId?: string; fingerprint?: string | null; idempotencyKey?: string | null; total?: number; stage?: string }): GenerationJob {
+export function createGenerationJob(input: ExecutionOwner & { fingerprint?: string | null; idempotencyKey?: string | null; total?: number; stage?: string }): GenerationJob {
   cleanup();
   const jobId = genId();
   const now = Date.now();
   const total = input.total ?? 0;
   const job: GenerationJob = {
     jobId,
-    organizationId: input.organizationId || 'unknown-organization',
-    userId: input.userId || 'unknown-user',
+    organizationId: input.desktopOwnerId ? undefined : input.organizationId || 'unknown-organization',
+    userId: input.desktopOwnerId ? undefined : input.userId || 'unknown-user',
+    desktopOwnerId: input.desktopOwnerId,
     status: 'processing',
     terminalStatus: undefined,
     total,
@@ -139,12 +142,12 @@ export function restoreGenerationJob(job: GenerationJob): GenerationJob {
 export function findActiveJobByFingerprint(
   fingerprint: string | null,
   idempotencyKey: string | null,
-  owner?: { organizationId: string; userId: string },
+  owner?: ExecutionOwner,
 ): GenerationJob | undefined {
   cleanup();
   for (const j of JOBS.values()) {
     if (j.status !== 'processing') continue;
-    if (owner && (j.organizationId !== owner.organizationId || j.userId !== owner.userId)) continue;
+    if (owner && !ownsExecution(j, owner)) continue;
     if (idempotencyKey && j.idempotencyKey === idempotencyKey) return j;
     if (fingerprint && j.fingerprint === fingerprint) return j;
   }

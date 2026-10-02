@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSection } from '@/lib/legal-engine/pipeline';
 import { UniversalLegalDocument } from '@/lib/legal-engine/types';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess, executionOwnerKey } from '@/lib/security/workspaceExecutionAccess';
 import { readDocumentExportReadiness } from '@/lib/legal-engine/documentLifecycle';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
@@ -12,9 +12,9 @@ export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const requestId = req.headers.get('x-request-id')?.trim() || generateRequestId();
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req);
   if (!auth.ok) return auth.response;
-  const rateLimit = checkRequestRateLimit(req, 'generation-section', 20, `${auth.context.organizationId}:${auth.context.userId}`);
+  const rateLimit = checkRequestRateLimit(req, 'generation-section', 20, executionOwnerKey(auth.context));
   if (!rateLimit.ok) return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas regeneraciones. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
 
   try {

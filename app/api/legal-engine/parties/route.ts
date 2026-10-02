@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { logger, generateRequestId } from '@/lib/logger';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { localPartiesRead, localPartiesDelete, saveLocalParty } from '@/lib/workspace/desktopParties';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,6 +26,8 @@ function errorResponse(error: string, status = 400) {
 
 // GET /api/legal-engine/parties?caseKey=...
 export async function GET(req: NextRequest) {
+  const local = await localPartiesRead(req);
+  if (local) return local;
   const auth = await requireLawyerAccess(req);
   if (!auth.ok) return auth.response;
 
@@ -59,6 +63,16 @@ const partyPostSchema = z.object({
 // Upsert lógico por (organizationId, caseKey, role).
 // Regla de prioridad: una parte confirmada manualmente nunca se degrada por una detectada.
 export async function POST(req: NextRequest) {
+  const local = desktopDraftRepository(req);
+  if (local) {
+    if (!local.ok) return local.response;
+    const parsed = partyPostSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) return errorResponse('INVALID_BODY');
+    const data = parsed.data;
+    if (!data.caseKey.trim()) return errorResponse('MISSING_CASE_KEY');
+    return saveLocalParty({ caseKey: data.caseKey.trim(), role: data.role, name: data.name.trim(), source: data.source,
+      confidence: data.confidence == null ? null : Math.round(data.confidence) });
+  }
   const auth = await requireLawyerAccess(req);
   if (!auth.ok) return auth.response;
 
@@ -135,6 +149,8 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/legal-engine/parties?id=...
 export async function DELETE(req: NextRequest) {
+  const local = await localPartiesDelete(req);
+  if (local) return local;
   const auth = await requireLawyerAccess(req);
   if (!auth.ok) return auth.response;
 

@@ -54,6 +54,7 @@ import { getDocumentStrategy } from './documentStrategies';
 import { hasSeedMarkers, stripSeedMarkers, hasUnresolvedFactualDependencies } from './seedMarkers';
 import { CoverageMatrix, buildCoverageMatrix, validateCoverageAndPlanInvariants } from './coverageMatrix';
 import { buildLegalIssueMatrix, type LegalIssueMatrix } from './legalIssueMatrix';
+import { renderDraftingReview, type LegalDraftingContract } from './draftingPropagation';
 import { sha256ResearchValue } from './legal-research/canonical';
 import { resolveLegalRegime, type LegalRegimeInput } from './legal-research/regimeResolution';
 import { buildLegalResearchRequest, normalizeResearchQuery } from './legal-research/researchRequest';
@@ -661,6 +662,7 @@ function enforceContestacionRoleIntegrity(
 }
 
 export interface IssuePlan {
+  legalDraftingContract?: LegalDraftingContract;
   id?: string;
   issueId?: string;
   legalIssueIds?: string[];
@@ -683,6 +685,7 @@ export interface IssuePlan {
 }
 
 export interface ClaimPlan {
+  legalDraftingContract?: LegalDraftingContract;
   id?: string;
   claimId?: string;
   claimNumber?: string;
@@ -699,6 +702,7 @@ export interface ClaimPlan {
 }
 
 export interface FactResponsePlan {
+  legalDraftingContract?: LegalDraftingContract;
   id?: string;
   factId?: string;
   factNumber?: string | number;
@@ -1009,6 +1013,8 @@ export function buildDraftingPlan(
     ? buildLegalIssueMatrix({ caseAnalysis, coverageMatrix })
     : undefined);
   const isContestacion = isContestacionType(doc.documentType) || /contestaci[oó]n/i.test(doc.documentTypeLabel || doc.documentType);
+  const reviewSectionId = doc.sections.find(s => s.type === 'argument'
+    && /agravio|concepto.*violaci/i.test(s.title))?.id;
 
   // RichCaseAnalysis is canonical whenever present. If it produces no linked
   // issue, do not resurrect unrelated legacy issues: their IDs are outside
@@ -1062,7 +1068,8 @@ export function buildDraftingPlan(
     const isObjetoSec = /objeto.*escrito/i.test(sec.title);
     const isArgumentOrAgravio = !isPrestacionesSec && !isHechosSec && !isObjetoSec && (sec.type === 'argument' || /agravio|concepto.*violaci/i.test(sec.title));
     const richIssuesForSection = (legalIssueMatrix?.issues || [])
-      .filter((issue) => issue.coverageItemIds.some((id) => coverageItemIds.includes(id)));
+      .filter((issue) => issue.coverageItemIds.some((id) => coverageItemIds.includes(id))
+        || (issue.planningOnly && sec.id === reviewSectionId));
     if (isArgumentOrAgravio && isRich && richIssuesForSection.length > 0) {
       const richIssues = richIssuesForSection;
       legalIssues = richIssues.map((issue) => issue.question);
@@ -1080,6 +1087,7 @@ export function buildDraftingPlan(
           evidenceIds: [...issue.evidenceMentionIds, ...issue.evidenceOfferIds],
           factIds: [...issue.factIds],
           relatedCoverageItemIds: matchingCoverageIds,
+          legalDraftingContract: issue.legalDraftingContract,
         };
       });
       if (issuePlans.length > 0) {
@@ -1143,6 +1151,7 @@ export function buildDraftingPlan(
               claimId: claim.id,
               claimNumber: String(idx + 1),
               claimText: claim.requestedRelief,
+              legalDraftingContract: caseAnalysis?.richCaseAnalysis?.draftingProjection?.claimResponses.find(c => c.claimId === claim.id),
               expectedParagraphs: 2,
               relatedCoverageItemIds: matchingCov ? [matchingCov.id] : [],
             };
@@ -1202,6 +1211,7 @@ export function buildDraftingPlan(
               factId: fact.id,
               factNumber: String(idx + 1),
               factText: fact.proposition,
+              legalDraftingContract: caseAnalysis?.richCaseAnalysis?.draftingProjection?.factResponses.find(f => f.sourceFactId === fact.id),
               supportingEvidenceIds,
               relatedCoverageItemIds: matchingCov ? [matchingCov.id] : [],
             };
@@ -1497,6 +1507,17 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
 }
 
 function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocument, caseAnalysis?: CaseAnalysis): string {
+  const projection = caseAnalysis?.richCaseAnalysis?.draftingProjection;
+  if (projection && /contestaci/i.test(doc.documentType)) {
+    if (/hechos/i.test(block.title) && projection.factResponses.length) return projection.factResponses.map(renderDraftingReview).join('\n\n');
+    if (/prestaci|pretensi/i.test(block.title) && projection.claimResponses.length) return projection.claimResponses.map(renderDraftingReview).join('\n\n');
+  }
+  if (projection?.challenges.length && /agravio|concepto.*violaci/i.test(block.title)) {
+    return projection.challenges.map(renderDraftingReview).join('\n\n');
+  }
+  if (projection?.challenges.length && block.sectionType === 'petition') {
+    return projection.challenges.map(c => `Petición expresamente solicitada: ${c.requestedEffect?.text || 'PENDIENTE: efecto solicitado por el abogado'}.\nProcedencia, plazo y fundamento pendientes de verificación oficial.`).join('\n\n');
+  }
   const isNewWriting = doc.flow === 'NEW_WRITING';
   const writingObjective = doc.intake?.objective || doc.intake?.requestedRelief;
   const isCommercialEnforcementDoc = doc.documentType === 'demanda_ejecutiva_mercantil';
@@ -2912,6 +2933,9 @@ export async function generateSection(
         const eligibleTasks = tasks.filter((task) => {
           const issueId = task.legalIssueIds?.[0] || task.issueId || task.targetIssueId;
           const issue = issueId ? doc.legalIssueMatrix!.issues.find((candidate) => candidate.id === issueId) : undefined;
+          // Review-only projections cannot become provider generation through
+          // research reentry: they still require substantive lawyer review.
+          if (issue?.planningOnly) return false;
           // REFERENCE_ONLY contract: if ALL coverage items for this task have satisfactionPolicy === 'REFERENCE_ONLY',
           // the task must NOT invoke the provider. The section is materialized from source provenance only.
           const taskCoverageItemIds = task.coverageItemIds || [];
@@ -2944,6 +2968,20 @@ export async function generateSection(
             ...researchInputs,
             formal: isFormalIssueTask(task, sec),
           }));
+        // Tasks excluded before the executor still have a real terminal state.
+        // This is trace instrumentation only, not an accepted provider result.
+        for (const outcome of blockedOutcomes) {
+          const task = tasks.find(t => t.id === outcome.taskId)!;
+          const issue = doc.legalIssueMatrix.issues.find(i => task.legalIssueIds?.includes(i.id));
+          trace?.recordTaskExecution({
+            taskId:task.id, taskType:task.taskType || task.type, sectionId:sec.id,
+            coverageItemIds:task.coverageItemIds || [], legalIssueIds:task.legalIssueIds || [],
+            evidenceIds:task.evidenceIds || [], factIds:task.factIds || [], claimIds:task.claimIds || [],
+            startedAt:new Date().toISOString(), completedAt:new Date().toISOString(), durationMs:0,
+            continuationCount:0, responseStatus:'BLOCKED', retryCount:0, fallbackUsed:false,
+            outputSizeBytes:0, error:issue?.planningOnly ? issue.statusReason : outcome.validation?.errors.join('; '),
+          });
+        }
         const allOutcomes = [...issueOutcomes, ...blockedOutcomes];
         const outcomesByTaskId = new Map(allOutcomes.map((o) => [o.taskId, o]));
         const plannedTasks = tasks.length;
@@ -3057,6 +3095,20 @@ export async function generateSection(
         const assembled = assembleIssueDraftBlocks(sec, allOutcomes, trace);
         if (assembled.blocks.length > 0) {
           sec.content = assembled.blocks;
+        } else if (tasks.some(t => t.legalDraftingContract)) {
+          // Preserve each unit as a review-only block. None of these blocks
+          // carries Coverage IDs or gets a substantive Coverage transition.
+          sec.content = tasks.filter(t => t.legalDraftingContract).map(task => {
+            const block = createContentBlock(renderDraftingReview(task.legalDraftingContract!), 'GENERATED_ARGUMENT', {provenance:'TEMPLATE_STRUCTURE'});
+            block.id = `review-block-${task.id}`;
+            block.generationStatus = 'partial'; block.generationRequirement = 'AI_REQUIRED';
+            block.fallbackStatus = 'DETERMINISTIC_FALLBACK'; block.issueDraftValidationStatus = 'VALID_NON_FINAL';
+            block.generationTaskId = task.id; block.generationTaskIds = [task.id];
+            block.legalIssueIds = task.legalIssueIds || []; block.coverageItemIds = [];
+            block.factIds = task.factIds || []; block.evidenceIds = task.evidenceIds || [];
+            trace?.recordDraftBlock(block, undefined, sec.id);
+            return block;
+          });
         } else {
           const fallbackText = isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
             ? getRevisionAmparoDirectoSectionText(doc, sec.title, caseAnalysis)
@@ -3507,7 +3559,7 @@ export async function runGenerationPipeline(
     const caseAnalysis: CaseAnalysis = mergedCaseAnalysis.richCaseAnalysis
       ? {
           ...mergedCaseAnalysis,
-          richCaseAnalysis: applyInstructionSupportedRichFields(mergedCaseAnalysis.richCaseAnalysis, userPrompt),
+          richCaseAnalysis: applyInstructionSupportedRichFields(mergedCaseAnalysis.richCaseAnalysis, userPrompt, sources),
         }
       : mergedCaseAnalysis;
     // El modo seguro de escritura desde cero debe llegar explícitamente en el

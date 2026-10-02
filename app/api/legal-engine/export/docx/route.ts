@@ -3,25 +3,28 @@ import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { UniversalLegalDocument } from '@/lib/legal-engine/types';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { isExportGuardError, prepareUniversalDocumentForExport } from '@/lib/legal-engine/exportGuards';
-import { resolveDocumentOutputFilename } from '@/lib/legal-engine/outputFilename';
+import { resolveDocumentOutputFilename, buildDownloadContentDisposition } from '@/lib/legal-engine/outputFilename';
 import { documentBelongsToPrincipal } from '@/lib/legal-engine/documentOwnership';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
 import { resolveExportMode } from '@/lib/legal-engine/exportModes';
 import { isLocalSameOriginDraftExportRequest, UNSAVED_DRAFT_EXPORT_HEADER } from '@/lib/security/localDraftExport';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const requestId = req.headers.get('x-request-id')?.trim() || generateRequestId();
+  const local = desktopDraftRepository(req);
+  if (local && !local.ok) return local.response;
   const unsavedDraftRequested = req.headers.get(UNSAVED_DRAFT_EXPORT_HEADER) === 'true';
   if (unsavedDraftRequested && !isLocalSameOriginDraftExportRequest(req)) {
     return NextResponse.json({ ok: false, errorCode: 'UNSAVED_DRAFT_EXPORT_LOCAL_ONLY', message: 'La exportación no guardada solo está disponible desde esta aplicación local.' }, { status: 403 });
   }
   let principal: { organizationId: string; userId: string } | null = null;
-  if (!unsavedDraftRequested) {
+  if (!unsavedDraftRequested && !local?.ok) {
     const auth = await requireLawyerAccess(req);
     if (!auth.ok) return auth.response;
     principal = auth.context;
@@ -49,13 +52,24 @@ export async function POST(req: NextRequest) {
     if (!exportMode) {
       return NextResponse.json({ ok: false, errorCode: 'INVALID_EXPORT_MODE', message: 'El modo de exportación debe ser DRAFT o FINAL.' }, { status: 400 });
     }
+    // Local persistence has a separate authenticated DRAFT contract. It does
+    // not fabricate a WEB principal or authorize FINAL.
+    if (local?.ok && exportMode !== 'DRAFT') {
+      return NextResponse.json({ ok: false, error: 'DESKTOP_FINAL_REVIEW_REQUIRED' }, { status: 422 });
+    }
     if (unsavedDraftRequested && exportMode !== 'DRAFT') {
       return NextResponse.json({ ok: false, errorCode: 'UNSAVED_DRAFT_EXPORT_REQUIRES_DRAFT', message: 'La exportación no guardada solo admite el modo DRAFT.' }, { status: 400 });
     }
     if (typeof doc.id !== 'string') {
       return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
     }
-    if (!unsavedDraftRequested) {
+    if (local?.ok) {
+      const owned = (await local.store.list()).some(record => {
+        const document = record.structuredDoc;
+        return document && typeof document === 'object' && 'id' in document && document.id === doc.id;
+      });
+      if (!owned) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
+    } else if (!unsavedDraftRequested) {
       if (!principal) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
       let belongsToPrincipal: boolean;
       try {
@@ -106,7 +120,7 @@ export async function POST(req: NextRequest) {
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-         'Content-Disposition': `attachment; filename="${fileName}.docx"`,
+        'Content-Disposition': buildDownloadContentDisposition(`${fileName}.docx`),
         'Content-Length': String(buffer.length),
         'X-Export-Mode': exportMode,
         ...(unsavedDraftRequested ? { 'X-Export-Persistence': 'UNSAVED_LOCAL_DRAFT' } : {}),

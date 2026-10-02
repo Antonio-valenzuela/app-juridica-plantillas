@@ -14,6 +14,9 @@ import {
 import fs from 'fs';
 import path from 'path';
 import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { desktopTemplates, createDesktopTemplate } from '@/lib/workspace/desktopTemplateRepository';
+import type { Prisma } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -73,6 +76,14 @@ const customTemplateJsonSchema = z.object({
 
 export async function GET(request: NextRequest) {
   try {
+    const local = desktopDraftRepository(request);
+    if (local) {
+      if (!local.ok) return local.response;
+      const query = new URL(request.url).searchParams.get('q')?.trim().toLocaleLowerCase() || '';
+      const templates = filterVisibleTemplates(await desktopTemplates().list()).filter(template => !query
+        || `${template.title} ${template.category || ''} ${template.content || ''}`.toLocaleLowerCase().includes(query));
+      return NextResponse.json({ ok: true, success: true, storage: 'DESKTOP_LOCAL', templates });
+    }
     const access = await requireCaseAccess(request);
     // Sin identidad resuelta NO se lista nada (evita exponer plantillas ajenas).
     if (!access.ok) return access.response;
@@ -158,10 +169,17 @@ export async function POST(request: NextRequest) {
   try {
     // Identidad OBLIGATORIA: sin workspace resuelto no se crea nada bajo
     // identificadores falsos (rompería el scoping y la trazabilidad).
-    const access = await requireCaseAccess(request);
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    const access = local?.ok ? { ok: true as const, context: { organizationId: undefined, userId: undefined } } : await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const orgId = access.context.organizationId;
     const userId = access.context.userId;
+    const persistTemplate = async (data: Record<string, unknown>) => {
+      if (local?.ok) return createDesktopTemplate(data);
+      if (!orgId || !userId) throw new Error('TEMPLATE_OWNER_MISSING');
+      return prisma.legalTemplate.create({ data: data as Prisma.LegalTemplateUncheckedCreateInput });
+    };
 
     const contentType = request.headers.get('content-type') || '';
 
@@ -317,8 +335,7 @@ export async function POST(request: NextRequest) {
       const baseSlug = slugify(title) || 'machote';
       const slug = `${baseSlug}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
-      const template = await prisma.legalTemplate.create({
-        data: {
+      const template = await persistTemplate({
           organizationId: orgId,
           createdBy: userId,
           title,
@@ -340,7 +357,6 @@ export async function POST(request: NextRequest) {
           visibility: 'ORG',
           version: 1,
           indexed: false,
-        },
       });
 
       return NextResponse.json(
@@ -392,8 +408,7 @@ export async function POST(request: NextRequest) {
     const baseSlug = slugify(parsed.title) || 'machote';
     const slug = `${baseSlug}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
-    const template = await prisma.legalTemplate.create({
-      data: {
+    const template = await persistTemplate({
         organizationId: orgId,
         createdBy: userId,
         title: parsed.title.trim(),
@@ -418,7 +433,6 @@ export async function POST(request: NextRequest) {
         visibility: parsed.visibility,
         version: 1,
         indexed: false,
-      },
     });
 
     return NextResponse.json(

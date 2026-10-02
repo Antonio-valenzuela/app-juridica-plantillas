@@ -19,6 +19,45 @@ const payload = {
 };
 
 describe('AnalyticsPanel', () => {
+  it('distinguishes section and extension activity from unmeasured global provider requests and tokens', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
+    render(<AnalyticsPanel />);
+    fireEvent.click(await screen.findByText('Diagnóstico avanzado'));
+    expect(await screen.findByText('Actividad de secciones y extensión:')).toBeVisible();
+    expect(screen.getByText('Solicitudes totales al proveedor:')).toHaveTextContent('No medido');
+    expect(screen.getByText('Tokens globales:')).toHaveTextContent('No medido');
+  });
+  it('gives a measured activity bar an absolute height so an auto-height wrapper cannot collapse it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
+    render(<AnalyticsPanel />);
+    const bar = await screen.findByTestId('analytics-daily-bar-2026-09-23');
+    expect(bar.style.height).toMatch(/^[1-9]\d*px$/);
+  });
+  it('does not display zero extension outcomes when no outcome was measured', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...payload, hasActivity: true,
+      observations: { pages: 0, qualityGate: 0, validation: 0, extensionOutcome: 0 }, extension: { achieved: 0, unmet: 0, withoutTarget: 5 },
+    }) }));
+    render(<AnalyticsPanel />);
+    expect((await screen.findByText('Objetivo alcanzado')).parentElement).toHaveTextContent('No medido');
+    expect(screen.getByText('Objetivo no alcanzado').parentElement).toHaveTextContent('No medido');
+  });
+  it('does not report zero PASS/FAIL when no quality or validation observations exist', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...payload,
+      observations: { pages: 0, qualityGate: 0, validation: 0 },
+      quality: { ...payload.quality, qualityGatePass: 0, qualityGateFail: 0, validationPass: 0, validationFail: 0 },
+    }) }));
+    render(<AnalyticsPanel />);
+    expect(await screen.findByText('Quality gate')).toHaveTextContent('Sin datos');
+    expect(screen.getByText('Validación')).toHaveTextContent('Sin datos');
+  });
+  it('shows Sin datos rather than a fake zero for unmeasured generated pages', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...payload,
+      totals: { ...payload.totals, generatedPages: 0 }, observations: { pages: 0, qualityGate: 0, validation: 0 },
+    }) }));
+    render(<AnalyticsPanel />);
+    const label = await screen.findByText('Páginas generadas');
+    expect(label.parentElement).toHaveTextContent('Sin datos');
+  });
   it('renders real KPI/chart values and distinguishes NEEDS_REVIEW from FAILED', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
     render(<AnalyticsPanel />);

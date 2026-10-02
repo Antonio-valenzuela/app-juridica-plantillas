@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DESKTOP_MANUAL_COOKIE, getRuntimeMode, requireDesktopLocalAccess } from '@/lib/security/desktopLocalAccess';
+import { DESKTOP_WORKSPACE_COOKIE } from '@/lib/workspace/desktopDraftRepository';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,12 @@ export async function POST(request: NextRequest) {
   const response = new NextResponse(null, { status: 204, headers: { 'Cache-Control': 'private, no-store' } });
   response.cookies.set(DESKTOP_MANUAL_COOKIE, process.env.LEX_DESKTOP_CAPABILITY!, {
     httpOnly: true, sameSite: 'strict', path: '/api/operational-manual',
+    expires: new Date(Number(process.env.LEX_DESKTOP_EXPIRES_AT)),
+  });
+  // Separate cookie: the original manual-only contract remains unchanged.
+  // Only explicitly integrated local repositories accept this capability.
+  response.cookies.set(DESKTOP_WORKSPACE_COOKIE, process.env.LEX_DESKTOP_CAPABILITY!, {
+    httpOnly: true, sameSite: 'strict', path: '/api',
     expires: new Date(Number(process.env.LEX_DESKTOP_EXPIRES_AT)),
   });
   return response;

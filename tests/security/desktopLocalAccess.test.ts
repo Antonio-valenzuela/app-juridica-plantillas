@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomBytes, createHash } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { NextRequest } from 'next/server';
 const db = vi.hoisted(() => ({ organization: { findUnique: vi.fn(), create: vi.fn() }, user: { findUnique: vi.fn(), create: vi.fn() }, legalTemplate: { findFirst: vi.fn() } }));
 vi.mock('@/lib/prisma', () => ({ prisma: db }));
@@ -11,7 +14,10 @@ import { GET as templateFile } from '@/app/api/templates/files/[filename]/route'
 import { GET as profile } from '@/app/api/workspace/lawyer-profile/route';
 
 let capability = '';
-beforeEach(() => {
+let root: string;
+beforeEach(async () => {
+  root = await mkdtemp(path.join(os.tmpdir(), 'lex-access-'));
+  vi.stubEnv('LEXPLANTILLAS_STORAGE_ROOT', root);
   clearCachedLawyerContext(); vi.clearAllMocks();
   capability = randomBytes(32).toString('hex');
   vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('DEMO_MODE_ENABLED', 'false');
@@ -21,7 +27,7 @@ beforeEach(() => {
   vi.stubEnv('LEX_DESKTOP_EXPIRES_AT', String(Date.now() + 60000));
   db.organization.findUnique.mockRejectedValue(new Error('TLS connection unavailable'));
 });
-afterEach(() => { clearCachedLawyerContext(); vi.unstubAllEnvs(); });
+afterEach(async () => { clearCachedLawyerContext(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 const request = (path: string, headers: Record<string,string> = {}) => new NextRequest(`http://127.0.0.1:3200${path}`, { headers });
 
 describe('launcher-authorized desktop manual access', () => {
@@ -69,8 +75,10 @@ describe('launcher-authorized desktop manual access', () => {
     expect(access.ok).toBe(false);
     if (!access.ok) expect(access.response.status).toBe(503);
     const template = await templateFile(request('/api/templates/files/client.pdf', headers), { params:Promise.resolve({filename:'client.pdf'}) });
-    expect(template.status).toBe(503);
-    expect((await profile(request('/api/workspace/lawyer-profile',headers))).status).toBe(503);
+    expect(template.status).toBe(404);
+    expect((await profile(request('/api/workspace/lawyer-profile',headers))).status).toBe(200);
+    expect((await profile(request('/api/workspace/lawyer-profile'))).status).toBe(403);
+    expect((await templateFile(request('/api/templates/files/client.pdf'), { params:Promise.resolve({filename:'client.pdf'}) })).status).toBe(403);
     expect(db.legalTemplate.findFirst).not.toHaveBeenCalled();
     expect(db.organization.create).not.toHaveBeenCalled(); expect(db.user.create).not.toHaveBeenCalled();
   });

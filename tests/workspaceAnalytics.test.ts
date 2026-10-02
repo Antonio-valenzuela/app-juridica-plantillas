@@ -3,6 +3,18 @@ import { buildAnalyticsDataset, type AnalyticsDraftProjection, type AnalyticsJob
 
 const now = new Date('2026-09-24T12:00:00.000Z');
 
+it('distinguishes unmeasured provider/HTTP/source data from explicit measured zeros', () => {
+  const unknown = buildAnalyticsDataset({ drafts: [{ id: 'unknown', createdAt: now, updatedAt: now, sourceDocuments: [{ id: 'source' }] }], jobs: [], rangeDays: 7, now });
+  expect(unknown.advanced.ocrSuccessRate).toBeNull();
+  expect(unknown.observations?.providerAttempts).toBe(0);
+  expect(unknown.observations?.httpErrors).toBe(0);
+  const measured = buildAnalyticsDataset({ drafts: [{ id: 'measured', createdAt: now, updatedAt: now,
+    generationMetadata: { httpErrors: 0, generationExtension: { metrics: { llmCalls: 0 } } } }], jobs: [], rangeDays: 7, now });
+  expect(measured.observations?.httpErrors).toBe(1);
+  expect(measured.observations?.providerAttempts).toBe(1);
+  expect(measured.advanced.httpErrors).toBe(0);
+});
+
 function draft(input: Partial<AnalyticsDraftProjection> & Pick<AnalyticsDraftProjection, 'id'>): AnalyticsDraftProjection {
   return {
     id: input.id,
@@ -33,6 +45,14 @@ function job(input: Partial<AnalyticsJobProjection> & Pick<AnalyticsJobProjectio
 }
 
 describe('workspace analytics aggregation', () => {
+  it('distinguishes unavailable page and quality observations from measured zero', () => {
+    const unknown = buildAnalyticsDataset({ now, rangeDays: 30, jobs: [], drafts: [draft({ id: 'unknown', validationResults: {} })] });
+    expect(unknown.observations).toMatchObject({ pages: 0, qualityGate: 0, validation: 0 });
+    const measured = buildAnalyticsDataset({ now, rangeDays: 30, jobs: [], drafts: [draft({ id: 'measured',
+      generationMetadata: { qualityGate: { passed: false }, generationExtension: { actualPages: 0 } },
+    })] });
+    expect(measured.observations).toMatchObject({ pages: 1, qualityGate: 1, validation: 1 });
+  });
   it('deduplicates a LegalDraft and its GenerationJob into one generation', () => {
     const result = buildAnalyticsDataset({
       now,

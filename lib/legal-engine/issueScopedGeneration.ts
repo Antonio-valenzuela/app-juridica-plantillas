@@ -2,6 +2,7 @@ import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types
 import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { GenerationTask } from './generationTasks';
 import type { CaseAnalysis } from './caseAnalysis';
+import { MISSING_DATA_CONSTRAINTS, type LegalDraftingContract } from './draftingPropagation';
 import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } from './coverageMatrix';
 import { buildLegalIssueMatrix, type LegalIssueItem, type LegalIssueMatrix, type LegalIssueStatus, type LegalIssueType } from './legalIssueMatrix';
 import type { DerivedIssueReadiness, LegalResearchBundle, VerifiedAuthority } from './legal-research/types';
@@ -325,6 +326,7 @@ export class IssueContextScopeError extends Error {
 }
 
 export interface IssueContextPack {
+  legalDraftingContract?: LegalDraftingContract;
   legalIssue: Pick<LegalIssueItem, 'id' | 'issueType' | 'question' | 'status' | 'relationStatus' | 'required'>;
   contentRole: SectionContract['contentRole'];
   draftContract?: IssueDraftContract;
@@ -612,6 +614,7 @@ export function buildIssueContextPack(
     ...selectedCoverage.flatMap((item) => item.provenance || []),
   ];
   const packWithoutHash = {
+    ...(task.legalDraftingContract ? { legalDraftingContract: task.legalDraftingContract } : {}),
     legalIssue: {
       id: issue.id,
       issueType: issue.issueType,
@@ -733,6 +736,7 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
     'La extensión nunca autoriza hechos, pruebas, posturas ni autoridades no incluidas en el contexto. Si el soporte permitido no alcanza, conserva una respuesta más breve, añade UNSUPPORTED_REQUIRED_ELEMENT o el requisito pendiente aplicable y no simules completitud.',
   ] : [];
   const systemPrompt = [
+    ...MISSING_DATA_CONSTRAINTS,
     'Genera únicamente un IssueDraftResult estructurado para una sola LegalIssue.',
     'Devuelve exactamente un objeto JSON y la respuesta completa debe ser JSON válido.',
     'La respuesta debe ser sin markdown, sin cercas de código y sin ```json; sin texto antes ni después del objeto, sin explicaciones ni comentarios.',

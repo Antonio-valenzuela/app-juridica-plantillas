@@ -19,7 +19,10 @@ vi.mock('@/lib/legal-engine/exportGuards', () => ({
 }));
 vi.mock('@/lib/legal-engine/exportPdfUniversal', () => ({ exportUniversalToPdf: mocks.exportUniversalToPdf }));
 vi.mock('@/lib/legal-engine/exportDocxUniversal', () => ({ exportUniversalToDocx: mocks.exportUniversalToDocx }));
-vi.mock('@/lib/legal-engine/outputFilename', () => ({ resolveDocumentOutputFilename: () => 'borrador-prueba.pdf' }));
+vi.mock('@/lib/legal-engine/outputFilename', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/legal-engine/outputFilename')>(),
+  resolveDocumentOutputFilename: () => 'borrador-prueba.pdf',
+}));
 
 import { POST as exportPdf } from '@/app/api/legal-engine/export/pdf/route';
 import { POST as exportDocx } from '@/app/api/legal-engine/export/docx/route';

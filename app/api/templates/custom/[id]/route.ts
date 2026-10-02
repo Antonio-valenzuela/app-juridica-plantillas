@@ -9,6 +9,8 @@ import { analyzePersonalTemplateText } from '@/lib/templates/personalTemplateBui
 import path from 'node:path';
 import { deleteOwnedTemplateFile } from '@/lib/security/templateFileCleanup';
 import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { desktopTemplates } from '@/lib/workspace/desktopTemplateRepository';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,6 +116,12 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const local = desktopDraftRepository(request);
+    if (local) {
+      if (!local.ok) return local.response;
+      const template = await desktopTemplates().find(id);
+      return template ? NextResponse.json({ ok: true, template }) : NextResponse.json({ ok: false, error: 'Plantilla no encontrada.' }, { status: 404 });
+    }
     const access = await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const orgId = access.context.organizationId;
@@ -165,12 +173,14 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const access = await requireCaseAccess(request);
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    const access = local?.ok ? { ok: true as const, context: { organizationId: undefined } } : await requireCaseAccess(request);
     if (!access.ok) return access.response;
     // Mutaciones: scope ESTRICTO al organizationId autenticado. Nunca al tenant compartido 'demo-legal'.
     const orgId = access.context.organizationId;
 
-    const existing = await prisma.legalTemplate.findFirst({
+    const existing = local?.ok ? await desktopTemplates().find(id) : await prisma.legalTemplate.findFirst({
       where: {
         id,
         organizationId: orgId,
@@ -253,6 +263,12 @@ export async function PATCH(
     );
     if (!templateStructure) return explicitIntentErrorResponse();
 
+    if (local?.ok) {
+      const template = await desktopTemplates().mutate(id, current => current ? { ...current, ...normalizedPatch,
+        structureJson: templateStructure, version: current.version + 1, updatedAt: new Date().toISOString(), indexed: false } : null);
+      return template ? NextResponse.json({ ok: true, template }) : NextResponse.json({ ok: false, error: 'Plantilla no encontrada.' }, { status: 404 });
+    }
+
     const updateResult = await prisma.legalTemplate.updateMany({
       where: { id, organizationId: orgId },
       data: {
@@ -299,12 +315,14 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const access = await requireCaseAccess(request);
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    const access = local?.ok ? { ok: true as const, context: { organizationId: undefined } } : await requireCaseAccess(request);
     if (!access.ok) return access.response;
     // Mutaciones: scope ESTRICTO al organizationId autenticado. Nunca al tenant compartido 'demo-legal'.
     const orgId = access.context.organizationId;
 
-    const existing = await prisma.legalTemplate.findFirst({
+    const existing = local?.ok ? await desktopTemplates().find(id) : await prisma.legalTemplate.findFirst({
       where: { id, organizationId: orgId },
       select: { id: true, structureJson: true },
     });
@@ -346,6 +364,10 @@ export async function DELETE(
       }
     }
 
+    if (local?.ok) {
+      await desktopTemplates().mutate(id, () => null);
+      return NextResponse.json({ ok: true });
+    }
     const deleted = await prisma.legalTemplate.deleteMany({
       where: {
         id,

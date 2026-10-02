@@ -661,6 +661,7 @@ export function createGenerationTraceContext(input: {
     },
     recordTaskPlanned(task, contextPack) {
       if (!enabled) return;
+      contextPack = contextPack ?? (task.legalDraftingContract ? { legalDraftingContract: task.legalDraftingContract } : undefined);
       const startedAt = now().toISOString();
       const existing = trace.generationTasks.find((entry) => entry.taskId === task.id);
       if (existing) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
-import { loadGenerationArtifact, saveGenerationArtifact } from '@/lib/legal-engine/generationPersistence';
+import { requireWorkspaceExecutionAccess, executionOwnerKey } from '@/lib/security/workspaceExecutionAccess';
+import { loadWorkspaceGenerationArtifact, saveGenerationArtifact } from '@/lib/legal-engine/generationPersistence';
 import { buildReviewRequest } from '@/lib/legal-engine/reviewRequest';
 import { runVerificationContinuation } from '@/lib/legal-engine/verificationContinuation';
 import { generateSection } from '@/lib/legal-engine/pipeline';
@@ -13,20 +13,20 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  const auth = await requireLawyerAccess(request);
+  const auth = await requireWorkspaceExecutionAccess(request);
   if (!auth.ok) return auth.response;
   const documentId = new URL(request.url).searchParams.get('documentId')?.trim() || '';
   if (!documentId) return NextResponse.json({ ok: false, error: 'MISSING_DOCUMENT_ID' }, { status: 400 });
-  const document = await loadGenerationArtifact(auth.context.organizationId, auth.context.userId, documentId);
+  const document = await loadWorkspaceGenerationArtifact(auth.context, documentId);
   if (!document) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
   return NextResponse.json({ ok: true, reviewRequest: buildReviewRequest(document) });
 }
 
 export async function POST(request: NextRequest) {
   const requestId = request.headers.get('x-request-id')?.trim() || generateRequestId();
-  const auth = await requireLawyerAccess(request);
+  const auth = await requireWorkspaceExecutionAccess(request);
   if (!auth.ok) return auth.response;
-  const rateLimit = checkRequestRateLimit(request, 'review', 20, `${auth.context.organizationId}:${auth.context.userId}`);
+  const rateLimit = checkRequestRateLimit(request, 'review', 20, executionOwnerKey(auth.context));
   if (!rateLimit.ok) return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas solicitudes de revisión. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
 
   try {
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     const answers = Array.isArray(body.answers) ? body.answers : [];
     if (!documentId || answers.length === 0) return NextResponse.json({ ok: false, error: 'DOCUMENT_ID_AND_ANSWERS_REQUIRED' }, { status: 400 });
 
-    const document = await loadGenerationArtifact(auth.context.organizationId, auth.context.userId, documentId);
+    const document = await loadWorkspaceGenerationArtifact(auth.context, documentId);
     if (!document) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
     const reviewRequest = buildReviewRequest(document);
     const validIds = new Set(reviewRequest.pendingItems.map((item) => item.id));
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     const verified = runVerificationContinuation(document);
     const nextReview = buildReviewRequest(verified.document);
     (verified.document.generationMetadata as any).reviewRequest = nextReview;
-    await saveGenerationArtifact({ organizationId: auth.context.organizationId, userId: auth.context.userId, document: verified.document, progress: 100, terminalStatus: verified.qualityGate.passed ? 'COMPLETED' : 'NEEDS_REVIEW', warnings: verified.qualityGate.passed ? [] : ['DOCUMENT_REQUIRES_REVIEW'] });
+    await saveGenerationArtifact({ ...auth.context, document: verified.document, progress: 100, terminalStatus: verified.qualityGate.passed ? 'COMPLETED' : 'NEEDS_REVIEW', warnings: verified.qualityGate.passed ? [] : ['DOCUMENT_REQUIRES_REVIEW'] });
     return NextResponse.json({ ok: true, documentId: verified.document.id, document: verified.document, answersApplied: answers.map((answer: any) => answer.itemId), sectionsRegenerated: [...affectedSections], fullRegeneration: false, reviewRequest: nextReview, validation: verified.validation, qualityGate: verified.qualityGate });
   } catch (error: any) {
     return apiErrorResponse({ requestId, status: 500, errorCode: 'REVIEW_APPLICATION_FAILED', message: 'No fue posible aplicar las respuestas de revisión.', internalError: error });
