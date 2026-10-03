@@ -12,7 +12,7 @@ import { assessRemainingDraftSupport } from './draftDepth';
 import { measureRenderedDocumentPages, type RenderedDocumentPageMetrics } from './documentPageMetrics';
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
 import type { GenerationTraceContext } from './generationTrace';
-import { evaluateGeneratedLegalAdmission } from './generatedLegalAdmission';
+import { evaluateGeneratedLegalAdmission, type GeneratedLegalAdmissionResult } from './generatedLegalAdmission';
 
 export interface ExtendedExpansionOptions {
   invokeProvider?: (request: AIRequest) => Promise<AIProviderResult>;
@@ -119,6 +119,25 @@ function countWords(text: string): number {
 
 function sectionWordCount(section: DocumentNode): number {
   return countWords((section.content || []).map((block) => block.text).join('\n'));
+}
+
+/** Sustracción mínima para considerar que un remanente es desarrollo útil. */
+const MIN_RECOVERED_WORDS = 25;
+const MIN_RECOVERED_SHARE = 0.5;
+
+/**
+ * La remediación por proposición conserva el razonamiento admisible, pero un
+ * remanente mínimo no es una sección: se trata como resto insuficiente y el
+ * candidato se rechaza. Evita que un fragmento truncado que sobrevive a la
+ * remediación entre al documento como si fuera desarrollo.
+ */
+function hasRecoverableRemediation(admission: GeneratedLegalAdmissionResult): boolean {
+  if (admission.accepted) return true;
+  if (admission.fullyNeutralized) return false;
+  const total = admission.proposals.reduce((sum, proposal) => sum + countWords(proposal.text), 0);
+  const kept = admission.proposals.filter(proposal => proposal.admitted)
+    .reduce((sum, proposal) => sum + countWords(proposal.text), 0);
+  return kept >= MIN_RECOVERED_WORDS && kept / Math.max(1, total) >= MIN_RECOVERED_SHARE;
 }
 
 function continuationLimit(section: DocumentNode, contract: GenerationExtensionContract): number {
@@ -474,13 +493,15 @@ async function expandWithSupportedCoverage(
       const admission = evaluateGeneratedLegalAdmission({ text: generated, sectionType: section.type, document, analysis: caseAnalysis, legalIssueIds: packet.legalIssueIds });
       if (!admission.accepted) {
         const reason = admission.reasons.join('+');
-        warnings.push(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
-        options.trace?.addWarning(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
-        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: countWords(generated), reason, lossStage: 'block-admission' });
-        continue;
+        const outcome = admission.fullyNeutralized ? 'LEGAL_ADMISSION_REJECTED' : 'LEGAL_ADMISSION_REMEDIATED';
+        warnings.push(`${outcome}:${section.id}:${reason}`);
+        options.trace?.addWarning(`${outcome}:${section.id}:${reason}`);
+        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: admission.rejectedWords, reason, lossStage: 'block-admission' });
+        if (!hasRecoverableRemediation(admission)) continue;
       }
+      const admittedText = admission.accepted ? generated : admission.text;
       const wholeDocumentText = document.sections.flatMap((candidate) => candidate.content.map((block) => block.text)).join('\n\n');
-      const deduplicated = deduplicateExpansionContent(wholeDocumentText, generated);
+      const deduplicated = deduplicateExpansionContent(wholeDocumentText, admittedText);
       if (deduplicated.removedWords > 0) {
         options.trace?.recordWordAccounting({
           sectionId: section.id,
@@ -570,8 +591,9 @@ export function buildExpansionPrompt(
     'Genera una ampliación sustantiva para una sección existente. No rellenes espacio.',
     'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
     'Cuando no exista postura fáctica confirmada por el abogado:',
-    'ESTÁ PERMITIDO ÚNICAMENTE: formular observaciones sobre hechos y fuentes concretos sin inventar postura. Carga probatoria, presunciones, efectos procesales y valor jurídico requieren una proposición oficialmente verificada y aplicable; en su ausencia marca PENDIENTE DE FUNDAMENTACIÓN / INVESTIGACIÓN. No ofrezcas evidencia no confirmada ni atribuyas valor pleno a una constancia.',
-    'ESTÁ TERMINANTEMENTE PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad, inventar una versión fáctica del demandado (como contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados), inventar documentos inexistentes, fechas no mencionadas o causas de terminación laboral no comprobadas en autos, o inventar acontecimientos materiales.',
+    'ESTÁ PERMITIDO ÚNICAMENTE: formular observaciones sobre hechos y fuentes concretos; cuestionar la acreditación y suficiencia probatoria del hecho afirmado por la contraria; señalar falta de precisión o presupuestos legales; analizar el alcance probatorio; identificar el error, la incongruencia y la afectación; y formular argumentos y excepciones jurídicas subsidiarias sostenibles, incluidos los que se apoyan en la carga de la prueba o en la interpretación normativa, siempre que se expongan como argumentación y no como regla verificada.',
+    'NO PUEDES AFIRMAR COMO VERIFICADO, aun si el material lo sugiere: el contenido de un artículo, precepto o jurisprudencia; una presunción jurídica específica; un plazo o un requisito de procedencia; la competencia; ni el efecto procesal atribuido a una norma. Esos elementos se marcan PENDIENTE DE FUNDAMENTACIÓN / INVESTIGACIÓN hasta verificarlos en fuente oficial. Tampoco ofrezcas evidencia no confirmada ni atribuyas valor pleno a una constancia.',
+    'PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad; inventar una versión fáctica de la contraparte (contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados); inventar documentos, fechas o acontecimientos materiales; y afirmar una autorización procesal que las constancias no acreditan.',
     'Usa únicamente los hechos, pruebas, autoridades y fuentes identificadas abajo. Si algo no consta, formula una reserva jurídica prudente sin inventarlo.',
     'No repitas texto, encabezados, premisas o citas ya existentes; escribe prosa forense continua sin Markdown.',
     `DOCUMENTO: ${document.documentTypeLabel || document.documentType}`,
@@ -775,13 +797,15 @@ export async function expandDocumentToPageTarget(
       const admission = evaluateGeneratedLegalAdmission({ text: generated, sectionType: section.type, document, analysis: caseAnalysis, legalIssueIds: section.content.flatMap(block => block.legalIssueIds || []) });
       if (!admission.accepted) {
         const reason = admission.reasons.join('+');
-        warnings.push(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
-        options.trace?.addWarning(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
-        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: countWords(generated), reason, lossStage: 'block-admission' });
-        continue;
+        const outcome = admission.fullyNeutralized ? 'LEGAL_ADMISSION_REJECTED' : 'LEGAL_ADMISSION_REMEDIATED';
+        warnings.push(`${outcome}:${section.id}:${reason}`);
+        options.trace?.addWarning(`${outcome}:${section.id}:${reason}`);
+        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: admission.rejectedWords, reason, lossStage: 'block-admission' });
+        if (!hasRecoverableRemediation(admission)) continue;
       }
+      const admittedText = admission.accepted ? generated : admission.text;
       const wholeDocText = document.sections.flatMap((candidate) => candidate.content.map((block) => block.text)).join('\n\n');
-      const deduplicated = deduplicateExpansionContent(wholeDocText, generated);
+      const deduplicated = deduplicateExpansionContent(wholeDocText, admittedText);
       if (deduplicated.removedWords > 0) options.trace?.recordWordAccounting({
         sectionId: section.id,
         dedupRemovedWords: deduplicated.removedWords,

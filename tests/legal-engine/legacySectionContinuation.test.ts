@@ -107,6 +107,20 @@ describe('standard legacy section continuation', () => {
     ['carga probatoria', 'argument', 'La carga de la prueba corresponde a la actora.', 'UNSUPPORTED_PROOF_RULE'],
     ['costas no solicitadas', 'petition', 'Se solicita condenar a la actora al pago de costas.', 'UNSUPPORTED_PETITION'],
   ];
+  it('keeps useful provider reasoning and AI provenance after neutralizing only an unsupported clause', async () => {
+    const { doc, block, trace } = generationFixture();
+    const reasoning = 'Corresponde contrastar la resolución recurrida con las constancias del expediente.';
+    const content = `${reasoning} El artículo 9876 establece una sanción no sustentada. La comparación debe distinguir lo solicitado de lo resuelto.`;
+    runFastModeMock.mockResolvedValueOnce(providerResponse({ content }));
+    const result = await generateLegalBlock(block, doc, buildDocumentIndex([]), undefined, undefined, undefined, DEFAULT_LAWYER_PROFILE, undefined, trace);
+    expect(result.text).toContain(reasoning);
+    expect(result.text).toContain('La comparación debe distinguir lo solicitado de lo resuelto');
+    expect(result.text).not.toContain('establece una sanción no sustentada');
+    expect(result.text).toContain('PENDIENTE DE DESARROLLO');
+    expect(result.aiUsed).toBe(true);
+    expect(trace.trace.taskExecutions[0].normalizedOutput).toBe(content);
+    expect(trace.trace.warnings.join(' ')).toContain('LEGAL_ADMISSION_REMEDIATED');
+  });
   it.each(unsupportedCases)('does not admit %s from provider output', async (_label, kind, content, code) => {
     const { doc, block, trace } = generationFixture();
     block.sectionType = kind;

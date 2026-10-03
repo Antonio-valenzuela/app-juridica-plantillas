@@ -123,7 +123,11 @@ export function retrieveManualRules(index: ManualIndex, query: RetrievalQuery): 
   // no se inyectan en escritos nuevos como si describieran al despacho actual.
   const legacyIdentity = /\bPB\s+JUR[IÍ]DICO\b|\bEDGARDO\s+PALACIOS\b|\basistente\s+jur[ií]dico\s+pb\b/i;
   const candidates = index.fragments.filter((item) => item.originalText.trim() && !legacyIdentity.test(item.originalText) && (item.alwaysActive || item.matter === query.matter || item.matter === 'GENERAL') && (!query.category || item.alwaysActive || item.category === query.category));
-  const ranked = candidates.map((item) => ({ item, score: (item.alwaysActive ? 100 : 0) + (item.matter === query.matter ? 30 : 0) + (query.stage && normalize(item.stage) === normalize(query.stage) ? 12 : 0) + terms.reduce((n, term) => n + (normalize(item.originalText).includes(term) ? 8 : 0), 0) })).sort((a, b) => b.score - a.score || a.item.physicalPage - b.item.physicalPage);
+  // El término de la tarea domina el orden: las reglas maestras ("no
+  // inventar", "distingue siempre") siempre están presentes, pero si se
+  // puntúan por encima de todo expulsan del presupuesto la metodología
+  // concreta de la sección (p. ej. metodología de agravio y silogismo).
+  const ranked = candidates.map((item) => ({ item, score: terms.reduce((n, term) => n + (normalize(item.originalText).includes(term) ? 8 : 0), 0) + (query.stage && normalize(item.stage) === normalize(query.stage) ? 12 : 0) + (item.matter === query.matter ? 20 : 0) + (item.alwaysActive ? 10 : 0) })).sort((a, b) => b.score - a.score || a.item.physicalPage - b.item.physicalPage);
   const selected: ManualFragment[] = []; const discardedRulesByContextLimit: string[] = [];
   let usedChars = 0; const budget = Math.max(0, query.budgetChars ?? 5000);
   for (const { item, score } of ranked) {

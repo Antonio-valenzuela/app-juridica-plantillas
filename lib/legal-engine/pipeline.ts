@@ -1038,13 +1038,22 @@ export function buildDraftingPlan(
       expectedParagraphs = 1;
     } else if (sec.type === 'identity' || sec.type === 'evidence') {
       expectedDepth = 'MEDIUM';
-      expectedParagraphs = 3;
+      expectedParagraphs = isDeep ? 5 : 3;
     } else if (sec.type === 'background' || sec.type === 'legal_grounds') {
       expectedDepth = isDeep ? 'DEEP' : 'MEDIUM';
       expectedParagraphs = isDeep ? 6 : 4;
     } else if (sec.type === 'argument') {
       expectedDepth = isDeep ? 'EXTENSIVE' : 'DEEP';
       expectedParagraphs = isDeep ? 8 : 5;
+    } else if (sec.type === 'custom') {
+      // Las secciones propias del recurso (objeto, consideraciones combatidas,
+      // efectos solicitados) son sustantivas: sin esta rama la profundidad
+      // Extensa nunca alcanzaba al recurso de apelación.
+      expectedDepth = isDeep ? 'DEEP' : 'MEDIUM';
+      expectedParagraphs = isDeep ? 5 : 2;
+    } else if (sec.type === 'petition') {
+      expectedDepth = isDeep ? 'MEDIUM' : 'SHORT';
+      expectedParagraphs = isDeep ? 3 : 2;
     }
 
     // Cobertura específica vinculada a esta sección
@@ -1278,6 +1287,73 @@ export function buildDraftingPlan(
 }
 
 /**
+ * Recupera la metodología interna de redacción de la Guía Operativa LEX
+ * PLANTILLAS para una sección concreta. Es UNA guía de CÓMO estructurar y
+ * razonar: no es autoridad jurídica, no aporta hechos, no verifica leyes ni
+ * jurisprudencia y jamás satisface CitationVerification o Coverage. Se acota
+ * por presupuesto para que el prompt reciba sólo el fragmento pertinente y
+ * se registra en el trace para trazabilidad.
+ */
+/**
+ * Intención metodológica por tipo de sección. La Guía Operativa está
+ * indexada por términos, no por tipo de escrito: sin esta señalación el
+ * presupuesto se llena de reglas maestras genéricas y el bloque no recibe la
+ * metodología que realmente necesita. Equivalente al "cada agravio deberá
+ * explicar" de p. 155 y a "premisa mayor / premisa menor / subsunción /
+ * conclusión" de p. 87.
+ */
+const MANUAL_METHODOLOGY_INTENT: Record<string, string> = {
+  argument: 'agravio concepto razonamiento silogismo premisa mayor premisa menor conclusion incongruencia',
+  background: 'antecedentes cronologia hechos constancia relevante pendiente de confirmar',
+  legal_grounds: 'fundamento norma vigente aplicabilidad jerarquia verificacion fuente oficial',
+  evidence: 'prueba analisis probatorio objeto alcance idoneidad documental pericial testimonial',
+  petition: 'peticion congruencia puntos petitorios consecuencia derivada argumentos requisitos',
+  identity: 'autoridad competencia personalidad del compareciente identificacion del asunto partes expediente',
+  custom: 'redaccion estructura antecedentes fundamentos argumentos peticiones congruencia',
+};
+
+const MANUAL_TITLE_INTENT: Array<[RegExp, string]> = [
+  [/agravio/, 'agravio concepto razonamiento silogismo premisa mayor premisa menor conclusion remedio dejar sin efecto'],
+  [/antecedent/, 'antecedentes relevantes cronologia sintesis verificacion'],
+  [/procedencia|oportunidad/, 'procedencia recurso plazo termino legitimacion autoridad competente verificacion'],
+  [/prueba|evidencia/, 'prueba analisis probatorio objeto alcance idoneidad autenticidad'],
+  [/petitorio|peticion/, 'peticion congruencia consecuencias derivadas requisitos recurso pedir'],
+  [/resolucion|impugnada|recurrida/, 'resolucion impugnada combate determinacion razonamiento acto autoridad'],
+  [/consideracion/, 'consideraciones combatidas razonamiento error'],
+];
+
+export async function buildBlockManualMethodology(
+  doc: UniversalLegalDocument, sectionTitle: string, sectionType: string,
+): Promise<{
+  context: string; matter: string; manualVersion: string; manualHash: string;
+  selectedRuleIds: string[]; selectedPages: number[]; selectedSections: string[];
+}> {
+  const manual = await loadActiveManual();
+  if (!manual) {
+    return { context: '', matter: 'GENERAL', manualVersion: '', manualHash: '', selectedRuleIds: [], selectedPages: [], selectedSections: [] };
+  }
+  const matterKey = String(doc.matter || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  const matter = (['CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL'] as ManualMatter[])
+    .find(candidate => matterKey.includes(candidate)) || 'GENERAL';
+  const titleKey = sectionTitle.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const titleIntent = MANUAL_TITLE_INTENT.find(([pattern]) => pattern.test(titleKey))?.[1] || '';
+  const taskQuery = [sectionTitle, MANUAL_METHODOLOGY_INTENT[sectionType] || '', titleIntent, doc.documentType].filter(Boolean).join(' ');
+  const selection = retrieveManualRules(manual, {
+    matter, caseType: doc.documentType, stage: sectionType, task: taskQuery,
+    budgetChars: 4500, measureContext: rules => formatManualTaskContext(rules).length,
+  });
+  return {
+    context: formatManualTaskContext(selection.selected),
+    matter,
+    manualVersion: manual.manifest.version,
+    manualHash: manual.manifest.sourceHash,
+    selectedRuleIds: selection.selected.map(rule => rule.stableRuleId),
+    selectedPages: [...new Set(selection.selected.map(rule => rule.physicalPage))],
+    selectedSections: [...new Set(selection.selected.map(rule => rule.section))],
+  };
+}
+
+/**
  * NUEVA: Genera un bloque jurídico con contexto rico (reutiliza índice una sola vez)
  */
 export async function generateLegalBlock(
@@ -1366,7 +1442,32 @@ export async function generateLegalBlock(
       const sectionFacts = /hechos/.test(titleKey) ? buildFactResponseText(caseAnalysis) : ctxFacts;
       const sectionClaims = /prestacion|pretension/.test(titleKey) ? buildClaimResponseText(caseAnalysis) : '';
       const sourceContext = sectionClaims || sectionFacts;
-      const isContestacion = isContestacionType(doc.documentType, doc.documentTypeLabel);
+const isContestacion = isContestacionType(doc.documentType, doc.documentTypeLabel);
+
+      // Guía Operativa LEX PLANTILLAS como METODOLOGÍA INTERNA de redacción.
+      // Se recupera por término de la tarea (p. ej. metodología de agravio,
+      // silogismo, congruencia, datos faltantes), se acota por presupuesto y
+      // llega etiquetada como no autoridad: nunca verifica una norma, nunca
+      // resuelve CitationVerification y nunca satisface Coverage por sí sola.
+      const manualMethodology = await buildBlockManualMethodology(doc, block.title, block.sectionType);
+      const manualMethodologyContext = manualMethodology.context;
+      if (manualMethodology.selectedRuleIds.length) {
+        const manualTrace = doc.generationMetadata.operationalManual ||= {
+          manualVersion: manualMethodology.manualVersion, manualHash: manualMethodology.manualHash,
+          selectedRuleIds: [], selectedPages: [], selectedSections: [], retrievals: [], auditRuleIds: [], auditFindings: [],
+        };
+        manualTrace.selectedRuleIds = [...new Set([...manualTrace.selectedRuleIds, ...manualMethodology.selectedRuleIds])];
+        manualTrace.selectedPages = [...new Set([...manualTrace.selectedPages, ...manualMethodology.selectedPages])];
+        manualTrace.selectedSections = [...new Set([...manualTrace.selectedSections, ...manualMethodology.selectedSections])];
+        manualTrace.retrievals.push({
+          taskId: `legacy-block-${block.id}`, retrievalStage: 'LEGACY_BLOCK',
+          matter: manualMethodology.matter, caseType: doc.documentType,
+          stage: block.sectionType, sectionTitle: block.title,
+          selectedRuleIds: manualMethodology.selectedRuleIds, selectedPages: manualMethodology.selectedPages,
+          contextCharacters: manualMethodologyContext.length,
+        } as any);
+        if (trace) trace.trace.operationalManual = manualTrace;
+      }
 
       const prompt = `${docTemplate.vozPrompt}
 Redacta el bloque jurídico "${block.title}" (tipo: ${block.kind} / ${block.sectionType}) para el documento judicial: "${doc.documentTypeLabel}".
@@ -1420,6 +1521,7 @@ ${blockContext.text}
 
 INSTRUCCIÓN ADICIONAL: ${instruction || 'Desarrollar con exhaustividad y técnica forense mexicana.'}
 
+${manualMethodologyContext}
 REGLAS OBLIGATORIAS:
 1. NO inventes hechos, fechas, autoridades ni jurisprudencia que no consten en las fuentes.
 2. Si un dato no está disponible, utiliza estrictamente: [DATO PENDIENTE DE EXPEDIENTE].
@@ -1613,14 +1715,21 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
     }
   }
 
-  const admission = evaluateGeneratedLegalAdmission({ text: rawText, sectionType: block.sectionType, document: doc, analysis: caseAnalysis, instruction, legalIssueIds: sectionPlan?.legalIssueIds });
+const admission = evaluateGeneratedLegalAdmission({ text: rawText, sectionType: block.sectionType, document: doc, analysis: caseAnalysis, instruction, legalIssueIds: sectionPlan?.legalIssueIds });
+  // Remediación granular por proposición. El razonamiento admisible se conserva
+  // y sólo se suspenden las proposiciones inseguras; el marcador emitido sigue
+  // siendo seed marker, por lo que Coverage y FINAL permanecen bloqueados.
   if (!admission.accepted) {
+    const reason = admission.reasons.join('+');
+    const outcome = admission.fullyNeutralized ? 'LEGAL_ADMISSION_REJECTED' : 'LEGAL_ADMISSION_REMEDIATED';
     trace?.recordWordAccounting({ sectionId: block.id, rejectedWords: admission.rejectedWords,
-      reason: admission.reasons.join('+'), lossStage: 'block-admission', taskId: `legacy-section-${block.id}` });
-    trace?.addWarning(`LEGAL_ADMISSION_REJECTED:${block.id}:${admission.reasons.join('+')}:${hashTraceText(rawText)}`);
-    rawText = admission.pendingText;
-    aiUsed = false;
-    aiError = `LEGAL_ADMISSION_REJECTED:${admission.reasons.join('+')}`;
+      reason, lossStage: 'block-admission', taskId: `legacy-section-${block.id}` });
+    trace?.addWarning(`${outcome}:${block.id}:${reason}:admitted=${admission.admittedCount}:neutralized=${admission.neutralizedCount}:${hashTraceText(rawText)}`);
+    rawText = admission.text;
+    if (admission.fullyNeutralized) {
+      aiUsed = false;
+      aiError = `${outcome}:${reason}`;
+    }
   }
   const styled = applyStyleToSectionText(block.sectionType as any, rawText, lawyerProfile);
   const sanitized = sanitizeGeneratedText(styled, { parties: doc.parties, caseRefs: doc.caseRefs });
@@ -1658,8 +1767,19 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
   const isCommercialEnforcementDoc = doc.documentType === 'demanda_ejecutiva_mercantil';
   const isContestacionDoc = /contestaci/i.test(doc.documentType || '') || /contestaci/i.test(doc.documentTypeLabel || '');
   const matterLower = (doc.matter || '').toLowerCase();
+  // El recurso pedido determina la vía procesal del escrito. La materia
+  // inferida del documento fuente (p. ej. una sentencia de amparo admitida como
+  // origen de una apelación civil) no puede convertir un recurso civil en un
+  // medio de defensa constitucional ni introducir conceptos de violación.
+  const requestedWrit = String(doc.documentType || '');
+  const isApelacionCivil = /apelacion_civil/.test(requestedWrit);
+  // El lenguaje de garantías fundamentales, tutela judicial efectiva y
+  // derechos humanos sólo corresponde a un escrito constitucional. Un recurso
+  // civil no puede heredar el parámetro del documento fuente.
+  const isConstitutionalWrit = !/apelacion|recurso/.test(requestedWrit)
+    && (Boolean(requestedWrit && isAmparoDocumentType(requestedWrit)) || /amparo/.test(requestedWrit) || Boolean(doc.documentType && /constitucional/.test(doc.documentTypeLabel || '')));
   const isLaboral = matterLower.includes('laboral') || Boolean(doc.documentType && (isLaboralDocumentType(doc.documentType) || /laboral|laudo/.test(doc.documentType)));
-  const isAmparo = matterLower.includes('amparo') || matterLower.includes('constitucional') || Boolean(doc.documentType && (isAmparoDocumentType(doc.documentType) || /amparo/.test(doc.documentType)));
+  const isAmparo = !isApelacionCivil && (matterLower.includes('amparo') || matterLower.includes('constitucional') || Boolean(doc.documentType && (isAmparoDocumentType(doc.documentType) || /amparo/.test(doc.documentType))));
   const isFamiliar = matterLower.includes('familiar') || Boolean(doc.documentType && /divorcio|alimentos|custodia|convivencia|patria_potestad|paternidad|adopcion|familiar/.test(doc.documentType));
   const isAdministrativo = matterLower.includes('administrativ') || Boolean(doc.documentType && (isAdministrativoDocumentType(doc.documentType) || /administrativ|nulidad.*administrativ/.test(doc.documentType)));
   const isFiscal = matterLower.includes('fiscal') || Boolean(doc.documentType && (isFiscalDocumentType(doc.documentType) || /fiscal|credito_fiscal|recurso_revocacion_fiscal/.test(doc.documentType)));
@@ -1779,12 +1899,38 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       const filingThrough = doc.proceduralIdentity?.organoPresentacion;
       return `${String(destinationAuthority).toUpperCase()}${filingThrough ? `\nPOR CONDUCTO DE: ${filingThrough}` : ''}\nPRESENTE.\n\nEXPEDIENTE: ${expedienteNum}`;
     }
-    case 'identity':
+    case 'identity': {
       if (isContestacionDoc) {
         const roles = resolveContestacionRoles(doc, caseAnalysis, (doc as any).caseParties || []);
         return `${roles.contesta}, en su carácter de parte demandada, comparece para contestar la demanda promovida por ${roles.contraparte}, dentro del expediente ${roles.expediente}, ante la autoridad competente.`;
       }
-      return `${quejosoName}, promoviendo en mi carácter dentro de los autos del expediente ${expedienteNum}, ante Usted con el debido respeto comparezco a exponer:`;
+      // Cada sección de identidad cumple una función procesal distinta. La Guía
+      // Operativa las separa en autoridad (p. 141), expediente y partes (p. 162,
+      // "II. EXPEDIENTE Y PARTES") y personalidad (p. 142-143, "7. PERSONALIDAD").
+      // Un único texto indiferenciado al título producía tres encabezados
+      // idénticos en el recurso de apelación.
+      const identityKey = block.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const isRecurso = /apelacion|recurso|revision/.test(`${doc.documentType || ''} ${doc.documentTypeLabel || ''}`);
+      const recursoLabel = isRecurso ? 'el recurso de apelación' : 'el presente escrito';
+      if (/proemio/.test(identityKey)) {
+        return `Se comparece a promover ${recursoLabel} contra la resolución dictada dentro del expediente ${expedienteNum}, `
+          + `con el propósito de que la autoridad revise la determinación combatida. `
+          + `La impugnación se sostiene en los antecedentes y en los agravios que se desarrollan más adelante, `
+          + `y la congruencia de lo pedido se verifica en los puntos petitorios.`;
+      }
+      if (/identificaci|asunto|rubro/.test(identityKey)) {
+        const tipoPromocion = doc.documentTypeLabel || (isRecurso ? 'Recurso de apelación' : 'Escrito procesal');
+        return `EXPEDIENTE: ${expedienteNum}\n`
+          + `TIPO DE PROMOCIÓN: ${tipoPromocion}\n`
+          + `MATERIA: ${doc.matter || '[DATO PENDIENTE: materia del asunto]'}\n`
+          + `PARTES: ${firmanteName} contra ${demandadoName}`;
+      }
+      if (/comparecencia|personalidad/.test(identityKey)) {
+        return `Comparece ${firmanteName}, en su carácter de parte interesada en el presente procedimiento, `
+          + `cuyo instrumento de personalidad se acredita con la documentación que obra en autos.`;
+      }
+      return `${firmanteName}, en su carácter de parte en el presente procedimiento, ante la autoridad competente dentro del expediente ${expedienteNum}.`;
+    }
     case 'background':
       if (isNewWriting) {
         const facts = caseAnalysis?.facts || [];
@@ -1945,6 +2091,34 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
               `2. Se promueve el presente ocurso en atención al estado de autos y con el objeto de: ${peticion}.\n\n` +
               `3. Resulta necesario proveer de conformidad para continuar con la secuela procesal.`);
       }
+      if (isApelacionCivil) {
+        // La Guía Operativa (p. 143, "8. ANTECEDENTES" y regla de síntesis) pide
+        // contexto indispensable, no una narración genérica; y cada apartado
+        // cumple una función distinta. Los datos que el expediente no acredita
+        // se marcan puntualmente: no se hipotetizan.
+        const backgroundKey = block.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const recurrentAuthority = doc.proceduralIdentity?.organoResolucionRecurrida
+          || doc.parties?.autoridadResponsable || '[DATO PENDIENTE: autoridad que dictó la resolución recurrida]';
+        const shared = (safeBlockText ? `${safeBlockText.slice(0, 800)}\n\n` : '')
+          + (numberedFacts
+            ? numberedFacts
+            : caseAnalysis?.proceduralTimeline && caseAnalysis.proceduralTimeline.length > 0
+              ? caseAnalysis.proceduralTimeline.slice(0, 5).map((e, idx) => `${idx + 1}. Con fecha ${e.date}: ${e.event}.`).join('\n\n')
+              : '');
+        if (/antecedent/.test(backgroundKey)) {
+          return `ANTECEDENTES PROCESALES:\n\n` +
+            `BAJO PROTESTA DE DECIR VERDAD, se manifiestan los antecedentes que dan contexto a la resolución recurrida dentro del expediente ${expedienteNum}:\n\n` +
+            (shared || `1. La resolución cuya impugnación se interpone fue dictada por ${recurrentAuthority}.\n\n` +
+              `2. [DATO PENDIENTE: fecha de la resolución recurrida y fecha de su notificación legal].\n\n` +
+              `3. [DATO PENDIENTE: actuaciones procesales relevantes que se consideran necesarias para comprender el problema].`);
+        }
+        if (/impugnada|recurrida/.test(backgroundKey)) {
+          return `${titleUpper}\n\n` +
+            `La determinación combatida es la dictada por ${recurrentAuthority} dentro del expediente ${expedienteNum}, que es la que la parte apelante considera gravada y que se somete a revisión en este recurso.\n\n` +
+            (shared || `[DATO PENDIENTE: contenido íntegro de la resolución recurrida, con fecha y firma].`);
+        }
+        return `${titleUpper}\n\n${shared || '[DATO PENDIENTE: antecedentes propios de esta sección].'}`;
+      }
       return `ANTECEDENTES Y CONSTANCIAS PROCESALES:\n\n` +
         `BAJO PROTESTA DE DECIR VERDAD, se manifiestan los antecedentes procesales que constan en las actuaciones de origen:\n\n` +
         (numberedFacts
@@ -2095,14 +2269,29 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
           `CONSECUENCIA JURÍDICA SOLICITADA:\n` +
           `Tener por formulada la manifestación y proveer lo que en derecho corresponda conforme a las constancias de autos.`;
       }
+      if (isConstitutionalWrit) {
+        return `${titleUpper}\n\n` +
+          `PLANTEAMIENTO CENTRAL:\n` +
+          `Causa agravio directo la determinación recurrida dictada por ${autoridadName}, al violentar las garantías de debido proceso, legalidad y tutela judicial efectiva.\n\n` +
+          `PARÁMETRO CONSTITUCIONAL Y CONTRASTE CON LA DECISIÓN IMPUGNADA:\n` +
+          `La autoridad resolutora sostuvo la validez del acto impugnado; sin embargo, dicho criterio resulta inconstitucional al desatender el marco de derechos humanos y la debida valoración de las constancias.\n\n` +
+          (safeBlockText ? `${safeBlockText.slice(0, 800)}\n\n` : '') +
+          `CONSECUENCIA JURÍDICA SOLICITADA:\n` +
+          `Procede revocar o dejar insubsistente la resolución recurrida a efecto de restituir a ${quejosoName} en el goce de los derechos fundamentales conculcados.`;
+      }
+      // Recurso (o cualquier escrito no constitucional): el agravio se construye
+      // sobre el acto combatido, el error y la afectación. No se le atribuyen
+      // garantías fundamentales ni tutela judicial efectiva que el escrito
+      // solicitado no.Unknown.
       return `${titleUpper}\n\n` +
-        `PLANTEAMIENTO CENTRAL:\n` +
-        `Causa agravio directo la determinación recurrida dictada por ${autoridadName}, al violentar las garantías de debido proceso, legalidad y tutela judicial efectiva.\n\n` +
-        `PARÁMETRO CONSTITUCIONAL Y CONTRASTE CON LA DECISIÓN IMPUGNADA:\n` +
-        `La autoridad resolutora sostuvo la validez del acto impugnado; sin embargo, dicho criterio resulta inconstitucional al desatender el marco de derechos humanos y la debida valoración de las constancias.\n\n` +
+        `ACTO COMBATIDO:\n` +
+        `Se combate la determinación dictada por ${autoridadName} dentro del expediente ${expedienteNum}.\n\n` +
+        `ERROR Y AFECTACIÓN:\n` +
         (safeBlockText ? `${safeBlockText.slice(0, 800)}\n\n` : '') +
-        `CONSECUENCIA JURÍDICA SOLICITADA:\n` +
-        `Procede revocar o dejar insubsistente la resolución recurrida a efecto de restituir a ${quejosoName} en el goce de los derechos fundamentales conculcados.`;
+        `La consideración recurrida debe contrastarse con las constancias del expediente para verificar su correspondencia con lo pedido y lo resuelto.\n\n` +
+        `CONSECUENCIA SOLICITADA:\n` +
+        `La corrección que proceda se determina en el apartado de petitorios, en congruencia con los agravos acreditados.`;
+      // eslint-disable-next-line no-fallthrough
     case 'evidence': {
       const confirmedEvidence = (caseAnalysis?.evidence || []).filter((item) => item.confirmed === true);
       if (confirmedEvidence.length === 0) return '[REQUIERE DEFINIR PRUEBAS A OFRECER]';
