@@ -119,6 +119,7 @@ export default function AppShell({
         key={item.label}
         href={item.href}
         className={`lex-sidebar-item ${active ? 'is-active' : ''}`}
+        aria-current={active ? 'page' : undefined}
         onClick={() => setMenuOpen(false)}
       >
         <span className="lex-sidebar-icon"><LexIcon name={item.icon} size={17} /></span>
@@ -157,7 +158,7 @@ export default function AppShell({
               <span>Abogado</span>
             </div>
 
-            <span className="lex-user-chevron">⌄</span>
+            <span className="lex-user-chevron"><LexIcon name="chevron-down" size={15} /></span>
           </div>
 
           <button

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { expect, it, vi } from 'vitest';
 import { markDocumentAsDraft, markDocumentAsSource } from '@/lib/legal-engine/documentLifecycle';
+import { persistDocumentBeforeExport } from '@/lib/legal-engine/exportPersistence';
 
 function harness(existingDocumentId: string, readStatus = 200) {
   const page = readFileSync('app/machotes/page.tsx', 'utf8');
@@ -20,7 +21,7 @@ function harness(existingDocumentId: string, readStatus = 200) {
     computeDraftSignature: JSON.stringify, lastSavedSignatureRef: { current: '' }, setHasSavedDraft: vi.fn(), window: { setTimeout: vi.fn() }, notify: vi.fn(),
   };
   const save = new Function(...Object.keys(deps), `${script}\nreturn handleSaveDraft;`)(...Object.values(deps)) as () => Promise<boolean>;
-  return { save, fetch, storage };
+  return { save, fetch, storage, deps, document };
 }
 it('a new document cannot overwrite the previous case merely because its saved pointer remains', async () => {
   const { save, fetch, storage } = harness('document-a');
@@ -38,5 +39,18 @@ it('the same document updates its existing record', async () => {
 it('a failed ownership-record read does not overwrite or create a phantom replacement', async () => {
   const { save, fetch } = harness('document-a', 503);
   expect(await save()).toBe(false);
+  expect(fetch.mock.calls.some(([, options]) => options?.method === 'PATCH' || options?.method === 'POST')).toBe(false);
+});
+it('the actual save handler reports failed previous-record check without marking saved or aborting a DRAFT copy', async () => {
+  const { save, fetch, storage, deps, document } = harness('document-b', 503);
+  const current = { ...document, title: 'EDICIÓN ACTUAL' };
+  const normal = vi.fn();
+  const transient = vi.fn(async value => value);
+  expect(await persistDocumentBeforeExport(current, save, normal, { exportMode: 'DRAFT', sendUnsavedDraftExport: transient })).toBe(current);
+  expect(deps.notify).toHaveBeenCalledWith('error', expect.stringContaining('No se pudo comprobar el borrador anterior antes de guardar.'));
+  expect(deps.setHasSavedDraft).not.toHaveBeenCalled();
+  expect(storage.get('jr_last_draft_id')).toBe('saved-a');
+  expect(normal).not.toHaveBeenCalled();
+  expect(transient).toHaveBeenCalledWith(current);
   expect(fetch.mock.calls.some(([, options]) => options?.method === 'PATCH' || options?.method === 'POST')).toBe(false);
 });

@@ -57,8 +57,10 @@ describe('Generation progress — single visible surface', () => {
 
     expect(markup.match(/data-testid="generation-status-bar"/g)).toHaveLength(1);
     expect(markup).toContain('data-layout="compact"');
+    expect(markup).toContain('data-status="processing"');
     expect(markup).toContain('data-testid="generation-status-summary"');
     expect(markup).toContain('aria-valuenow="33"');
+    expect(markup).toContain('background:var(--lex-info)');
     expect(markup).toContain('33%');
     expect(markup).toContain('1/3');
     expect(markup).toContain('Generando escrito…');

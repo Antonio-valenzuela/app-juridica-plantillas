@@ -40,8 +40,9 @@ export async function GET(request: NextRequest) {
       const drafts = (await local.store.list()).filter(isGeneratedActivity).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       const jobs = await listDesktopGenerationJobs(owner.ownerId);
       const dataset = buildAnalyticsDataset({ drafts, jobs, rangeDays: 30 });
-      const counts = { generated: 0, review: 0, failed: 0 };
-      for (const draft of drafts) counts[statusOfDraft({ ...draft, validationResults: draft.validationResults, generationMetadata: draft.generationMetadata })]++;
+      // Share Configuración's deduplicated, 30-day draft + job activity counts.
+      // A failed/review job can exist without a saved document.
+      const counts = { generated: dataset.totals.completed, review: dataset.totals.needsReview, failed: dataset.totals.failed };
       const failure = jobs.filter(job => job.status === 'failed' || job.terminalStatus === 'FAILED').sort((a,b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       return NextResponse.json({ ok: true, source: 'DESKTOP_LOCAL', stats: { ...counts, pendingReview: counts.review,
         totalDocuments: drafts.length, averageGenerationMs: dataset.totals.averageGenerationMs }, daily: dataset.daily,

@@ -15,7 +15,15 @@ export async function persistDocumentBeforeExport<TDocument, TResult>(
     isPersistenceUnavailableResponse?: (result: TResult) => boolean | Promise<boolean>;
   } = {},
 ): Promise<TResult> {
-  const persisted = await saveDraft(document);
+  let persisted: boolean;
+  try {
+    persisted = await saveDraft(document);
+  } catch (error) {
+    if (options.exportMode === 'DRAFT' && options.sendUnsavedDraftExport) {
+      return options.sendUnsavedDraftExport(document);
+    }
+    throw error;
+  }
   if (!persisted) {
     if (options.exportMode === 'DRAFT' && options.sendUnsavedDraftExport) {
       return options.sendUnsavedDraftExport(document);

@@ -15,6 +15,7 @@ export interface SectionSummary {
 
 export interface DocumentState {
   version: 'DOCUMENT_STATE_V1';
+  documentId?: string;
   establishedFactIds: string[];
   disputedFactIds: string[];
   partyIds: string[];
@@ -34,6 +35,7 @@ export function createDocumentState(caseAnalysis: CaseAnalysis, issueMatrix?: Le
   const matterKnowledgeBase = buildMatterKnowledgeBase(caseAnalysis, [], issueMatrix);
   return {
     version: 'DOCUMENT_STATE_V1',
+    documentId: issueMatrix?.documentId,
     establishedFactIds: unique((rich?.facts || []).filter((fact) => fact.assertionStatus === 'ESTABLISHED_FACT').map((fact) => fact.id)),
     disputedFactIds: unique((rich?.facts || []).filter((fact) => fact.assertionStatus !== 'ESTABLISHED_FACT').map((fact) => fact.id)),
     partyIds: unique((rich?.parties || []).map((party) => party.id)),

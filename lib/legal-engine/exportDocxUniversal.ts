@@ -1,4 +1,5 @@
 import 'server-only';
+import { prepareDraftReviewMaterialization } from './draftDocumentMaterialization';
 import {
   AlignmentType,
   Document,
@@ -357,6 +358,9 @@ function verifiedInputForPreparedDocument(
   exportValidation: ReturnType<typeof validateForExport>,
   options: PrepareUniversalDocumentForExportOptions = {},
 ): VerifiedMaterializationInput {
+  if (document.generationMetadata.exportMode === 'DRAFT') {
+    return prepareDraftReviewMaterialization(document, exportValidation);
+  }
   const candidate = document as UniversalLegalDocument & {
     documentAssemblyResult?: unknown;
     documentAssemblyQualityGate?: unknown;

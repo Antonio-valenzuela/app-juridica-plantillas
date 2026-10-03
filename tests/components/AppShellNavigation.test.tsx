@@ -24,6 +24,7 @@ it('has real destinations for the 12 navigation items and opens/closes the mobil
     ['Biblioteca','biblioteca'],['Alertas DOF y Boletín','alertas'],['Configuración','configuracion'],['Ayuda','ayuda'],
   ];
   for (const [name, tab] of destinations) expect(screen.getByRole('link',{name})).toHaveAttribute('href',`/machotes?tab=${tab}`);
+  expect(screen.getByRole('link', { name: 'Inicio' })).toHaveAttribute('aria-current', 'page');
   fireEvent.click(screen.getByRole('button',{name:'Abrir menú'}));
   expect(screen.getByRole('complementary')).toHaveClass('is-mobile-open');
   fireEvent.keyDown(window,{key:'Escape'});

@@ -29,7 +29,7 @@ describe('declarative document section contracts', () => {
     expect(contracts.map((contract) => contract.title)).toEqual([
       'PROEMIO', 'COMPARECENCIA Y PERSONALIDAD', 'OBJETO DEL ESCRITO',
       'CONTESTACIÓN DE HECHOS', 'CONTESTACIÓN DE PRESTACIONES',
-      'EXCEPCIONES Y DEFENSAS', 'PRUEBAS', 'ALEGATOS', 'PETITORIOS', 'FIRMA',
+      'EXCEPCIONES Y DEFENSAS', 'PRUEBAS', 'DERECHO', 'ALEGATOS', 'PETITORIOS', 'FIRMA',
     ]);
   });
 

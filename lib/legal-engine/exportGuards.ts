@@ -11,7 +11,7 @@ import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumen
 import { hasSeedMarkers, hasUnresolvedFactualDependencies } from './seedMarkers';
 import { DRAFT_EXPORT_NOTICE, UNSAVED_DRAFT_EXPORT_NOTICE, resolveExportMode, type ExportMode } from './exportModes';
 import { evaluateProvenanceIntegrityGate } from './provenanceIntegrityGate';
-import { evaluateAuthorityVerificationGate } from './authorityVerificationGate';
+import { markUnverifiedAuthorityReferences } from './authorityReferenceAudit';
 
 /**
  * exportGuards.ts
@@ -916,108 +916,30 @@ export interface PrepareUniversalDocumentForExportOptions {
   unsavedDraft?: boolean;
 }
 
-const REVIEW_OVERRIDE_ERROR_PATTERNS = [
-  /^LIFECYCLE_NOT_EXPORTABLE:/,
-  /^QUALITY_GATE_FAILED:/,
-  /^INCOMPLETE_DOCUMENT:/,
-  /^PREFLIGHT_NOT_READY:/,
-  /^COMMERCIAL_PREFLIGHT_NOT_READY:/,
-  /^COMMERCIAL_QUALITY_GATE_NOT_READY:/,
-  /^RESPONSE_PREFLIGHT_NOT_READY:/,
-  /^RESPONSE_QUALITY_GATE_NOT_READY:/,
-  /^PROVENANCE_INTEGRITY_GATE:/,
-  /^UNRESOLVED_FACTUAL_DEPENDENCY:/,
-  /^TRUNCATED_GENERATION:/,
-];
-
-// A DRAFT may expose missing expediente data, but it must not export content
-// whose factual support, client posture, evidence, or legal authority is known
-// to be missing or invalid.
-const DRAFT_HARD_BLOCKING_QUALITY_CHECKS = new Set([
-  'FACTUAL_CLAIM_AUDIT_MISSING',
-  'UNSUPPORTED_FACTUAL_CLAIM',
-  'FACTUAL_CLAIM_UNVERIFIED',
-  'FACTUAL_CLAIM_CONTRADICTORY',
-  'MISAPPLIED_AUTHORITY',
-  'CONTRADICTORY_POSITION',
-  'UNSUPPORTED_EVIDENCE',
-]);
-
-const MATERIAL_AUTHORITY_CITATION_RE = /\b(?:art[íi]culos?\s+\d+[\w.°º-]*|registro\s+digital\s*[:#]?\s*\d+|tesis\s+[A-Z0-9./-]+)\b/giu;
-
-function materialCitations(text: string): string[] {
-  return Array.from(text.matchAll(new RegExp(MATERIAL_AUTHORITY_CITATION_RE.source, 'giu')), (match) => match[0]);
-}
-
-function normalizeCitation(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-MX').replace(/\s+/g, ' ').trim();
-}
-
 /**
- * DRAFT keeps useful review content but never exports an unverified material
- * citation as if it were law. The affected sentence is replaced with an
- * explicit editorial notice; FINAL continues to require the full authority gate.
+ * DRAFT preserves the proposition and marks only citations that the existing
+ * official-authority gate cannot validate. FINAL still requires the full gate.
  */
-function omitUnverifiedAuthoritySentencesForDraft(document: UniversalLegalDocument): string[] {
+function markUnverifiedAuthorityCitationsForDraft(document: UniversalLegalDocument): string[] {
   const metadata = document.generationMetadata;
-  const verifiedAuthorities = metadata.verifiedAuthorities || [];
-  const authorityUses = metadata.authorityUses || [];
-  const omittedBlockIds = new Set<string>();
-  let omittedCitationCount = 0;
+  let markedCitationCount = 0;
 
   for (const section of document.sections) {
-    let sectionHasOmittedCitation = false;
     for (const block of section.content || []) {
-      if (block.generatedBy !== 'AI' || !block.text?.trim() || materialCitations(block.text).length === 0) continue;
-      const blockUses = authorityUses.filter((use) => use.blockId === block.id);
-      const audit = evaluateAuthorityVerificationGate({
-        blocks: [{ id: block.id, text: block.text }],
-        uses: blockUses,
-        verifiedAuthorities,
+      if (block.generatedBy !== 'AI' || !block.text?.trim()) continue;
+      const audit = markUnverifiedAuthorityReferences({
+        text: block.text,
+        blockId: block.id,
+        authorityUses: metadata.authorityUses || [],
+        verifiedAuthorities: metadata.verifiedAuthorities || [],
       });
-      if (audit.status === 'PASS') continue;
-
-      const pieces = block.text.split(/(?<=[.!?;])\s+|\r?\n+/).map((piece) => piece.trim()).filter(Boolean);
-      const safePieces = pieces.map((piece) => {
-        const citations = materialCitations(piece);
-        if (citations.length === 0) return piece;
-        omittedCitationCount += citations.length;
-        omittedBlockIds.add(block.id);
-        sectionHasOmittedCitation = true;
-        return '';
-      }).filter(Boolean);
-      block.text = safePieces.join('\n\n');
-    }
-    const noteId = `draft-authority-omission-${document.id}-${section.id}`;
-    if (sectionHasOmittedCitation && !section.content.some((block) => block.id === noteId)) {
-      section.content.push({
-        id: noteId,
-        layer: 'GENERATED_ARGUMENT',
-        trustLevel: 'VERIFIED',
-        text: 'CITA JURÍDICA OMITIDA - REQUIERE VERIFICACIÓN OFICIAL.',
-        style: { fontStyle: 'italic' },
-        generationRequirement: 'DETERMINISTIC',
-        generationStatus: 'generated',
-        generatedBy: 'DETERMINISTIC',
-        isManuallyEdited: false,
-      });
+      block.text = audit.text;
+      markedCitationCount += audit.unverifiedCitationCount;
     }
   }
 
-  if (omittedBlockIds.size > 0) {
-    const survivingCitations = new Map(
-      document.sections.flatMap((section) => section.content || [])
-        .filter((block) => block.generatedBy === 'AI')
-        .map((block) => [block.id, materialCitations(block.text)]),
-    );
-    metadata.authorityUses = authorityUses.filter((use) => {
-      const citations = survivingCitations.get(use.blockId) || [];
-      return citations.some((citation) => normalizeCitation(citation) === normalizeCitation(use.citationText));
-    });
-  }
-
-  return omittedCitationCount > 0
-    ? [`DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED:${omittedCitationCount}`]
+  return markedCitationCount > 0
+    ? [`DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_MARKED:${markedCitationCount}`]
     : [];
 }
 
@@ -1052,10 +974,6 @@ function normalizeInlineMarkdownFormatting(doc: UniversalLegalDocument): {
   return { document: { ...doc, sections }, boldCount, italicCount, htmlTagCount };
 }
 
-function isReviewOverrideError(error: string): boolean {
-  return REVIEW_OVERRIDE_ERROR_PATTERNS.some((pattern) => pattern.test(error));
-}
-
 function collectReviewOverrideErrors(
   errors: string[],
   warnings: string[],
@@ -1066,7 +984,9 @@ function collectReviewOverrideErrors(
     return [];
   }
 
-  const hardErrors = errors.filter((error) => !isReviewOverrideError(error));
+  // DRAFT is a recovery artifact, not legal approval. Shape and actual content
+  // are checked separately; every legal finding remains a review warning.
+  const hardErrors = errors.filter((error) => error.startsWith('DOCUMENTO_VACIO:'));
   if (hardErrors.length > 0) guardFailure(hardErrors, warnings);
   return errors.length > 0
     ? ['REVIEW_EXPORT_OVERRIDE: exportación explícita de un borrador con pendientes: ' + errors.join(' | ')]
@@ -1107,6 +1027,7 @@ export async function prepareUniversalDocumentForExport(
   options: PrepareUniversalDocumentForExportOptions = {},
 ): Promise<PreparedExportDocument> {
   assertExportDocumentShape(doc);
+  if (!collectText(doc).trim()) guardFailure(['DOCUMENTO_VACIO: El documento no contiene texto para exportar.']);
   const exportMode = resolveExportMode(options.exportMode)
     || (options.allowReviewOverride === true ? 'DRAFT' : 'FINAL');
   if (options.unsavedDraft && exportMode !== 'DRAFT') {
@@ -1130,15 +1051,21 @@ export async function prepareUniversalDocumentForExport(
 
   const auditTrace = exportSource.generationMetadata?.auditTrace;
   const { document: sanitized, report } = sanitizeLegalDocument(exportSource, { dedupeBlocks: false });
+  if (exportMode === 'DRAFT') {
+    report.removedPrompts = report.removedMetadata = report.removedCrypto = report.removedWatermarks = report.removedDuplicates = report.proofreadingApplied = 0;
+  }
   // El trace es metadata transitoria de auditoría. Se conserva en el clon de
   // exportación para que el exporter pueda registrar DOCX sin tocar el texto.
   if (auditTrace && !sanitized.generationMetadata.auditTrace) {
     sanitized.generationMetadata = { ...sanitized.generationMetadata, auditTrace };
   }
-  const metadataWithoutNotice = { ...sanitized.generationMetadata } as UniversalLegalDocument['generationMetadata'] & { exportNotice?: string };
+  // Never discard current editor paragraphs merely because a draft is unfinished.
+  // FINAL retains the existing sanitizer. Clone DRAFT before citation marking.
+  const exportContent = exportMode === 'DRAFT' ? structuredClone(exportSource) : sanitized;
+  const metadataWithoutNotice = { ...exportContent.generationMetadata } as UniversalLegalDocument['generationMetadata'] & { exportNotice?: string };
   delete metadataWithoutNotice.exportNotice;
   const exportDocument = {
-    ...sanitized,
+    ...exportContent,
     generationMetadata: {
       ...metadataWithoutNotice,
       exportMode,
@@ -1148,7 +1075,7 @@ export async function prepareUniversalDocumentForExport(
     },
   } as UniversalLegalDocument;
   if (exportMode === 'DRAFT') {
-    reviewOverrideWarnings.push(...omitUnverifiedAuthoritySentencesForDraft(exportDocument));
+    reviewOverrideWarnings.push(...markUnverifiedAuthorityCitationsForDraft(exportDocument));
   }
   const afterSanitize = validateForExport(exportDocument);
   reviewOverrideWarnings.push(...collectReviewOverrideErrors(afterSanitize.errors, afterSanitize.warnings, allowReviewOverride));
@@ -1157,26 +1084,31 @@ export async function prepareUniversalDocumentForExport(
   // from becoming a module initialization cycle.
   const { runQualityGateCheck } = await import('./qualityGate');
   const qualityGate = runQualityGateCheck(exportDocument);
-  const omittedAuthorities = reviewOverrideWarnings
-    .filter((warning) => warning.startsWith('DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED:'))
+  if (exportMode === 'DRAFT') {
+    const originalQuality = runQualityGateCheck(exportSource);
+    for (const finding of originalQuality.criticalErrors) {
+      if (!qualityGate.criticalErrors.some(existing => existing.checkId === finding.checkId && existing.message === finding.message)) {
+        qualityGate.criticalErrors.push(finding);
+      }
+    }
+    for (const finding of originalQuality.warnings) {
+      if (!qualityGate.warnings.some(existing => existing.checkId === finding.checkId && existing.message === finding.message)) {
+        qualityGate.warnings.push(finding);
+      }
+    }
+    qualityGate.passed = qualityGate.passed && originalQuality.passed;
+    qualityGate.canMarkAsFinal = qualityGate.canMarkAsFinal && originalQuality.canMarkAsFinal;
+  }
+  const markedAuthorities = reviewOverrideWarnings
+    .filter((warning) => warning.startsWith('DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_MARKED:'))
     .reduce((total, warning) => total + (Number(warning.split(':')[1]) || 0), 0);
-  if (omittedAuthorities > 0) {
+  if (markedAuthorities > 0) {
     qualityGate.passed = false;
     qualityGate.canMarkAsFinal = false;
     qualityGate.criticalErrors.push({
-      checkId: 'DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED',
-      message: `${omittedAuthorities} cita(s) no verificadas se excluyeron del borrador; la fundamentación debe completarse antes de FINAL.`,
+      checkId: 'DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_MARKED',
+      message: `${markedAuthorities} cita(s) permanecen marcadas para verificación oficial; FINAL continúa bloqueado.`,
     });
-  }
-  if (allowReviewOverride) {
-    const draftIntegrityFailures = qualityGate.criticalErrors
-      .filter((issue) => DRAFT_HARD_BLOCKING_QUALITY_CHECKS.has(issue.checkId));
-    if (draftIntegrityFailures.length > 0) {
-      guardFailure(
-        draftIntegrityFailures.map((issue) => `${issue.checkId}: ${issue.message}`),
-        qualityGate.warnings.map((issue) => issue.message),
-      );
-    }
   }
   if (!qualityGate.passed || !qualityGate.canMarkAsFinal) {
     const qualityErrors = [
@@ -1194,7 +1126,7 @@ export async function prepareUniversalDocumentForExport(
   if (!validation.isValid || validation.errors.length > 0) {
     const validationErrors = validation.errors.map((issue) => issue.message);
     const reviewValidationErrors = allowReviewOverride
-      ? validationErrors.filter((message) => /puntos petitorios/i.test(message))
+      ? validationErrors
       : [];
     const hardValidationErrors = validationErrors.filter((message) => !reviewValidationErrors.includes(message));
     if (hardValidationErrors.length > 0) {

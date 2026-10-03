@@ -12,6 +12,7 @@ import { assessRemainingDraftSupport } from './draftDepth';
 import { measureRenderedDocumentPages, type RenderedDocumentPageMetrics } from './documentPageMetrics';
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
 import type { GenerationTraceContext } from './generationTrace';
+import { evaluateGeneratedLegalAdmission } from './generatedLegalAdmission';
 
 export interface ExtendedExpansionOptions {
   invokeProvider?: (request: AIRequest) => Promise<AIProviderResult>;
@@ -470,6 +471,14 @@ async function expandWithSupportedCoverage(
         });
         continue;
       }
+      const admission = evaluateGeneratedLegalAdmission({ text: generated, sectionType: section.type, document, analysis: caseAnalysis, legalIssueIds: packet.legalIssueIds });
+      if (!admission.accepted) {
+        const reason = admission.reasons.join('+');
+        warnings.push(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
+        options.trace?.addWarning(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
+        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: countWords(generated), reason, lossStage: 'block-admission' });
+        continue;
+      }
       const wholeDocumentText = document.sections.flatMap((candidate) => candidate.content.map((block) => block.text)).join('\n\n');
       const deduplicated = deduplicateExpansionContent(wholeDocumentText, generated);
       if (deduplicated.removedWords > 0) {
@@ -561,7 +570,7 @@ export function buildExpansionPrompt(
     'Genera una ampliación sustantiva para una sección existente. No rellenes espacio.',
     'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
     'Cuando no exista postura fáctica confirmada por el abogado:',
-    'ESTÁ PERMITIDO ÚNICAMENTE: cuestionar la acreditación y suficiencia probatoria del hecho afirmado por la contraria, invocar la carga de la prueba, señalar falta de precisión o presupuestos legales, analizar el alcance probatorio y formular argumentos y excepciones jurídicas subsidiarias sostenibles.',
+    'ESTÁ PERMITIDO ÚNICAMENTE: formular observaciones sobre hechos y fuentes concretos sin inventar postura. Carga probatoria, presunciones, efectos procesales y valor jurídico requieren una proposición oficialmente verificada y aplicable; en su ausencia marca PENDIENTE DE FUNDAMENTACIÓN / INVESTIGACIÓN. No ofrezcas evidencia no confirmada ni atribuyas valor pleno a una constancia.',
     'ESTÁ TERMINANTEMENTE PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad, inventar una versión fáctica del demandado (como contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados), inventar documentos inexistentes, fechas no mencionadas o causas de terminación laboral no comprobadas en autos, o inventar acontecimientos materiales.',
     'Usa únicamente los hechos, pruebas, autoridades y fuentes identificadas abajo. Si algo no consta, formula una reserva jurídica prudente sin inventarlo.',
     'No repitas texto, encabezados, premisas o citas ya existentes; escribe prosa forense continua sin Markdown.',
@@ -761,6 +770,14 @@ export async function expandDocumentToPageTarget(
           reason: 'COMPLETION_SENTINEL_WITHOUT_NEW_CONTENT',
           lossStage: 'provider-validation',
         });
+        continue;
+      }
+      const admission = evaluateGeneratedLegalAdmission({ text: generated, sectionType: section.type, document, analysis: caseAnalysis, legalIssueIds: section.content.flatMap(block => block.legalIssueIds || []) });
+      if (!admission.accepted) {
+        const reason = admission.reasons.join('+');
+        warnings.push(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
+        options.trace?.addWarning(`LEGAL_ADMISSION_REJECTED:${section.id}:${reason}`);
+        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: countWords(generated), reason, lossStage: 'block-admission' });
         continue;
       }
       const wholeDocText = document.sections.flatMap((candidate) => candidate.content.map((block) => block.text)).join('\n\n');

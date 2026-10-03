@@ -133,6 +133,13 @@ export interface TaskExecutionTrace {
   completedAt?: string;
   durationMs?: number;
   tokenBudget?: number;
+  /** Null when the legacy provider request did not specify/report a token cap. */
+  maxTokensRequested?: number | null;
+  /** Null when the provider router does not expose its resolved per-model cap. */
+  maxTokensResolved?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
   inputSizeBytes?: number;
   outputSizeBytes?: number;
   continuationCount: number;

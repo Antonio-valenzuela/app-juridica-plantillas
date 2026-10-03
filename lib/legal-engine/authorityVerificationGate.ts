@@ -1,4 +1,5 @@
 import type { VerifiedAuthority } from './legal-research/types';
+import { extractMaterialLegalCitations, normalizeLegalCitation } from './materialLegalCitations';
 
 export interface AuthorityUse {
   blockId: string;
@@ -25,10 +26,25 @@ export interface AuthorityVerificationGateResult {
   uses: Array<AuthorityUse & { verificationStatus: 'VERIFIED' | 'UNVERIFIED' | 'NOT_REQUIRED'; issues: string[] }>;
 }
 
-const MATERIAL_CITATION_RE = /\b(?:art[íi]culos?\s+\d+[\w.°º-]*|registro\s+digital\s*[:#]?\s*\d+|tesis\s+[A-Z0-9./-]+)\b/giu;
-
 function normalize(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-MX').replace(/\s+/g, ' ').trim();
+  return normalizeLegalCitation(value);
+}
+
+function citationIdentityMatchesAuthority(
+  citation: ReturnType<typeof extractMaterialLegalCitations>[number],
+  authority: VerifiedAuthority,
+): boolean {
+  const identity = normalize(`${authority.identity.canonicalCitation} ${authority.identifier || ''} ${authority.title || ''}`);
+  if (citation.articleText && !identity.includes(normalize(citation.articleText))) return false;
+  if (citation.statuteText) {
+    const requiredTitleWords = normalize(citation.statuteText)
+      .split(' ')
+      .filter((word) => !['de', 'del', 'la', 'las', 'el', 'los', 'y'].includes(word));
+    if (!requiredTitleWords.every((word) => identity.split(' ').includes(word))) return false;
+  } else if (!citation.articleText && !citation.aliases.some((alias) => identity.includes(normalize(alias)))) {
+    return false;
+  }
+  return true;
 }
 
 function officialEvidenceValid(authority: VerifiedAuthority): boolean {
@@ -55,10 +71,10 @@ export function evaluateAuthorityVerificationGate(input: AuthorityVerificationGa
   let unsupportedLegalAuthorities = 0;
 
   for (const block of input.blocks) {
-    for (const match of block.text.matchAll(MATERIAL_CITATION_RE)) {
-      const citation = normalize(match[0]);
+    for (const citationReference of extractMaterialLegalCitations(block.text)) {
+      const citationAliases = new Set(citationReference.aliases.map(normalize));
       const useIndex = input.uses.findIndex((use, index) => !consumed.has(index)
-        && use.blockId === block.id && normalize(use.citationText) === citation);
+        && use.blockId === block.id && citationAliases.has(normalize(use.citationText)));
       if (useIndex < 0) {
         issues.push(`AUTHORITY_USE_MISSING:${block.id}`);
         unsupportedLegalAuthorities += 1;
@@ -78,9 +94,9 @@ export function evaluateAuthorityVerificationGate(input: AuthorityVerificationGa
         if (authority.proposition.supportLevel !== 'DIRECT'
           || normalize(authority.proposition.text) !== normalize(use.proposition)) useIssues.push(`AUTHORITY_PROPOSITION_UNVERIFIED:${block.id}`);
         if (!use.application.trim()) useIssues.push(`AUTHORITY_APPLICATION_MISSING:${block.id}`);
-        // Canonical citation or identifier must contain the cited article/registration.
-        const identity = normalize(`${authority.identity.canonicalCitation} ${authority.identifier || ''}`);
-        if (!identity.includes(citation)) useIssues.push(`AUTHORITY_IDENTITY_MISMATCH:${block.id}`);
+        if (!citationIdentityMatchesAuthority(citationReference, authority)) {
+          useIssues.push(`AUTHORITY_IDENTITY_MISMATCH:${block.id}`);
+        }
       }
       if (useIssues.length > 0) unsupportedLegalAuthorities += 1;
       else {

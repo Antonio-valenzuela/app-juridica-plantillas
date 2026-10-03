@@ -103,10 +103,12 @@ describe('FASE 5B effective issue generation eligibility', () => {
 
   it.each([
     ['BLOCKED_BY_CONFLICT', { status: 'BLOCKED_BY_CONFLICT', conflictIds: ['conflict-1'] }],
-    ['BLOCKED_BY_CLIENT_POSITION', { status: 'NEEDS_CLIENT_POSITION', clientPositionStatus: 'UNKNOWN' }],
+    // Explicit AUTHORITY_RESEARCH remains blocked by canonical state; source-only
+    // review drafts use a different contract and are not unlocked by this bundle.
+    ['ISSUE_STATUS_NEEDS_CLIENT_POSITION', { status: 'NEEDS_CLIENT_POSITION', clientPositionStatus: 'UNKNOWN' }],
     ['UNLINKED_COVERAGE_REQUIRES_REVIEW', { status: 'UNLINKED', relationStatus: 'UNLINKED' }],
     ['UNKNOWN_ISSUE_STATUS_REQUIRES_REVIEW', { status: 'UNKNOWN' }],
-  ])('keeps canonical blocker %s ahead of research', (reason, overrides) => {
+  ])('keeps blocked issues ineligible despite sufficient research (%s)', (reason, overrides) => {
     const issue = issueFixture(overrides as Partial<LegalIssueItem>);
     const bundle = bundleFixture(issue.id);
     const result = resolveEffectiveIssueGenerationEligibility({
@@ -118,6 +120,9 @@ describe('FASE 5B effective issue generation eligibility', () => {
     });
 
     expect(result.eligible).toBe(false);
+    expect(result.effectiveStatus).toBe('BLOCKED');
+    expect(result.canonicalStatus).toBe(issue.status);
+    expect(result.verifiedAuthorityIds).toEqual([]);
     expect(result.reason).toBe(reason);
   });
 });

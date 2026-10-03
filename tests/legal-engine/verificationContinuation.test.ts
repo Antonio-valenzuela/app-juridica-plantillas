@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { runVerificationContinuation } from '@/lib/legal-engine/verificationContinuation';
-import type { UniversalLegalDocument } from '@/lib/legal-engine/types';
+import { createEmptyDocument, type UniversalLegalDocument } from '@/lib/legal-engine/types';
 
 function documentFixture(): UniversalLegalDocument {
-  return {
+  return createEmptyDocument({
     id: '4036c1cb-9931-43ee-82c4-4917052cfc52',
     documentType: 'contestacion_revision_amparo_directo',
     documentTypeLabel: 'Contestación',
@@ -13,9 +13,10 @@ function documentFixture(): UniversalLegalDocument {
     sections: [],
     validation: { isValid: false, errors: [], warnings: [] },
     generationMetadata: {
-      pipelineState: { isComplete: false, hasErrors: true, currentStage: 'validate' },
+      ...createEmptyDocument().generationMetadata,
+      pipelineState: { ...createEmptyDocument().generationMetadata.pipelineState, isComplete: false, hasErrors: true, currentStage: 'validate' },
     },
-  } as unknown as UniversalLegalDocument;
+  });
 }
 
 describe('verification continuation', () => {

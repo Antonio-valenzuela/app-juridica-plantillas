@@ -12,6 +12,7 @@ import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { extractMachoteStructure } from './structureBuilder';
 import { formatCaseContextField } from './caseContext';
+import { renderRequestLedSection } from './generationRequestContract';
 import { hasSeedMarkers, stripSeedMarkers } from './seedMarkers';
 import { buildCoverageMatrix, type CoverageMatrix } from './coverageMatrix';
 import { bindCoverageToSections } from './richCoverage';
@@ -115,6 +116,10 @@ function seedForSection(
   type: SectionType,
   doc: UniversalLegalDocument
 ): SectionSeed {
+  const requestLedText = renderRequestLedSection(doc, type, title);
+  if (requestLedText !== undefined) {
+    return { text: requestLedText, generationRequirement: 'DETERMINISTIC', generationStatus: 'generated', generationInstruction: `Conservar la solicitud y datos confirmados: ${requestLedText}` };
+  }
   const commercial = doc.caseContext?.commercialEnforcement;
   if (tpl.tipo === 'demanda_ejecutiva_mercantil') {
     if (type === 'header') {

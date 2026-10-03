@@ -11,6 +11,21 @@ import {
 import { expandDocumentToPageTarget } from '../../lib/legal-engine/generationExpansion';
 
 describe('generation extension contract', () => {
+  it('does not materialize unsupported testimony returned by an expansion provider', async () => {
+    const document = {
+      documentType: 'contestacion_demanda_laboral', documentTypeLabel: 'Contestación laboral',
+      sourceDocuments: [], generationMetadata: { generationId: 'offline-admission' },
+      sections: [{ id: 'pruebas', title: 'PRUEBAS', type: 'evidence', content: [{ id: 'base', text: '[PENDIENTE: confirmar pruebas]' }] }],
+    } as any;
+    const contract = resolveGenerationExtensionContract({ generationMode: 'extended-legal', targetPages: 2, minPages: 2, maxPages: 3, maxCallsPerDocument: 1, maxExpansionPasses: 1 });
+    const result = await expandDocumentToPageTarget(document, undefined, contract, {
+      measure: async () => ({ actualPages: 1, wordCount: 5, characterCount: 30, pdfBytes: 100 }),
+      invokeProvider: async () => ({ provider: 'groq', model: 'offline-fixture', success: true, latencyMs: 1, content: 'TESTIMONIAL DE LOS TESTIGOS QUE SE NOMINEN EN EL ACTO DE AUDIENCIA.', origin: 'AI_GENERATED_LEGAL_CONTENT', isLegalAiContent: true }),
+    });
+    expect(document.sections[0].content).toHaveLength(1);
+    expect(result.warnings.join(' ')).toContain('UNCONFIRMED_EVIDENCE');
+    expect(contract.extensionTargetUnmet).toBe(true);
+  });
   it('keeps standard mode bounded and resolves extended mode to the requested 40-page window', () => {
     const standard = resolveGenerationExtensionContract();
     const extended = resolveGenerationExtensionContract({ generationMode: 'extended-legal' });
@@ -184,7 +199,7 @@ describe('generation extension contract', () => {
   it.each([
     { name: 'isTruncated', response: { isTruncated: true } },
     { name: 'finishReason=length', response: { finishReason: 'length' } },
-  ])('materializes complete sentences from truncated output marked by $name', async ({ response: truncation }) => {
+  ])('does not admit an unsupported burden rule merely because its truncated sentence is complete ($name)', async ({ response: truncation }) => {
     const complete = 'La carga probatoria debe distribuirse conforme a la acción ejercitada y a los hechos efectivamente controvertidos. La documental debe valorarse según su alcance y relación con cada punto debatido.';
     const document = {
       documentType: 'apelacion_civil',
@@ -212,9 +227,22 @@ describe('generation extension contract', () => {
       } as any),
     });
 
-    expect(document.sections[0].content).toHaveLength(2);
-    expect(document.sections[0].content[1].text).toBe(complete);
+    expect(document.sections[0].content).toHaveLength(1);
+    expect(result.warnings.join(' ')).toContain('UNSUPPORTED_PROOF_RULE');
+    expect(contract.extensionTargetUnmet).toBe(true);
     expect(result.warnings).toContain('EXTENSION_OUTPUT_PARTIALLY_RECOVERED:agravios');
+  });
+
+  it('still materializes a complete factual observation from a truncated response', async () => {
+    const complete = 'La parte solicita que se confronte el registro aportado con el hecho controvertido, sin prejuzgar su eficacia.';
+    const document = { documentType: 'apelacion_civil', sourceDocuments: [], generationMetadata: { generationId: 'safe-tail' },
+      sections: [{ id: 'argument', title: 'Argumentos', type: 'argument', content: [{ id: 'base', text: 'Punto de partida' }] }] } as any;
+    const contract = resolveGenerationExtensionContract({ generationMode: 'extended-legal', targetPages: 2, minPages: 2, maxPages: 3, maxCallsPerDocument: 1, maxExpansionPasses: 1 });
+    await expandDocumentToPageTarget(document, undefined, contract, {
+      measure: async value => ({ actualPages: value.sections[0].content.length > 1 ? 2 : 1, wordCount: 100, characterCount: 600, pdfBytes: 1000 }),
+      invokeProvider: async () => ({ provider: 'groq', model: 'offline-fixture', success: true, latencyMs: 1, content: `${complete} Falta completar`, isTruncated: true, finishReason: 'length', origin: 'AI_GENERATED_LEGAL_CONTENT', isLegalAiContent: true }),
+    });
+    expect(document.sections[0].content[1].text).toBe(complete);
   });
 
   it('keeps novel paragraphs when a truncated-free expansion also contains a repeated paragraph', async () => {

@@ -9,6 +9,7 @@ import {
 } from '@/lib/legal-engine/documentAssemblyTypes';
 import { assembleLegalDraft } from '@/lib/legal-engine/documentAssembly';
 import { validateDocumentAuthorities } from '@/lib/legal-engine/documentAuthority';
+import { markUnverifiedAuthorityReferences } from '@/lib/legal-engine/authorityReferenceAudit';
 import type { RichCaseAnalysis } from '@/lib/legal-engine/case-extraction/types';
 import type { LegalIssueMatrix } from '@/lib/legal-engine/legalIssueMatrix';
 
@@ -121,6 +122,51 @@ function authorityInput(options: {
 }
 
 describe('document authority validation', () => {
+  it('blocks an article citation in generated prose when no official authority use is linked', () => {
+    const findings = validateDocumentAuthorities(authorityInput({
+      text: 'El artículo 17 de la Constitución garantiza tutela judicial efectiva.',
+      authorityIds: [],
+    }));
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'UNVERIFIED_AUTHORITY_REFERENCE', severity: 'BLOCKER' }),
+    ]));
+  });
+
+  it('blocks a named statute cited without a verified authority use', () => {
+    const findings = validateDocumentAuthorities(authorityInput({
+      text: 'Conforme a la Ley de Amparo, procede el trámite solicitado.',
+      authorityIds: [],
+    }));
+
+    expect(findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'UNVERIFIED_AUTHORITY_REFERENCE', severity: 'BLOCKER' }),
+    ]));
+  });
+
+  it('marks an unverified generated cite while preserving the legal proposition for review', () => {
+    const text = 'El artículo 17 de la Constitución garantiza tutela judicial efectiva en el trámite.';
+    const result = markUnverifiedAuthorityReferences({
+      text,
+      blockId: 'blk-authority',
+      authorityUses: [],
+      verifiedAuthorities: [],
+    });
+
+    expect(result.text).toContain('[NO VERIFICADO: artículo 17 de la Constitución]');
+    expect(result.text).toContain('garantiza tutela judicial efectiva en el trámite.');
+    expect(result.findings).toHaveLength(1);
+  });
+
+  it('does not classify expediente numbers, dates, or page counts as legal authorities', () => {
+    const findings = validateDocumentAuthorities(authorityInput({
+      text: 'Expediente 800/2024; fecha 29/09/2026; consta de 14 páginas.',
+      authorityIds: [],
+    }));
+
+    expect(findings.some((item) => item.code === 'UNVERIFIED_AUTHORITY_REFERENCE')).toBe(false);
+  });
+
   it('rejects a citation not present in the authorized authority graph', () => {
     const findings = validateDocumentAuthorities(authorityInput({
       text: 'Se invoca la Tesis inventada 99/2026 para sostener la pretensión.',

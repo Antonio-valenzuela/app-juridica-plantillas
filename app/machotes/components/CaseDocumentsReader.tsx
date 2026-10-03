@@ -724,7 +724,7 @@ export function CaseDocumentsReader({
                     {copyFeedback && <span className="text-xs font-medium text-emerald-600">{copyFeedback}</span>}
                   </div>
 
-                  <div className="h-[62vh] min-h-[440px] max-h-[820px] bg-white lg:h-[74vh] lg:min-h-[600px]">
+                  <div className="contestaciones-document-preview h-[62vh] min-h-[440px] max-h-[820px] bg-white lg:h-[74vh] lg:min-h-[600px]">
                     {viewMode === 'original' && hasFileUrl && isPdfDoc ? (
                       <object
                         data={`${selectedDoc.fileUrl}#page=${safeActivePage}&toolbar=0&navpanes=0&view=FitH`}

@@ -479,6 +479,7 @@ export interface PipelineState {
 }
 
 export interface GenerationMetadata {
+  requestContract?: import('./generationRequestContract').GenerationRequestContract;
   /** Modo de la última exportación materializada; no cambia el lifecycle jurídico. */
   exportMode?: import('./exportModes').ExportMode;
   /** Aviso que acompaña exclusivamente a una exportación de borrador. */

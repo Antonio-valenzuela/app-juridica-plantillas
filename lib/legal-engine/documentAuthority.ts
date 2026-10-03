@@ -1,6 +1,9 @@
 import type { SourceAuthorityMention, RichCaseAnalysis } from './case-extraction/types';
 import type { CoverageMatrix } from './coverageMatrix';
 import type { LegalIssueMatrix } from './legalIssueMatrix';
+import { markUnverifiedAuthorityReferences } from './authorityReferenceAudit';
+import type { AuthorityUse } from './authorityVerificationGate';
+import type { VerifiedAuthority } from './legal-research/types';
 import type {
   DocumentAssemblyFinding,
   DocumentAssemblyResult,
@@ -12,6 +15,8 @@ export interface DocumentAuthorityInput {
   coverageMatrix?: CoverageMatrix;
   legalIssueMatrix?: LegalIssueMatrix;
   verifiedAuthorityIds?: readonly string[];
+  authorityUses?: readonly AuthorityUse[];
+  verifiedAuthorities?: readonly VerifiedAuthority[];
 }
 
 export interface DocumentAuthorityAllowlist {
@@ -147,6 +152,35 @@ export function validateDocumentAuthorities(input: DocumentAuthorityInput): read
     const sectionIds = blockSectionIds(input.assembly, block.id);
     const explicitAuthorityIds = unique(block.authorityIds);
     const citations = [...(block.text || '').matchAll(AUTHORITY_CITATION_PATTERN)].map((match) => match[0]);
+
+    if (block.generatedBy === 'AI' && block.text?.trim()) {
+      const authorityAudit = markUnverifiedAuthorityReferences({
+        text: block.text,
+        blockId: block.id,
+        authorityUses: input.authorityUses || [],
+        verifiedAuthorities: input.verifiedAuthorities || [],
+      });
+      for (const unverified of authorityAudit.findings) {
+        findings.push({
+          ...finding(
+            'UNVERIFIED_AUTHORITY_REFERENCE',
+            `La cita jurídica "${unverified.citationText}" no tiene una aplicación oficial verificada para este bloque.`,
+            block,
+          ),
+          sectionIds,
+        });
+      }
+      if (/\[NO VERIFICADO:[^\]]+\]/iu.test(block.text)) {
+        findings.push({
+          ...finding(
+            'UNVERIFIED_AUTHORITY_REFERENCE',
+            'El bloque conserva una cita jurídica marcada para verificación oficial.',
+            block,
+          ),
+          sectionIds,
+        });
+      }
+    }
 
     for (const citation of citations) {
       if (!citationMatchesAllowed(citation, allowlist)) {

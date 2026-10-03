@@ -955,6 +955,21 @@ export function stitchTruncatedText(existingText: string, continuationText: stri
   if (!cleanExisting) return cleanContinuation;
   if (!cleanContinuation) return cleanExisting;
 
+  // Some providers restart the whole response despite the continuation instruction.
+  // Admit the replacement only when its COMPLETE prefix is identical word for word
+  // (line wrapping may differ). Never use title matching or fuzzy similarity here.
+  const priorWords = cleanExisting.split(/\s+/);
+  const nextWords = cleanContinuation.split(/\s+/);
+  const finalWord = priorWords[priorWords.length - 1];
+  const prefixMatches = priorWords.slice(0, -1).every((word, index) => word === nextWords[index]);
+  const lastWordMatches = finalWord === nextWords[priorWords.length - 1]
+    || (/^\p{L}{4,}$/u.test(finalWord)
+      && Boolean(nextWords[priorWords.length - 1]?.startsWith(finalWord)));
+  if (priorWords.length >= 30 && nextWords.length >= priorWords.length
+    && prefixMatches && lastWordMatches) {
+    return cleanContinuation;
+  }
+
   // 1. Check direct character overlap on seam
   const maxOverlap = Math.min(250, cleanExisting.length, cleanContinuation.length);
   for (let len = maxOverlap; len >= 5; len--) {

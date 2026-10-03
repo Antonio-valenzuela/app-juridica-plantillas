@@ -55,6 +55,7 @@ export function GenerationStatusBar({
     <div
       data-testid="generation-status-bar"
       data-layout="compact"
+      data-status={job.status}
       data-progress-mode={isIndeterminate ? 'indeterminate' : 'determinate'}
       role="status"
       aria-live="polite"
@@ -154,7 +155,7 @@ export function GenerationStatusBar({
           className={`h-full rounded-full transition-all duration-300 motion-reduce:transition-none ${isIndeterminate ? 'w-[38%] motion-safe:animate-pulse motion-reduce:animate-none' : ''}`}
           style={{
             width: isIndeterminate ? undefined : `${isFailed ? 0 : isCompleted ? 100 : pct}%`,
-            background: 'linear-gradient(90deg,#0B2545 0%, #2457A6 60%, #5B8DEF 100%)',
+            background: 'var(--lex-info)',
           }}
         />
       </div>

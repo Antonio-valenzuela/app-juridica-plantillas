@@ -2634,7 +2634,7 @@ export default function MachotesPage() {
           </div>
         ) : activeNavTab === 'responses_resources' ? (
           /* TAB 3: CONTESTACIONES Y RECURSOS (PANEL DE COTEJO DOCUMENTAL 1:1) */
-          <div className="min-h-screen min-w-0 w-full overflow-x-hidden overflow-y-auto bg-[#F5F7FA]">
+          <div className="contestaciones-workspace-root min-h-screen min-w-0 w-full overflow-x-hidden overflow-y-auto bg-[#F5F7FA]">
             <CaseDocumentsReader
               documents={caseDocuments}
               sourceDocs={uploadedSourceDocs}

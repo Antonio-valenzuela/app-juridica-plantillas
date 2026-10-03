@@ -112,7 +112,7 @@ function RealResearchView() {
    return <WorkspaceFrame title="Jurisprudencia SCJN" eyebrow="Investigación jurídica" description="Consulta criterios reales conservando registro, fuente y estado de verificación."><div className="grid grid-cols-1 gap-4 xl:grid-cols-[210px_minmax(0,1fr)_300px]"><aside className={`${card} h-fit p-4`}><h2 className="text-sm font-extrabold text-[#0B2545]">Criterios de lectura</h2><p className="mt-3 text-xs leading-relaxed text-slate-500">Los resultados secundarios se muestran como pendientes de confirmar y no se presentan como autoridad verificada.</p><div className="mt-4 rounded-xl bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-800">Confirma siempre la fuente oficial antes de incorporar un criterio al escrito.</div></aside><section className="min-w-0"><form onSubmit={(event) => { event.preventDefault(); void search(); }} className={`${card} flex items-center gap-2 p-3`}><Icon className="text-slate-400">search</Icon><input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="Buscar rubro, registro o texto…" /><button disabled={loading} type="submit" className="rounded-lg bg-[#0B2545] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{loading ? 'Buscando…' : 'Buscar'}</button></form><div className="mt-2 flex items-center justify-between gap-3"><p className="text-xs text-slate-500" aria-live="polite">{status}</p>{hasError && <button type="button" onClick={() => void search()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div><div className="mt-4 space-y-3">{results.map((result) => <article key={result.id} role="button" tabIndex={0} onClick={() => setSelected(result)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelected(result); }} className={`${card} cursor-pointer p-4 hover:border-[#B58A5A] ${selected?.id === result.id ? 'border-[#0B2545] ring-1 ring-[#0B2545]' : ''}`}><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{authorityTypeLabel(result.tipo)}</span><span className="text-xs text-slate-400">Registro {result.registroDigital || 'no informado'}</span></div><h3 className="mt-3 text-sm font-extrabold leading-snug text-[#0B2545]">{result.rubro}</h3><p className="mt-2 text-xs leading-relaxed text-slate-500">{result.snippet || 'La fuente no expuso un fragmento en esta consulta.'}</p><div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-400"><span>{sourceLabel(result.source)}</span><span>·</span><span>{verificationLabel(result.verificationStatus)}</span></div></article>)}{!hasError && !loading && query && results.length === 0 && <div className={`${card} p-6 text-center text-sm text-slate-500`}>No encontramos criterios verificables para esta búsqueda.</div>}</div></section><aside className={`${card} p-5`}><p className="text-xs font-bold uppercase tracking-wide text-[#B58A5A]">Criterio seleccionado</p>{selected ? <><h2 className="mt-3 text-lg font-extrabold text-[#0B2545]">{selected.rubro}</h2><p className="mt-3 text-xs text-slate-600">Estado: {verificationLabel(selected.verificationStatus)}</p><p className="mt-1 text-xs text-slate-600">Fuente: {sourceLabel(selected.source)}</p>{selected.officialUrl && <a href={selected.officialUrl} target="_blank" rel="noreferrer" className="mt-5 block text-xs font-bold text-[#0B5ED7]">Abrir fuente consultada →</a>}</> : <p className="mt-3 text-sm leading-relaxed text-slate-600">Selecciona un resultado real para consultar su ficha y fuente.</p>}</aside></div></WorkspaceFrame>;
 }
 
-function OperationalManualPanel() {
+function OperationalManualPanel({ compact = false }: { compact?: boolean }) {
   const [manual, setManual] = useState<{ manifest: { version: string; detectedPages: number; sourceHash: string; importedAt: string; status: string; active: boolean }; distribution: Record<string, number>; sections: string[] } | null>(null);
   const [status, setStatus] = useState('Consultando guía operativa…');
   useEffect(() => {
@@ -121,6 +121,15 @@ function OperationalManualPanel() {
       .then((payload) => { setManual(payload); setStatus(''); })
       .catch(() => setStatus('La guía operativa no está disponible en este momento.'));
   }, []);
+  if (compact) return <section className="mt-5 border-t border-slate-200 pt-4" aria-label="Recursos internos">
+    <h2 className="text-xs font-bold text-slate-500">Recursos internos</h2>
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm">
+      <div><p className="font-semibold text-[#0B2545]">Guía operativa</p>
+        <p className="mt-1 text-xs text-slate-500" role="status">{manual ? `Versión ${manual.manifest.version} · ${manual.manifest.active ? 'Activa' : 'Inactiva'}` : status}</p>
+      </div>
+      {manual && <a className="inline-flex min-h-11 items-center rounded-lg px-3 text-xs font-bold text-[#0B5ED7] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" href="/api/operational-manual/original" target="_blank" rel="noreferrer">Ver documento</a>}
+    </div>
+  </section>;
   return <section className={`${card} mb-5 p-5`} aria-label="Guía Operativa LEX PLANTILLAS">
     <h2 className="text-base font-extrabold text-[#0B2545]">Guía Operativa LEX PLANTILLAS</h2>
     <p className="mt-1 text-xs text-slate-500">Guía interna; no verifica artículos, jurisprudencia ni precedentes.</p>
@@ -471,6 +480,16 @@ function RealHelpView() {
 }
 
 function WorkspaceFrame({ title, eyebrow, description, action, children }: { title: string; eyebrow: string; description: string; action?: string; children: React.ReactNode }) {
+  const visualModule = ({
+    Inicio: 'dashboard',
+    Expedientes: 'cases',
+    'Cómputo de Términos': 'terms',
+    'Jurisprudencia SCJN': 'research',
+    'Biblioteca Jurídica': 'library',
+    'Alertas DOF y Boletín': 'alerts',
+    Configuración: 'settings',
+    Ayuda: 'help',
+  } as Record<string, string>)[title] || 'workspace';
   const contentClass = title === 'Jurisprudencia SCJN'
     ? 'workspace-research-grid'
     : title === 'Biblioteca Jurídica'
@@ -478,7 +497,7 @@ function WorkspaceFrame({ title, eyebrow, description, action, children }: { tit
       : '';
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-5 py-6 md:px-8">
+    <div className="workspace-module-frame mx-auto w-full max-w-[1600px] px-5 py-6 md:px-8" data-workspace-module={visualModule}>
       <Header
         title={title}
         eyebrow={eyebrow}
@@ -486,8 +505,9 @@ function WorkspaceFrame({ title, eyebrow, description, action, children }: { tit
         action={action ? <button type="button" className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0B2545] px-4 text-sm font-bold text-white shadow-sm hover:bg-[#081d39]"><Icon>add</Icon>{action}</button> : undefined}
       />
       {title === 'Inicio' && <UserFacingSystemStatusPanel />}
-      {(title === 'Biblioteca Jurídica' || title === 'Configuración') && <OperationalManualPanel />}
+      {title === 'Biblioteca Jurídica' && <OperationalManualPanel />}
       <div className={contentClass}>{children}</div>
+      {title === 'Configuración' && <OperationalManualPanel compact />}
     </div>
   );
 }

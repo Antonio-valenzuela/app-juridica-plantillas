@@ -47,6 +47,14 @@ function readyDocument() {
   return markDocumentAsReadyToExport(document, { explicit: true });
 }
 
+async function expectDraftReviewAndFinalBlocked(document: ReturnType<typeof readyDocument>, checkId: string) {
+  const prepared = await prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' });
+  expect(prepared.qualityGate.criticalErrors.map(issue => issue.checkId)).toContain(checkId);
+  expect(prepared.qualityGate.canMarkAsFinal).toBe(false);
+  expect(prepared.document.generationMetadata.exportMode).toBe('DRAFT');
+  await expect(prepareUniversalDocumentForExport(document, { exportMode: 'FINAL' })).rejects.toThrow();
+}
+
 describe('exportMode DRAFT | FINAL', () => {
   it('mantiene el aviso DRAFT en texto profesional sin separadores tipográficos raros', () => {
     expect(DRAFT_EXPORT_NOTICE).toMatch(/^[\p{L}\p{N}\s-]+$/u);
@@ -136,7 +144,7 @@ describe('exportMode DRAFT | FINAL', () => {
     expect(prepared.reviewOverrideWarnings).toContain('INLINE_HTML_FORMATTING_NORMALIZED: 3 etiqueta(s)');
   });
 
-  it('bloquea DRAFT cuando el control factual detecta una fecha concreta no respaldada', async () => {
+  it('conserva en DRAFT la fecha no respaldada y bloquea FINAL', async () => {
     const document = readyDocument();
     document.generationMetadata.draftDepth = 'EXTENSIVE_40';
     const body = document.sections.find((section) => section.id === 'body')!;
@@ -145,13 +153,10 @@ describe('exportMode DRAFT | FINAL', () => {
       text: `${body.content[0].text}\nLa actora ingresó el 3 de diciembre de 2024.`,
     };
 
-    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
-      .rejects.toThrow(/UNSUPPORTED_FACTUAL_CLAIM/);
-    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT', unsavedDraft: true }))
-      .rejects.toThrow(/UNSUPPORTED_FACTUAL_CLAIM/);
+    await expectDraftReviewAndFinalBlocked(document, 'UNSUPPORTED_FACTUAL_CLAIM');
   });
 
-  it('bloquea DRAFT cuando una autoridad material está aplicada a una proposición incorrecta', async () => {
+  it('conserva el finding de autoridad mal aplicada en DRAFT y bloquea FINAL', async () => {
     const document = readyDocument();
     document.matter = 'LABORAL';
     document.generationMetadata.draftDepth = 'EXTENSIVE_40';
@@ -161,13 +166,10 @@ describe('exportMode DRAFT | FINAL', () => {
       text: `${body.content[0].text}\nEl artículo 39-A de la LFT permite terminar un contrato por tiempo determinado al llegar su vencimiento.`,
     };
 
-    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
-      .rejects.toThrow(/MISAPPLIED_AUTHORITY/);
-    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT', unsavedDraft: true }))
-      .rejects.toThrow(/MISAPPLIED_AUTHORITY/);
+    await expectDraftReviewAndFinalBlocked(document, 'MISAPPLIED_AUTHORITY');
   });
 
-  it('omite en DRAFT las oraciones con autoridad no verificada y advierte la revisión', async () => {
+  it('marca en DRAFT la autoridad no verificada sin borrar la proposición', async () => {
     const document = readyDocument();
     document.generationMetadata.draftDepth = 'EXTENSIVE_40';
     const body = document.sections.find((section) => section.id === 'body')!;
@@ -182,21 +184,25 @@ describe('exportMode DRAFT | FINAL', () => {
       status: 'LEGAL_ARGUMENT',
       sourceSpans: [],
       reviewedBy: 'ATTORNEY',
+    }, {
+      blockId: 'body-1',
+      claim: 'El [NO VERIFICADO: artículo 47 de la LFT] regula los efectos aplicables al caso concreto.',
+      status: 'LEGAL_ARGUMENT',
+      sourceSpans: [],
+      reviewedBy: 'ATTORNEY',
     }];
 
     const prepared = await prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' });
     const exportedText = prepared.document.sections.flatMap((section) => section.content).map((block) => block.text).join('\n');
-    const authorityNote = prepared.document.sections.flatMap((section) => section.content).find((block) => block.text.includes('CITA JURÍDICA OMITIDA'));
 
     expect(exportedText).toContain('La pretensión requiere revisión de las constancias.');
-    expect(exportedText).not.toMatch(/artículo 47 de la LFT/i);
-    expect(exportedText).toContain('CITA JURÍDICA OMITIDA');
-    expect(authorityNote?.generatedBy).toBe('DETERMINISTIC');
+    expect(exportedText).toContain('regula los efectos aplicables al caso concreto.');
+    expect(exportedText).toContain('[NO VERIFICADO: artículo 47 de la LFT]');
     expect(prepared.qualityGate.canMarkAsFinal).toBe(false);
-    expect(prepared.reviewOverrideWarnings.some((warning) => warning.includes('DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED'))).toBe(true);
+    expect(prepared.reviewOverrideWarnings).toContain('DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_MARKED:1');
   });
 
-  it('deja una sola nota de autoridad omitida por sección aunque retire varias citas', async () => {
+  it('marca cada cita no verificada y conserva el texto de ambas proposiciones', async () => {
     const document = readyDocument();
     document.generationMetadata.draftDepth = 'EXTENSIVE_40';
     const body = document.sections.find((section) => section.id === 'body')!;
@@ -223,8 +229,22 @@ describe('exportMode DRAFT | FINAL', () => {
         reviewedBy: 'ATTORNEY',
       },
       {
+        blockId: 'authority-1',
+        claim: 'El [NO VERIFICADO: artículo 47 de la LFT] regula los efectos aplicables al caso.',
+        status: 'LEGAL_ARGUMENT',
+        sourceSpans: [],
+        reviewedBy: 'ATTORNEY',
+      },
+      {
         blockId: 'authority-2',
         claim: 'El argumento requiere valoración.',
+        status: 'LEGAL_ARGUMENT',
+        sourceSpans: [],
+        reviewedBy: 'ATTORNEY',
+      },
+      {
+        blockId: 'authority-2',
+        claim: 'El [NO VERIFICADO: artículo 48 de la LFT] sustenta esta consecuencia.',
         status: 'LEGAL_ARGUMENT',
         sourceSpans: [],
         reviewedBy: 'ATTORNEY',
@@ -233,16 +253,15 @@ describe('exportMode DRAFT | FINAL', () => {
 
     const prepared = await prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' });
     const exportedText = prepared.document.sections.flatMap((section) => section.content).map((block) => block.text).join('\n');
-    const authorityNotes = prepared.document.sections.flatMap((section) => section.content).filter((block) => block.text.includes('CITA JURÍDICA OMITIDA'));
 
-    expect(exportedText.match(/CITA JURÍDICA OMITIDA/g)).toHaveLength(1);
-    expect(authorityNotes).toHaveLength(1);
-    expect(authorityNotes[0]?.generatedBy).toBe('DETERMINISTIC');
-    expect(exportedText).not.toMatch(/artículo (47|48) de la LFT/i);
-    expect(prepared.reviewOverrideWarnings).toContain('DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_OMITTED:2');
+    expect(exportedText).toContain('[NO VERIFICADO: artículo 47 de la LFT]');
+    expect(exportedText).toContain('[NO VERIFICADO: artículo 48 de la LFT]');
+    expect(exportedText).toContain('regula los efectos aplicables al caso.');
+    expect(exportedText).toContain('sustenta esta consecuencia.');
+    expect(prepared.reviewOverrideWarnings).toContain('DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_MARKED:2');
   });
 
-  it('bloquea DRAFT cuando hay bloques de IA sin auditoría factual individual', async () => {
+  it('conserva auditoría ausente en DRAFT y bloquea FINAL', async () => {
     const document = readyDocument();
     document.generationMetadata.draftDepth = 'EXTENSIVE_40';
     const body = document.sections.find((section) => section.id === 'body')!;
@@ -253,11 +272,10 @@ describe('exportMode DRAFT | FINAL', () => {
     } as any;
 
     expect(runQualityGateCheck(document).criticalErrors.map((issue) => issue.checkId)).toContain('FACTUAL_CLAIM_AUDIT_MISSING');
-    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
-      .rejects.toThrow(/FACTUAL_CLAIM_AUDIT_MISSING/);
+    await expectDraftReviewAndFinalBlocked(document, 'FACTUAL_CLAIM_AUDIT_MISSING');
   });
 
-  it('bloquea DRAFT cuando la auditoría determinística detecta una contradicción factual', async () => {
+  it('conserva contradicción factual en DRAFT y bloquea FINAL', async () => {
     const document = readyDocument();
     document.generationMetadata.draftDepth = 'EXTENSIVE_40';
     const sourceSentence = 'La jornada inició a las 16:30 horas.';
@@ -282,11 +300,10 @@ describe('exportMode DRAFT | FINAL', () => {
     populateDeterministicFactualClaimAudit(document);
 
     expect(runQualityGateCheck(document).criticalErrors.map((issue) => issue.checkId)).toContain('FACTUAL_CLAIM_CONTRADICTORY');
-    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
-      .rejects.toThrow(/FACTUAL_CLAIM_CONTRADICTORY/);
+    await expectDraftReviewAndFinalBlocked(document, 'FACTUAL_CLAIM_CONTRADICTORY');
   });
 
-  it('bloquea DRAFT cuando el abogado no confirmó la postura del hecho que la respuesta niega', async () => {
+  it('conserva postura contradictoria en DRAFT y bloquea FINAL', async () => {
     const document = readyDocument();
     document.documentType = 'contestacion_laboral';
     document.documentTypeLabel = 'Contestación laboral';
@@ -313,8 +330,7 @@ describe('exportMode DRAFT | FINAL', () => {
     const quality = runQualityGateCheck(document);
     expect(quality.criticalErrors.map((issue) => issue.checkId)).toContain('CONTRADICTORY_POSITION');
 
-    await expect(prepareUniversalDocumentForExport(document, { exportMode: 'DRAFT' }))
-      .rejects.toThrow(/CONTRADICTORY_POSITION/);
+    await expectDraftReviewAndFinalBlocked(document, 'CONTRADICTORY_POSITION');
   });
 
   it('permite DRAFT si falta confirmar postura pero la redacción se limita a reservar revisión', async () => {

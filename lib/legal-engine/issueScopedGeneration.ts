@@ -553,6 +553,7 @@ export function buildIssueContextPack(
   matrix: LegalIssueMatrix,
   options: { verifiedResearch?: VerifiedResearchContext } = {},
 ): IssueContextPack {
+  if (matrix.documentId !== doc.id) throw new IssueContextScopeError('MATTER_DOCUMENT_MISMATCH');
   const rich = caseAnalysis.richCaseAnalysis;
   if (!rich) throw new IssueContextScopeError('RICH_ANALYSIS_REQUIRED');
   const issueIds = issueIdsOf(task);
@@ -613,6 +614,13 @@ export function buildIssueContextPack(
     ...selectedAuthorities.flatMap((item) => item.provenance),
     ...selectedCoverage.flatMap((item) => item.provenance || []),
   ];
+  // Only explicit source ownership is checked here; this does not verify a span.
+  if (doc.sourceDocuments?.length) {
+    const sources = new Set(doc.sourceDocuments.map((source) => source.id));
+    if (linkedProvenance.some((p) => !sources.has(p.sourceId))) {
+      throw new IssueContextScopeError('MATTER_SOURCE_OUT_OF_SCOPE');
+    }
+  }
   const packWithoutHash = {
     ...(task.legalDraftingContract ? { legalDraftingContract: task.legalDraftingContract } : {}),
     legalIssue: {

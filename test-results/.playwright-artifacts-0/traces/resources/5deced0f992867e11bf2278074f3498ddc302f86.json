@@ -1,0 +1,1 @@
+{"ok":true,"chain":["groq","nvidia","gemini","local"],"providers":[{"id":"gemini","available":true},{"id":"groq","available":true},{"id":"nvidia","available":true},{"id":"local","available":true}]}

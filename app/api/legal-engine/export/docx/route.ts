@@ -63,11 +63,16 @@ export async function POST(req: NextRequest) {
     if (typeof doc.id !== 'string') {
       return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
     }
-    if (local?.ok) {
-      const owned = (await local.store.list()).some(record => {
-        const document = record.structuredDoc;
-        return document && typeof document === 'object' && 'id' in document && document.id === doc.id;
-      });
+    if (local?.ok && !unsavedDraftRequested) {
+      let owned: boolean;
+      try {
+        owned = (await local.store.list()).some(record => {
+          const document = record.structuredDoc;
+          return document && typeof document === 'object' && 'id' in document && document.id === doc.id;
+        });
+      } catch {
+        return NextResponse.json({ ok: false, errorCode: 'EXPORT_PERSISTENCE_UNAVAILABLE', message: 'No se pudo verificar el borrador guardado. Puedes descargar una copia DRAFT local.' }, { status: 503 });
+      }
       if (!owned) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
     } else if (!unsavedDraftRequested) {
       if (!principal) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });

@@ -8,9 +8,11 @@ const mocks = vi.hoisted(() => ({
   prepareUniversalDocumentForExport: vi.fn(),
   exportUniversalToPdf: vi.fn(),
   exportUniversalToDocx: vi.fn(),
+  desktopDraftRepository: vi.fn(),
 }));
 
 vi.mock('@/lib/security/lawyerAuth', () => ({ requireLawyerAccess: mocks.requireLawyerAccess }));
+vi.mock('@/lib/workspace/desktopDraftRepository', () => ({ desktopDraftRepository: mocks.desktopDraftRepository }));
 vi.mock('@/lib/legal-engine/documentOwnership', () => ({ documentBelongsToPrincipal: mocks.documentBelongsToPrincipal }));
 vi.mock('@/lib/security/rateLimit', () => ({ checkRequestRateLimit: mocks.checkRequestRateLimit }));
 vi.mock('@/lib/legal-engine/exportGuards', () => ({
@@ -45,6 +47,7 @@ function request(path: string, payload: Record<string, unknown>, headers: Record
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('NODE_ENV', 'production');
+  mocks.desktopDraftRepository.mockReturnValue(null);
   mocks.requireLawyerAccess.mockResolvedValue({
     ok: false,
     response: Response.json({ error: 'UNAUTHORIZED' }, { status: 401 }),
@@ -64,6 +67,29 @@ afterEach(() => {
 });
 
 describe('exportación local de borrador no persistido', () => {
+  it.each([['pdf', exportPdf], ['docx', exportDocx]] as const)('%s: caída del almacén tras guardar permite señalar fallback, no se confunde con propiedad denegada', async (format, handler) => {
+    mocks.desktopDraftRepository.mockReturnValue({ ok: true, store: { list: vi.fn(async () => { throw new Error('store unavailable after save'); }) } });
+    const response = await handler(request(`/api/legal-engine/export/${format}`, { document, exportMode: 'DRAFT' }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'EXPORT_PERSISTENCE_UNAVAILABLE' });
+    expect(mocks.prepareUniversalDocumentForExport).not.toHaveBeenCalled();
+  });
+  it('DRAFT efímero autenticado no consulta el almacén caído; FINAL no se autoriza', async () => {
+    const list = vi.fn(async () => { throw new Error('store unavailable'); });
+    mocks.desktopDraftRepository.mockReturnValue({ ok: true, store: { list } });
+    for (const [handler, format] of [[exportPdf, 'pdf'], [exportDocx, 'docx']] as const) {
+      const response = await handler(request(`/api/legal-engine/export/${format}`, { document, exportMode: 'DRAFT' }, { 'X-Unsaved-Draft-Export': 'true' }));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('X-Export-Persistence')).toBe('UNSAVED_LOCAL_DRAFT');
+    }
+    expect(list).not.toHaveBeenCalled();
+    expect((await exportPdf(request('/api/legal-engine/export/pdf', { document, exportMode: 'FINAL' }, { 'X-Unsaved-Draft-Export': 'true' }))).status).toBe(422);
+  });
+  it('DRAFT efímero no evita el rechazo de capacidad local inválida', async () => {
+    mocks.desktopDraftRepository.mockReturnValue({ ok: false, response: Response.json({ error: 'UNAUTHORIZED' }, { status: 401 }) });
+    expect((await exportPdf(request('/api/legal-engine/export/pdf', { document, exportMode: 'DRAFT' }, { 'X-Unsaved-Draft-Export': 'true' }))).status).toBe(401);
+    expect(mocks.exportUniversalToPdf).not.toHaveBeenCalled();
+  });
   it('exporta PDF y DOCX DRAFT sin Prisma, únicamente desde el mismo origen loopback', async () => {
     const pdfResponse = await exportPdf(request('/api/legal-engine/export/pdf', {
       document,

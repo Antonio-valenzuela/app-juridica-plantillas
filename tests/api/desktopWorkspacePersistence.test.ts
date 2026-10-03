@@ -6,6 +6,7 @@ import { NextRequest } from 'next/server';
 import { POST, GET as listDrafts } from '@/app/api/legal-drafts/route';
 import { GET, PATCH } from '@/app/api/legal-drafts/[id]/route';
 import { GET as analytics } from '@/app/api/workspace/analytics/route';
+import { GET as dashboard } from '@/app/api/workspace/dashboard/route';
 import { GET as cases } from '@/app/api/workspace/cases/route';
 import { POST as exchange } from '@/app/api/desktop-local/session/route';
 import { POST as exportDocx } from '@/app/api/legal-engine/export/docx/route';
@@ -48,6 +49,22 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 describe('REAL_LOCAL desktop draft repository (no mocked auth/store/aggregator)', () => {
+  it('shows job-only activity in Inicio with the same counts as Configuración', async () => {
+    const owner = await new DesktopProfileRepository().load();
+    const job = createGenerationJob({ desktopOwnerId: owner.ownerId });
+    await flushGenerationJobPersistence(job.jobId);
+    job.status = 'failed';
+    job.terminalStatus = 'FAILED';
+    job.errorCode = 'SYNTHETIC_TEST_FAILURE';
+    await persistGenerationJob(job);
+    const settings = await (await analytics(request('/api/workspace/analytics'))).json();
+    const home = await (await dashboard(request('/api/workspace/dashboard'))).json();
+    expect(settings.totals.failed).toBe(1);
+    expect(home.stats.failed).toBe(1);
+    expect(home.daily.reduce((sum: number, day: { count: number }) => sum + day.count, 0)).toBe(1);
+    expect(home.stats.totalDocuments).toBe(0);
+    evictGenerationJob(job.jobId);
+  });
   it('makes an interrupted valid checkpoint reopenable once, without promotion or duplicating the document', async () => {
     const owner = await new DesktopProfileRepository().load();
     const job = createGenerationJob({ desktopOwnerId: owner.ownerId });

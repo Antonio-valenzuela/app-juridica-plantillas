@@ -109,6 +109,20 @@ export interface NormalizedResearchQuery {
 }
 
 export interface AuthorityCandidate {
+  /** Institutional consolidation is retrieval evidence, not official verification. */
+  stateSource?: {
+    kind: 'INSTITUTIONAL_CONSOLIDATED' | 'OFFICIAL_PUBLICATION';
+    catalogUrl: string;
+    catalogHash: string;
+    lastModificationDate: string | null;
+    decreeNumber: string | null;
+    officialPublicationUrl: string | null;
+    publicationMatch: 'NOT_CHECKED' | 'NOT_FOUND' | 'CANDIDATE_FOUND' | 'UNAVAILABLE' | 'MATCHED';
+    publicationSearchUrl?: string;
+    publicationSearchHash?: string;
+    excerpt?: string;
+    reviewReasons: string[];
+  };
   id: string;
   requestId: string;
   provider?: 'SCJN' | 'FEDERAL_LEGISLATION' | 'DOF' | 'STATE_OFFICIAL' | 'FIXTURE_OFFICIAL' | 'CORPUS_IURIS' | 'LEX_MX' | 'RESEARCH_ROUTER';
@@ -139,6 +153,15 @@ export interface AuthorityCandidate {
 }
 
 export interface LegalAuthority {
+  provenance?: {
+    level: 1 | 2 | 3 | 4 | 5;
+    origin: 'OFFICIAL_VERIFIED' | 'OFFICIAL_RETRIEVED' | 'SECONDARY' | 'USER_PROVIDED' | 'MODEL_SUGGESTED';
+    stage: 'SUGGESTED' | 'RETRIEVED' | 'VERIFIED';
+    sourceUrl?: string;
+    retrievedAt?: string;
+    sourceHash?: string;
+    locator?: string;
+  };
   id: string;
   title: string;
   type: AuthorityType;

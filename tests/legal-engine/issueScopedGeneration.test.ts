@@ -684,6 +684,21 @@ describe('FASE 4 issue eligibility and plan linkage', () => {
 });
 
 describe('FASE 4 allow-listed issue context and prompt strategies', () => {
+  it('preserves the current matter context when its loaded source matches the selected provenance', () => {
+    const value = readyExecutionContext();
+    value.doc.sourceDocuments = [{ id: 'fixture-f-source', sourceValidated: true } as any];
+    expect(() => buildIssueContextPack(value.task, value.doc, value.analysis, value.matrix)).not.toThrow();
+  });
+  it('rejects a matrix belonging to another document before constructing the provider context', () => {
+    const value = readyExecutionContext();
+    expect(() => buildIssueContextPack(value.task, value.doc, value.analysis, { ...value.matrix, documentId: 'OTHER_MATTER' })).toThrow('MATTER_DOCUMENT_MISMATCH');
+  });
+
+  it('rejects a source-backed entity imported from another matter', () => {
+    const value = readyExecutionContext();
+    value.doc.sourceDocuments = [{ id: 'ONLY_CURRENT_SOURCE', sourceValidated: true }];
+    expect(() => buildIssueContextPack(value.task, value.doc, value.analysis, value.matrix)).toThrow('MATTER_SOURCE_OUT_OF_SCOPE');
+  });
   describe('task-to-draft-contract invariant', () => {
     const descriptivePayload = {
       factualDevelopment: ['Desarrollo descriptivo respaldado por la fuente.'],

@@ -62,6 +62,19 @@ describe('authority verification gate', () => {
     expect(result.unsupportedLegalAuthorities).toBe(0);
   });
 
+  it('rejects a verified authority when its verified proposition differs from the generated use', () => {
+    const result = evaluateAuthorityVerificationGate({
+      blocks: [{ id: 'b1', text: 'Conforme al artículo 7 de la Ley de Ejemplo, procede la petición.' }],
+      uses: [{ blockId: 'b1', citationText: 'artículo 7', authorityId: 'verified-7', issueId: 'issue-1', proposition: 'La norma establece una regla distinta.', application: 'La regla se aplica a la petición del caso.' }],
+      verifiedAuthorities: [authority],
+    });
+
+    expect(result.status).toBe('BLOCKED');
+    expect(result.verifiedAuthorityCount).toBe(0);
+    expect(result.appliedAuthorityCount).toBe(0);
+    expect(result.issues).toContain('AUTHORITY_PROPOSITION_UNVERIFIED:b1');
+  });
+
   it('rejects a fixture labeled as an official authority in a real-document gate', () => {
     const result = evaluateAuthorityVerificationGate({
       blocks: [{ id: 'b1', text: 'Conforme al artículo 7 de la Ley de Ejemplo, procede la petición.' }],

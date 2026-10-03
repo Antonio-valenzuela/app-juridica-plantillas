@@ -18,6 +18,7 @@ import {
 import { classifyIntent } from './classifier';
 import { buildVariableMap } from './variableResolver';
 import { validateDocument } from './validator';
+import { buildGenerationRequestContract, renderRequestLedSection, validateGenerationRequestContract } from './generationRequestContract';
 import { buildGenerationContext, requiresValidatedSources, buildBlockGenerationContext } from './context';
 import { createReferenceDocument } from './context';
 import { markDocumentAsDraft, markDocumentAsReviewRequired, markDocumentAsSource, readDocumentLifecycle } from './documentLifecycle';
@@ -80,6 +81,7 @@ import { advanceDocumentState, createDocumentState, type DocumentState } from '.
 import { buildSourceGroundingForDocuments } from './sourceGrounding';
 import { evaluateProvenanceIntegrityGate } from './provenanceIntegrityGate';
 import { correctMisappliedLaborAuthorities } from './authorityPropositionGate';
+import { evaluateGeneratedLegalAdmission } from './generatedLegalAdmission';
 
 export interface LegalResearchOnlyInput {
   caseAnalysis: CaseAnalysis;
@@ -353,6 +355,7 @@ import {
   applySemanticEvaluationToCoverageMatrix,
   logGenerationPlan,
   logTaskExecution,
+  stitchTruncatedText,
 } from './generationTasks';
 import type { GenerationTask } from './generationTasks';
 import { evaluateBlockQuality, evaluateDocumentSemantics } from './semanticEvaluator';
@@ -372,6 +375,7 @@ import { deriveSectionContracts, validateSectionContracts } from './documentSect
 import { validateDocumentConsistency } from './documentConsistency';
 import { validateDocumentEvidence } from './documentEvidence';
 import { validateDocumentAuthorities } from './documentAuthority';
+import { markUnverifiedAuthorityReferences } from './authorityReferenceAudit';
 import { findDocumentRedundancy } from './documentRedundancy';
 import { reconcileDocumentCoverage } from './documentCoverage';
 import { decideDocumentAssemblyReadiness, evaluateDocumentAssemblyChecks, type DocumentReadinessInput } from './documentReadiness';
@@ -477,6 +481,7 @@ export function applySectionCoverageTransition(
 
 /** Mapeo rol CaseParty → campo de DocumentParties */
 const PARTY_FIELD_BY_ROLE: Record<string, keyof DocumentParties> = {
+  promovente: 'actor',
   actor: 'actor',
   demandado: 'demandado',
   autoridad: 'autoridadResponsable',
@@ -823,11 +828,7 @@ export function buildLawyerStyleDirective(profile: LawyerProfile): string {
     `- Extensión promedio por sección: ${profile.averageSectionLength}`,
     `- Extensión documental: ${profile.preferredDocumentLength}`,
     `- Estilo de citas: ${profile.citationStyle}`,
-    `- Orden preferido: ${profile.preferredSectionOrdering.join(' → ') || 'el orden canónico del documento'}`,
-    `- Fórmulas recurrentes: ${profile.recurringFormulas.join(' | ') || 'ninguna'}`,
-    `- Forma de contestar hechos: ${profile.preferredWayToContestFacts.join(' | ') || 'argumentación técnica y prudente'}`,
-    `- Forma de contestar prestaciones: ${profile.preferredWayToContestBenefits.join(' | ') || 'argumentación técnica y prudente'}`,
-    `- Forma de peticionar: ${profile.preferredWayToWritePetition.join(' | ') || 'petitorio claro y congruente'}`,
+    '- La estructura y los petitorios dependen del expediente actual y de la solicitud confirmada, no de fórmulas históricas del perfil.',
   ].join('\n');
 }
 
@@ -1287,7 +1288,8 @@ export async function generateLegalBlock(
   instruction: string | undefined,
   customGenerator: PipelineInput['generateSection'] | undefined,
   lawyerProfile: LawyerProfile,
-  sectionPlan?: SectionPlan
+  sectionPlan?: SectionPlan,
+  trace?: GenerationTraceContext,
 ): Promise<{ text: string; warnings: string[]; sources?: GeneratedSourceReference[]; aiUsed?: boolean; aiProvider?: string; aiModel?: string; aiError?: string; finishReason?: string | null; isTruncated?: boolean; fallbackUsed?: boolean }> {
   // Si el bloque no requiere IA, preservarlo directamente (fallback determinístico sin llamada)
   if (!block.requiresAi) {
@@ -1371,6 +1373,11 @@ Redacta el bloque jurídico "${block.title}" (tipo: ${block.kind} / ${block.sect
 
 ${referenceDirective}
 
+${doc.generationMetadata.requestContract ? `SOLICITUD ACTUAL VINCULANTE (no convertirla en demanda o recurso):
+${JSON.stringify(doc.generationMetadata.requestContract.requests.map(request => request.text))}
+PERSONALIDAD EXPLÍCITA: ${doc.generationMetadata.requestContract.capacity || '[DATO PENDIENTE]'}
+El cuerpo y su conclusión deben limitarse a esta solicitud; no agregar resultados de fondo ni certificar hechos o autoridades.` : ''}
+
 IDENTIDAD PROCESAL (no modificar ni inferir otra):
 materia: ${identity.matter}
 jurisdicción: ${identity.jurisdiction}
@@ -1418,7 +1425,7 @@ REGLAS OBLIGATORIAS:
 2. Si un dato no está disponible, utiliza estrictamente: [DATO PENDIENTE DE EXPEDIENTE].
 3. Aplica contraste riguroso con la resolución impugnada ("El Tribunal sostuvo... Sin embargo... El problema constitucional radica en... Por tanto...").
 4. Mantén redacción forense mexicana formal, técnica y persuasiva sin relleno.
-5. Concluye el bloque con una consecuencia jurídica clara.
+5. Concluye el bloque solo con el efecto expresamente solicitado y sustentado; si falta soporte, marca la cuestión como pendiente, no inventes una consecuencia jurídica.
 6. PROHIBIDO usar Markdown: nada de **asteriscos**, *cursivas*, #encabezados ni viñetas "-". Los títulos o rúbricas van SOLO EN MAYÚSCULAS, sin símbolos.
 7. NO reproduzcas etiquetas internas de este encabezado (OBJETIVO DEL BLOQUE, TIPO DE BLOQUE, CONTEXTO ANTERIOR, CONTEXTO POSTERIOR, TEORÍA DEL CASO, TEXTO ORIGINAL DEL BLOQUE). Redacta únicamente el contenido jurídico del bloque.
 8. Conserva INTACTAS las redacciones del expediente (corridas de asteriscos *****) y los marcadores [DATO PENDIENTE DE EXPEDIENTE]; jamás intentes deducir ni sustituir su contenido.
@@ -1431,27 +1438,94 @@ REGLAS OBLIGATORIAS:
 Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
 
       const SECTION_TIMEOUT_MS = Number(process.env.SECTION_AI_TIMEOUT_MS) || 60000;
-      const aiPromise = runFastMode({
+      const providerRequest = {
         systemPrompt: 'Eres el Motor Forense de Análisis y Redacción Jurídica de Jurídico Radar. Trabajas por bloques jurídicos, no por fragmentos aislados.',
         userMessage: prompt,
-        mode: 'fast',
+        mode: 'fast' as const,
         taskType: 'SECTION_SUPPORT',
         ...caseProviderFlags(doc),
-      });
+      };
+      const callProvider = async (userMessage: string) => {
+        const startedAt = new Date();
+        const startedMs = Date.now();
+        const aiPromise = runFastMode({ ...providerRequest, userMessage });
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout de IA por bloque (${SECTION_TIMEOUT_MS}ms)`)), SECTION_TIMEOUT_MS)
+        );
+        const result = await Promise.race([aiPromise, timeoutPromise]);
+        return {
+          result,
+          startedAt,
+          durationMs: Math.max(0, Date.now() - startedMs),
+          inputSizeBytes: Buffer.byteLength(userMessage, 'utf8'),
+        };
+      };
+      const recordProviderAttempt = (
+        attempt: Awaited<ReturnType<typeof callProvider>>,
+        continuationCount: number,
+      ) => {
+        const response = attempt.result;
+        const output = String(response.content || '');
+        const responseFinishReason = String(response.finishReason || (response as any).rawResponse?.choices?.[0]?.finish_reason || 'stop');
+        const truncated = Boolean(response.isTruncated || ['length', 'max_tokens'].includes(responseFinishReason.toLowerCase()));
+        const actualProvider = response.providerActuallyUsed && response.providerActuallyUsed !== 'none'
+          ? response.providerActuallyUsed
+          : response.provider;
+        const providerMap: Record<string, 'NVIDIA' | 'GEMINI' | 'GROQ' | 'LOCAL' | 'NONE'> = {
+          nvidia: 'NVIDIA', gemini: 'GEMINI', groq: 'GROQ', local: 'LOCAL',
+        };
+        const providerActuallyUsed = providerMap[String(actualProvider).toLowerCase()] || 'NONE';
+        const realProvider = providerActuallyUsed !== 'LOCAL' && providerActuallyUsed !== 'NONE';
+        trace?.recordTaskExecution({
+          taskId: `legacy-section-${block.id}`,
+          taskType: 'SECTION_SUPPORT',
+          sectionId: block.id,
+          coverageItemIds: sectionPlan?.coverageItemIds || [],
+          legalIssueIds: sectionPlan?.legalIssueIds || [],
+          evidenceIds: sectionPlan?.evidenceIds || [],
+          factIds: sectionPlan?.factIds || [],
+          claimIds: [],
+          providerRequested: response.providerRequested || trace.trace.providerRequested || 'router-chain',
+          providerActuallyUsed,
+          model: response.model || null,
+          startedAt: attempt.startedAt.toISOString(),
+          completedAt: new Date().toISOString(),
+          durationMs: attempt.durationMs,
+          maxTokensRequested: null,
+          maxTokensResolved: null,
+          promptTokens: response.usage?.promptTokens ?? null,
+          completionTokens: response.usage?.completionTokens ?? null,
+          totalTokens: response.usage?.totalTokens ?? null,
+          inputSizeBytes: attempt.inputSizeBytes,
+          outputSizeBytes: Buffer.byteLength(output, 'utf8'),
+          continuationCount,
+          responseStatus: !response.success || !output
+            ? 'provider_failed'
+            : !realProvider
+              ? 'rejected_local_fallback'
+              : truncated ? 'truncated' : 'completed',
+          rawOutputHash: output ? hashTraceText(output) : undefined,
+          normalizedOutput: output || undefined,
+          retryCount: 0,
+          fallbackUsed: !realProvider,
+          fallbackReason: !realProvider ? response.fallbackReason || 'LOCAL_PROVIDER_NOT_ACCEPTED_AS_LEGAL_AI' : null,
+          origin: 'AI_GENERATED_LEGAL_CONTENT',
+          error: !response.success ? response.errorCode || response.warnings?.join('; ') : undefined,
+        });
+        return { responseFinishReason, truncated, realProvider };
+      };
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout de IA por bloque (${SECTION_TIMEOUT_MS}ms)`)), SECTION_TIMEOUT_MS)
-      );
-
-      const aiRes = await Promise.race([aiPromise, timeoutPromise]);
+      const firstAttempt = await callProvider(prompt);
+      const aiRes = firstAttempt.result;
+      const firstAttemptState = recordProviderAttempt(firstAttempt, 0);
 
       if (aiRes.success && aiRes.content) {
         const isRealAI = aiRes.provider !== 'local';
         aiUsed = isRealAI;
         aiProvider = aiRes.provider;
         aiModel = aiRes.model;
-        finishReason = aiRes.finishReason || (aiRes as any).rawResponse?.choices?.[0]?.finish_reason || 'stop';
-        isTruncated = Boolean(aiRes.isTruncated || finishReason === 'length');
+        finishReason = firstAttemptState.responseFinishReason;
+        isTruncated = firstAttemptState.truncated;
         // CAUSA RAÍZ RC1: LocalProvider genera texto genérico ("Análisis legal preliminar...")
         // que NO contiene expediente/partes ni estructura jurídica. Para escritos formales,
         // solo la IA real (nvidia) es válida; su fallback local debe descartarse y usar
@@ -1463,6 +1537,56 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
           );
         if (isRealAI && !isGenericFallback) {
           rawText = aiRes.content;
+          if (isTruncated) {
+            const continuationPrompt = `${prompt}\n\nCONTINUACIÓN DE LA MISMA SECCIÓN — intento 2 de máximo 2.\nLa respuesta anterior terminó por límite de salida. Continúa exactamente desde su último punto, sin reiniciar, resumir ni repetir el contenido ya redactado. Conserva hechos, solicitudes, postura, estructura, autoridades y restricciones del contexto original. No incorpores afirmaciones ni citas nuevas sin respaldo en el contexto. Devuelve únicamente el texto que falta para completar la sección y cierra el último párrafo.\n\nTEXTO YA GENERADO (no lo repitas; úsalo para continuar y conservar cobertura):\n${rawText}`;
+            try {
+              const continuationAttempt = await callProvider(continuationPrompt);
+              const continuationRes = continuationAttempt.result;
+              const continuationState = recordProviderAttempt(continuationAttempt, 1);
+              const usableContinuation = continuationState.realProvider
+                && continuationRes.success
+                && Boolean(continuationRes.content?.trim());
+              if (usableContinuation) {
+                rawText = stitchTruncatedText(rawText, continuationRes.content);
+                finishReason = continuationState.responseFinishReason;
+                isTruncated = continuationState.truncated;
+                aiProvider = continuationRes.provider;
+                aiModel = continuationRes.model;
+              } else {
+                // Keep the first response intact; a failed/local continuation cannot complete it.
+                isTruncated = true;
+                aiError = continuationRes.errorCode || continuationRes.warnings?.join('; ') || 'La continuación no produjo texto jurídico externo utilizable.';
+              }
+            } catch (continuationError: any) {
+              // Preserve the partial body and original truncation signal for the existing gates.
+              isTruncated = true;
+              aiError = continuationError?.message || String(continuationError);
+              trace?.recordTaskExecution({
+                taskId: `legacy-section-${block.id}`,
+                taskType: 'SECTION_SUPPORT',
+                sectionId: block.id,
+                coverageItemIds: sectionPlan?.coverageItemIds || [],
+                legalIssueIds: sectionPlan?.legalIssueIds || [],
+                evidenceIds: sectionPlan?.evidenceIds || [],
+                factIds: sectionPlan?.factIds || [],
+                claimIds: [],
+                providerRequested: trace.trace.providerRequested || 'router-chain',
+                startedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+                durationMs: 0,
+                maxTokensRequested: null,
+                maxTokensResolved: null,
+                inputSizeBytes: Buffer.byteLength(continuationPrompt, 'utf8'),
+                outputSizeBytes: 0,
+                continuationCount: 1,
+                responseStatus: 'provider_failed',
+                retryCount: 0,
+                fallbackUsed: false,
+                origin: 'AI_GENERATED_LEGAL_CONTENT',
+                error: aiError,
+              });
+            }
+          }
         } else {
           fallbackUsed = true;
           aiError = `Fallback local genérico descartado (provider=${aiRes.provider}); se usará determinístico con expediente ${expedienteNum}.`;
@@ -1489,12 +1613,21 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
     }
   }
 
+  const admission = evaluateGeneratedLegalAdmission({ text: rawText, sectionType: block.sectionType, document: doc, analysis: caseAnalysis, instruction, legalIssueIds: sectionPlan?.legalIssueIds });
+  if (!admission.accepted) {
+    trace?.recordWordAccounting({ sectionId: block.id, rejectedWords: admission.rejectedWords,
+      reason: admission.reasons.join('+'), lossStage: 'block-admission', taskId: `legacy-section-${block.id}` });
+    trace?.addWarning(`LEGAL_ADMISSION_REJECTED:${block.id}:${admission.reasons.join('+')}:${hashTraceText(rawText)}`);
+    rawText = admission.pendingText;
+    aiUsed = false;
+    aiError = `LEGAL_ADMISSION_REJECTED:${admission.reasons.join('+')}`;
+  }
   const styled = applyStyleToSectionText(block.sectionType as any, rawText, lawyerProfile);
   const sanitized = sanitizeGeneratedText(styled, { parties: doc.parties, caseRefs: doc.caseRefs });
 
   return {
     text: sanitized,
-    warnings: isTruncated ? ['Generación truncada por límite de tokens (finish_reason: length).'] : [],
+    warnings: [...admission.reasons.map(reason => `LEGAL_ADMISSION_REJECTED:${reason}`), ...(isTruncated ? ['Generación truncada por límite de tokens (finish_reason: length).'] : [])],
     sources: blockContext.references,
     aiUsed,
     aiProvider,
@@ -1507,6 +1640,8 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
 }
 
 function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocument, caseAnalysis?: CaseAnalysis): string {
+  const requestLedText = renderRequestLedSection(doc, block.sectionType, block.title);
+  if (requestLedText !== undefined) return requestLedText;
   const projection = caseAnalysis?.richCaseAnalysis?.draftingProjection;
   if (projection && /contestaci/i.test(doc.documentType)) {
     if (/hechos/i.test(block.title) && projection.factResponses.length) return projection.factResponses.map(renderDraftingReview).join('\n\n');
@@ -1620,13 +1755,12 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
     if (/hechos/.test(titleKey)) return `CONTESTACIÓN DE HECHOS\n\n${buildFactResponseText(caseAnalysis)}`;
     if (/prestacion|pretension/.test(titleKey)) return `CONTESTACIÓN DE PRESTACIONES\n\n${buildClaimResponseText(caseAnalysis)}`;
     if (/excepcion|defensa/.test(titleKey)) {
-      const hasDefense = Boolean(caseAnalysis?.arguments?.length || caseAnalysis?.caseTheory?.legalTheory);
-      return hasDefense
-        ? 'EXCEPCIONES Y DEFENSAS\n\n1. EXCEPCIÓN DE INEXISTENCIA DE DESPIDO INJUSTIFICADO Y CONCLUSIÓN DEL VENCIMIENTO DEL TÉRMINO.- Se opone en virtud de que la relación jurídica concluyó por el vencimiento del término pactado y la extinción de la materia que le dio origen, de conformidad con los artículos 35, 36, 37, 39 y 53 fracción III de la Ley Federal del Trabajo, resultando improcedente cualquier reclamo por despido injustificado.\n\n2. EXCEPCIÓN DE FALTA DE ACCIÓN Y DE DERECHO (SINE ACTIONE AGIS).- Se opone frente a todas y cada una de las pretensiones formuladas por la actora en su escrito de demanda.\n\n3. EXCEPCIÓN DE OBSCURIDAD Y DEFECTO LEGAL DE LA DEMANDA.- Derivada de las omisiones e imprecisiones en las circunstancias de modo, tiempo y lugar del reclamo.\n\n4. EXCEPCIÓN DE PLUS PETITIO.- En virtud de que la promovente reclama conceptos y alcances económicos superiores a los procedentes conforme a derecho.'
-        : 'EXCEPCIONES Y DEFENSAS\n\n1. EXCEPCIÓN DE FALTA DE ACCIÓN Y DE DERECHO (SINE ACTIONE AGIS).- Se opone frente a todas y cada una de las pretensiones de la demanda.\n\n2. EXCEPCIÓN DE INEXISTENCIA DE DESPIDO INJUSTIFICADO.- Derivada de la conclusión legal de los servicios prestados de conformidad con los artículos 35, 36, 37, 39 y 53 fracción III de la Ley Federal del Trabajo.\n\n3. EXCEPCIÓN DE OBSCURIDAD Y DEFECTO LEGAL DE LA DEMANDA.- Por omisión de circunstancias de tiempo, modo y lugar.';
+      // Legacy analysis arguments can belong to the opposing party. Their mere
+      // existence is neither client adoption nor proof of contractual termination.
+      return 'EXCEPCIONES Y DEFENSAS\n\n[PENDIENTE DE DESARROLLO: confirmar con el abogado las defensas concretas, los hechos que las sustentan y su fundamentación verificada. No se opone una excepción por defecto.]';
     }
     if (/alegato/.test(titleKey)) {
-      return 'ALEGATOS\n\nSÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA:\n\nDe las constancias procesales y de la contestación formulada, se desprende con meridiana claridad que la parte actora carece de acción y derecho para reclamar la reinstalación o indemnización constitucional pretendida. Ha quedado desvirtuada la existencia de despido injustificado alguno, acreditándose que la conclusión de los servicios obedeció a causas legales y al agotamiento de la materia de trabajo, por lo que resulta procedente dictar resolución plenamente absolutoria en favor de esta representación demandada.';
+      return 'ALEGATOS\n\n[PENDIENTE DE DESARROLLO: vincular la postura confirmada con los hechos y las pruebas realmente aportadas; someter su valoración al Tribunal y verificar el efecto solicitado. No se afirma acreditación ni absolución automática.]';
     }
     if (/objeto/.test(titleKey)) {
       const roles = resolveContestacionRoles(doc, caseAnalysis, (doc as any).caseParties || []);
@@ -3252,7 +3386,7 @@ export async function generateSection(
     isManuallyEdited: Boolean((sec as any).isManuallyEdited || sec.content?.some((c: any) => c.isManuallyEdited)),
   };
 
-  return generateLegalBlock(block, doc, tempIndex, caseAnalysis, instruction, undefined, lawyerProfile, sectionPlan);
+  return generateLegalBlock(block, doc, tempIndex, caseAnalysis, instruction, undefined, lawyerProfile, sectionPlan, trace);
 }
 
 // Compatibilidad hacia atrás: exposed como antes
@@ -3571,6 +3705,7 @@ export async function runGenerationPipeline(
     traceContext?.snapshotCaseAnalysis(caseAnalysis);
 
     doc.parties = {
+      ...doc.parties,
       quejoso: caseAnalysis.parties.quejoso || doc.parties.quejoso,
       actor: caseAnalysis.parties.actor || doc.parties.actor,
       demandado: caseAnalysis.parties.demandado || doc.parties.demandado,
@@ -3786,6 +3921,10 @@ export async function runGenerationPipeline(
     });
     const docTemplate = routing.template;
     doc.documentType = routing.resolvedTemplate;
+    doc.generationMetadata.requestContract = buildGenerationRequestContract(doc, userPrompt);
+    if (doc.generationMetadata.requestContract?.destination) {
+      doc.parties.autoridadDestinataria = doc.generationMetadata.requestContract.destination;
+    }
     const customDocumentTypeLabel = input.taxonomy?.documentType === 'otro'
       ? input.taxonomy.documentTypeCustom?.customValue?.trim()
       : undefined;
@@ -4037,6 +4176,19 @@ export async function runGenerationPipeline(
     const accumulatedGenerationTasks: GenerationTask[] = [];
     const taskAccountingFindings: DocumentAssemblyFinding[] = [];
     let documentState: DocumentState = createDocumentState(caseAnalysis, doc.legalIssueMatrix);
+    const markBlockAuthorityReferences = (block: ContentBlock) => {
+      if (block.generatedBy !== 'AI' && block.provenance !== 'AI_GENERATED') return;
+      const result = markUnverifiedAuthorityReferences({
+        text: block.text || '',
+        blockId: block.id,
+        authorityUses: doc.generationMetadata.authorityUses || [],
+        verifiedAuthorities: doc.generationMetadata.verifiedAuthorities || [],
+      });
+      block.text = result.text;
+      if (result.findings.length > 0) {
+        traceContext?.addWarning(`UNVERIFIED_AUTHORITY_REFERENCES:${block.id}:${result.findings.length}`);
+      }
+    };
 
     console.log(`[pipeline] Generando ${doc.sections.length} secciones bajo el plan ${doc.templateId} (${plan.planSource})...`);
     let completedBlocks = 0;
@@ -4191,6 +4343,7 @@ export async function runGenerationPipeline(
 
       if (generated.blocks && generated.blocks.length > 0) {
         section.content = generated.blocks;
+        section.content.forEach(markBlockAuthorityReferences);
       } else if (Array.isArray(generated.blocks) && !generated.text?.trim()) {
         section.content = [];
       } else {
@@ -4217,6 +4370,7 @@ export async function runGenerationPipeline(
             ? 'DETERMINISTIC_FALLBACK'
             : undefined;
         newBlock.fallbackReason = sourceBackedProceduralReference ? null : generated.aiError || null;
+        markBlockAuthorityReferences(newBlock);
 
         // La sección aporta el vínculo planeado; la política de Coverage
         // decide después si el bloque realmente puede satisfacerlo.
@@ -4473,7 +4627,14 @@ export async function runGenerationPipeline(
         ...validateSectionContracts({ documentType: doc.documentType, documentPlan: plan, candidateSections: preSanitizerSections, coverageMatrix: doc.coverageMatrix }),
         ...validateDocumentConsistency({ assembly, richCaseAnalysis: caseAnalysis.richCaseAnalysis }),
         ...validateDocumentEvidence({ assembly, richCaseAnalysis: caseAnalysis.richCaseAnalysis, coverageMatrix: doc.coverageMatrix, sectionContracts: documentAssemblyContracts, legalIssueMatrix: doc.legalIssueMatrix }),
-        ...validateDocumentAuthorities({ assembly, richCaseAnalysis: caseAnalysis.richCaseAnalysis, coverageMatrix: doc.coverageMatrix, legalIssueMatrix: doc.legalIssueMatrix }),
+        ...validateDocumentAuthorities({
+          assembly,
+          richCaseAnalysis: caseAnalysis.richCaseAnalysis,
+          coverageMatrix: doc.coverageMatrix,
+          legalIssueMatrix: doc.legalIssueMatrix,
+          authorityUses: doc.generationMetadata.authorityUses || [],
+          verifiedAuthorities: doc.generationMetadata.verifiedAuthorities || [],
+        }),
         ...findDocumentRedundancy({ assembly }),
         ...(documentAssemblyCoverage.findings || []),
       ];
@@ -4634,6 +4795,11 @@ export async function runGenerationPipeline(
     doc.semanticEvaluation = docSemanticEval;
 
     doc.validation = validateDocument(doc);
+    const requestContractErrors = validateGenerationRequestContract(doc);
+    if (requestContractErrors.length) {
+      doc.validation.isValid = false;
+      doc.validation.errors.push(...requestContractErrors);
+    }
     doc.validation.warnings.push(...roleIntegrityWarnings);
 
     populateDeterministicFactualClaimAudit(doc);

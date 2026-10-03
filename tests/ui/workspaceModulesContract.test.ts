@@ -43,6 +43,7 @@ describe('Workspace visual modules contract', () => {
   it('fija el encabezado y las vistas de investigación a clases de layout resistentes a utilidades heredadas', () => {
     const modules = fs.readFileSync(modulesPath, 'utf8');
     expect(modules).toContain('workspace-page-header');
+    expect(modules).toContain('workspace-module-frame');
     expect(modules).toContain('workspace-research-grid');
     expect(modules).toContain('workspace-library-grid');
   });
@@ -65,7 +66,7 @@ describe('Workspace visual modules contract', () => {
     const modules = fs.readFileSync(modulesPath, 'utf8');
     expect(modules).toContain('onCaseSelected?.(item)');
     expect(modules).toContain('onOpenCase(selected)');
-    expect(page).toContain('handleReopenDraft(summary.id)');
+    expect(page).toContain('handleReopenDraft(summary.draftRecordId || summary.id)');
     expect(page).toContain('caseId: summary.id');
   });
 

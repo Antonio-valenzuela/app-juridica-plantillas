@@ -8,6 +8,7 @@ import { normalizeUnresolvedFieldMarkers, extractUnresolvedFieldMarkers } from '
 import { readDocumentExportReadiness, markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import { buildWorkspacePageModel } from '@/lib/legal-engine/generationUi';
 import type { ExportMode } from '@/lib/legal-engine/exportModes';
+import { LexIcon } from '@/components/layout/LexIcon';
 
 interface WorkspaceDocumentEditorProps {
   document: UniversalLegalDocument | null;
@@ -426,7 +427,7 @@ export function WorkspaceDocumentEditor({
   ────────────────────────────────────────────────────────────────────────── */
   if (isGenerating && !document) {
     return (
-      <main className="flex-1 min-w-0 bg-[#ede8dd] overflow-y-auto flex flex-col h-full select-none font-sans">
+      <main className="workspace-editor-shell flex-1 min-w-0 bg-[#ede8dd] overflow-y-auto flex flex-col h-full select-none font-sans">
         <div className="p-3.5 border-b border-[#ded8c9] bg-[#fbf9f5] flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="w-4 h-4 rounded-full border-2 border-[#0B2545] border-t-transparent animate-spin" />
@@ -437,7 +438,7 @@ export function WorkspaceDocumentEditor({
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-lg bg-white rounded-3xl border border-[#ded8c9] shadow-2xl p-8 space-y-6 text-center">
             <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#0B2545] text-2xl flex items-center justify-center mx-auto animate-pulse">
-              ⚖️
+              <LexIcon name="scale" size={25} />
             </div>
 
             <div className="space-y-2">
@@ -455,7 +456,7 @@ export function WorkspaceDocumentEditor({
   }
 
   return (
-    <main className="flex-1 min-w-0 bg-[#ede8dd] flex flex-col h-full select-none relative font-sans overflow-hidden">
+    <main className="workspace-editor-shell flex-1 min-w-0 bg-[#ede8dd] flex flex-col h-full select-none relative font-sans overflow-hidden">
       {/* ── BARRA SUPERIOR CONSOLIDADA POR ZONAS (sin posicionamiento absoluto):
              A Identificación · B Edición global · C Formato · D Navegación ·
              E Vista · F Documento · G IA/Calidad/Exportación · Volver ── */}
@@ -981,7 +982,7 @@ export function WorkspaceDocumentEditor({
           {!document ? (
             <div
               style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
-              className="transition-transform duration-150 py-4"
+              className="transition-transform duration-150 py-4 w-[816px] max-w-none"
             >
               <div
                 onClick={onTriggerUpload}
@@ -1019,7 +1020,7 @@ export function WorkspaceDocumentEditor({
             /* ── RENDER DE HOJA PAGINADA ÚNICA (UNA SOLA HOJA A LA VEZ: Pág. 1 / 27) ── */
             <div
               style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
-              className="transition-transform duration-150 py-4"
+              className="transition-transform duration-150 py-4 w-[816px] max-w-none"
             >
               <div
                 key={`sheet-page-${viewPage}`}

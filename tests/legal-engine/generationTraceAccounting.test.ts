@@ -116,7 +116,7 @@ describe('generation trace task accounting', () => {
     expect(JSON.stringify(traceContext.trace.wordAccounting)).not.toContain('contenido duplicado');
   });
 
-  it('records blocked planned tasks even when no task reaches issue execution', async () => {
+  it('accounts separately for a research-blocked task and a source-grounded fallback task', async () => {
     const caseAnalysis = { richCaseAnalysis: buildFixtureRichCaseAnalysis() } as any;
     const document = buildFixtureDocument();
     const template = getDocumentTemplate('recurso_revision_amparo_directo');
@@ -163,8 +163,15 @@ describe('generation trace task accounting', () => {
     );
 
     expect(generated.generationTasks?.length).toBeGreaterThan(0);
-    expect(generated.taskAccounting?.blockedTasks).toBe(generated.taskAccounting?.plannedTasks);
-    expect(traceContext.trace.generationTasks.length).toBe(generated.generationTasks?.length);
-    expect(traceContext.trace.taskExecutions).toHaveLength(0);
+    expect(generated.taskAccounting).toEqual({ plannedTasks: 2, attemptedTasks: 1, acceptedTasks: 0, rejectedTasks: 0, blockedTasks: 1, reviewRequiredTasks: 1, unresolvedTasks: 0 });
+    expect(new Set(generated.generationTasks?.map(task => task.id)).size).toBe(2);
+    expect(traceContext.trace.generationTasks).toHaveLength(2);
+    expect(traceContext.trace.taskExecutions).toHaveLength(2);
+    const researchTask = generated.generationTasks!.find(task => task.coverageItemIds?.includes('cov-authority-mention-fixture-rrad-authority-1'))!;
+    const sourceTask = generated.generationTasks!.find(task => task.coverageItemIds?.includes('cov-claim-fixture-rrad-claim-1'))!;
+    expect(researchTask.status).toBe('blocked');
+    expect(sourceTask.status).toBe('fallback');
+    expect(traceContext.trace.taskExecutions.find(row => row.taskId === researchTask.id)).toMatchObject({ responseStatus: 'BLOCKED', error: 'RESEARCH_BUNDLE_MISSING', outputSizeBytes: 0, fallbackUsed: false });
+    expect(traceContext.trace.taskExecutions.find(row => row.taskId === sourceTask.id)).toMatchObject({ responseStatus: 'FALLBACK', fallbackUsed: true, fallbackReason: 'LOCAL_PROVIDER_OUTPUT' });
   }, 30000);
 });
