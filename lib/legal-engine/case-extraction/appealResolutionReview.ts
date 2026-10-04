@@ -1,4 +1,5 @@
 import type { UploadedSourceDocument } from '../types';
+export { extractAppealReasoningCandidates } from './appealReasoningCandidates';
 // Browser/server identical revision fingerprint; not an authentication capability.
 function fingerprint(text: string) {
   let a = 2166136261, b = 2246822507;
@@ -37,7 +38,7 @@ function matchingLine(raw: string) {
   while (margin.test(text)) text = text.replace(margin, '').replace(/^[\s|“”"'_:;!+—–-]+/, '');
   return text.replace(/[\s|—–-]+$/, '').trim();
 }
-function lineView(text: string) {
+export function lineView(text: string) {
   let offset = 0;
   return text.split('\n').map(raw => {
     const line = { raw, text: matchingLine(raw), start: offset, end: offset + raw.length };

@@ -17,6 +17,8 @@ import { ContestacionesAnalysisPanel } from './ContestacionesAnalysisPanel';
 import { ContestacionesConfigPanel } from './ContestacionesConfigPanel';
 import { ContestacionesChecklist } from './ContestacionesChecklist';
 import { AppealResolutionReviewPanel } from './AppealResolutionReviewPanel';
+import { AppealReasoningCandidatesPanel } from './AppealReasoningCandidatesPanel';
+import { extractAppealReasoningCandidates } from '@/lib/legal-engine/case-extraction/appealReasoningCandidates';
 import { extractAppealResolutionReview, isCivilFamilyAppeal, validateAppealConfirmation, type AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 
 export interface CaseDocumentsReaderProps {
@@ -251,6 +253,9 @@ export function CaseDocumentsReader({
   const appealReview = useMemo(() => isCivilFamilyAppeal(selectedResponseType) ? extractAppealResolutionReview(sourceDocs) : undefined, [sourceDocs, selectedResponseType]);
   useEffect(() => { setAppealConfirmation(undefined); }, [selectedResponseType, appealReview?.sourceFingerprint]);
   const confirmedAppeal = appealReview ? validateAppealConfirmation(appealReview, appealConfirmation) : undefined;
+  const appealCandidates = useMemo(() => appealReview && appealConfirmation && validateAppealConfirmation(appealReview, appealConfirmation).eligible
+    ? extractAppealReasoningCandidates(sourceDocs, { documentType: selectedResponseType, resolution: validateAppealConfirmation(appealReview, appealConfirmation).selected!, parties: appealConfirmation.parties, representedNames: appealConfirmation.representedNames, sourceFingerprint: appealReview.sourceFingerprint }) : undefined,
+  [appealReview, appealConfirmation, sourceDocs, selectedResponseType]);
   const pendingAppealField = 'Pendiente de confirmar en el paso 1';
   const appealFicha = appealReview ? {
     expediente: pendingAppealField,
@@ -925,6 +930,7 @@ export function CaseDocumentsReader({
           />
 
           {appealReview && <AppealResolutionReviewPanel key={`${selectedResponseType}:${appealReview.sourceFingerprint}`} review={appealReview} onChange={setAppealConfirmation} disabled={isGenerating} />}
+          {appealCandidates && <AppealReasoningCandidatesPanel review={appealCandidates} />}
           <ContestacionesChecklist
             appealMode={Boolean(appealReview)}
             hasDocument={Boolean(selectedDoc)}
