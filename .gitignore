@@ -6,6 +6,10 @@ build/
 .env.local
 .env.production
 *.log
+*.local.json
+audit/apelaciones-fase-2b/appeal-gold.local.json
+audit/apelaciones-fase-2b/appeal-provider-real-input.local.json
+audit/apelaciones-fase-2b/appeal-provider-real-result.local.json
 npm-debug.log*
 .DS_Store
 *.tsbuildinfo

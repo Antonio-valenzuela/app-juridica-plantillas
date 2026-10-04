@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { extractAppealResolutionReview, extractAppealReasoningCandidates } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
+import { redactAppealReplayText } from '@/scripts/audit/appealReplayRedaction';
 const pdfPath = process.env.APPEAL_SOURCE_PDF, cachePath = process.env.APPEAL_OCR_CACHE;
 const available = Boolean(pdfPath && cachePath && existsSync(pdfPath) && existsSync(cachePath));
 if (!available) console.warn('SKIP realAppealReasoningSource: faltan APPEAL_SOURCE_PDF / APPEAL_OCR_CACHE o sus archivos; no se ejecutó replay de fase 2b.');
@@ -19,11 +20,7 @@ if (!available) console.warn('SKIP realAppealReasoningSource: faltan APPEAL_SOUR
   const result = extractAppealReasoningCandidates([source], { documentType: 'apelacion_civil', resolution, parties: resolution.parties, representedNames: resolution.parties.filter(p => p.role === 'actor').map(p => p.name), sourceFingerprint: review.sourceFingerprint });
   const spans = [...result.blocks.flatMap(b => [b.origin, ...b.decisionOrigins]), ...result.statements.map(r => r.origin), ...result.reasonings.flatMap(r => [r.origin, r.decisionOrigin]), ...result.candidates.flatMap(r => [r.origin, r.decisionOrigin]), ...result.globalOutcome.findings.map(f => f.origin)];
   const spansValid = spans.every(o => source.pages.find((p: any) => p.page === o.page)?.text.slice(o.start, o.end) === o.excerpt);
-  const redact = (text: string) => {
-    const partiesRedacted = resolution.parties.filter(p => p.name).sort((a, b) => b.name.length - a.name.length)
-      .reduce((value, party) => value.replace(new RegExp(party.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[PARTE]'), text);
-    return partiesRedacted.replace(/(\b(?:otorgad[oa]s?\s+por|testador(?:a)?|fallecid[oa]|señor(?:a)?|persona)\s+)([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑa-záéíóúüñ'-]+(?:\s+[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑa-záéíóúüñ'-]+){1,3})/gi, '$1[PERSONA]');
-  };
+  const redact = (text: string) => redactAppealReplayText(text, resolution.parties.filter(p => p.name).map(p => p.name));
   const shortQuote = (text: string) => { const clean = redact(text).replace(/\s+/g, ' ').trim(); return clean.length > 180 ? `${clean.slice(0, 177)}...` : clean; };
   const categories = ['ADVERSE', 'BENEFICIAL', 'NEUTRAL', 'UNDETERMINED'];
   const reasoningCounts = Object.fromEntries(categories.map(impact => [impact, result.reasonings.filter(r => r.impact === impact).length]));

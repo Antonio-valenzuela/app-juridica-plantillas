@@ -50,7 +50,7 @@ it('does not manufacture prejudice for an unknown represented party', () => {
   expect(api([civilReasoningSource], { documentType: 'apelacion_civil', resolution: review.resolutions[0], parties: review.resolutions[0].parties, representedNames: ['PERSONA AJENA'], sourceFingerprint: review.sourceFingerprint }).candidates).toEqual([]);
 });
 it('does not attribute a litigant citation to the judge, even in the same paragraph', () => {
-  const text = civilReasoningSource.pages![0].text.split('VISTOS: autos')[0] + 'VISTOS: autos\nCONSIDERANDO SEGUNDO\nLa parte actora invoca el artículo 99 del ordenamiento. Este juzgado declara improcedente la reclamación de los actores porque no acreditaron la entrega.';
+  const text = civilReasoningSource.pages![0].text.split('VISTOS: autos')[0] + 'VISTOS: autos\nCONSIDERANDO PRIMERO\nAntecedente neutral.\nCONSIDERANDO SEGUNDO\nLa parte actora invoca el artículo 99 del ordenamiento. Este juzgado declara improcedente la reclamación de los actores porque no acreditaron la entrega.';
   const source = { ...civilReasoningSource, pages: [{ page: 5, text, chars: text.length }] };
   const r = run(source);
   expect(r.candidates).toHaveLength(1);
@@ -58,7 +58,7 @@ it('does not attribute a litigant citation to the judge, even in the same paragr
 });
 it('keeps a brief literal quote and the full decision span for an extensive reasoning', () => {
   const decision = 'Este juzgado declara improcedente la reclamación de los actores porque no acreditaron la entrega ' + 'con las constancias documentales que fueron descritas en este considerando, '.repeat(8) + 'ni su recepción.';
-  const text = civilReasoningSource.pages![0].text.split('VISTOS: autos')[0] + `VISTOS: autos\nCONSIDERANDO SEGUNDO\n${decision}`;
+  const text = civilReasoningSource.pages![0].text.split('VISTOS: autos')[0] + `VISTOS: autos\nCONSIDERANDO PRIMERO\nAntecedente neutral.\nCONSIDERANDO SEGUNDO\n${decision}`;
   const r = run({ ...civilReasoningSource, pages: [{ page: 5, text, chars: text.length }] });
   expect(r.candidates).toHaveLength(1);
   expect(r.candidates[0].origin.excerpt.length).toBeLessThanOrEqual(360);

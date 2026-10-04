@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { CaseDocumentsReader } from '@/app/machotes/components/CaseDocumentsReader';
-import { AppealReasoningCandidatesPanel } from '@/app/machotes/components/AppealReasoningCandidatesPanel';
+import { AppealReasoningAiReview, AppealReasoningCandidatesPanel } from '@/app/machotes/components/AppealReasoningCandidatesPanel';
 import { extractAppealReasoningCandidates, extractAppealResolutionReview } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { civilReasoningSource } from '../fixtures/appealReasoningSources';
 import { eightConsideringsCivil } from '../fixtures/appealReasoningImpact';
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it('removes candidates when another resolution is selected, without restoring them on return', () => {
   const text = 'JUZGADO DE PRUEBA\nAUTO: TRÁMITE\nACTORES: PERSONA ALFA\nDEMANDADOS: PERSONA BETA\nLOCALIDAD A 12 DOCE DE AGOSTO DE 2026\nVISTOS: autos\nSe rechaza la solicitud de los actores porque no fue acreditada.';
   const source = { ...civilReasoningSource, pages: [{ page: 1, text, chars: text.length }, ...civilReasoningSource.pages!] };
@@ -65,4 +65,43 @@ it('shows the global disposition and the quoted rule behind each classification'
   expect(within(panel.getAllByRole('article')[0]).getByText(/Regla 2/)).toBeTruthy();
   expect(panel.getByTestId('appeal-global-outcome-page').textContent).toMatch(/Página 5/);
   expect(panel.getAllByText(/Este juzgado determina que no se acreditó la entrega del bien reclamado/).length).toBeGreaterThanOrEqual(2);
+});
+
+it('requires explicit provider consent and renders per-block AI results read-only after the UI action', async () => {
+  const extraction = extractAppealResolutionReview([eightConsideringsCivil]);
+  const resolution = extraction.resolutions[0];
+  const review = extractAppealReasoningCandidates([eightConsideringsCivil], {
+    documentType: 'apelacion_civil', resolution, parties: resolution.parties,
+    representedNames: resolution.parties.filter(p => p.role === 'actor').map(p => p.name),
+    sourceFingerprint: extraction.sourceFingerprint,
+  });
+  const reasoningBlock = review.blocks.find(block => block.kind === 'REASONING')!;
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    expect(body.externalProviderOptIn).toBe(true);
+    expect(body.representedNames).toEqual(review.representedNames);
+    expect(body.blocks.find((item: any) => item.id === reasoningBlock.id).sourceText).toBe(reasoningBlock.sourceText);
+    return {
+      ok: true,
+      json: async () => ({ ok: true, warnings: [], classifications: [{
+        blockId: reasoningBlock.id, impact: 'ADVERSE', appliedRule: 2,
+        classificationReason: 'La cita expresa que un hecho no se acreditó.',
+        status: 'AI_VALIDATED', citationValidated: true,
+        validatedQuote: 'Este juzgado determina que no se acreditó la entrega del bien reclamado.',
+        cacheKey: 'sha256-test',
+      }] }),
+    } as Response;
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(<AppealReasoningAiReview review={review} />);
+  const action = screen.getByRole('button', { name: 'Clasificar razonamientos' });
+  expect((action as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox', { name: /Autorizo enviar los bloques/ }));
+  fireEvent.click(action);
+  expect(await screen.findByText(/Cita OCR original validada · Página 5: Este juzgado determina que no se acreditó la entrega del bien reclamado/)).toBeTruthy();
+  const readOnly = within(screen.getByLabelText('Agravios candidatos'));
+  expect(readOnly.getByText(/IA · cita validada/)).toBeTruthy();
+  expect(readOnly.queryAllByRole('textbox')).toHaveLength(0);
+  expect(readOnly.queryAllByRole('button')).toHaveLength(0);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 });

@@ -1,5 +1,6 @@
 ﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { loadActiveManual } from '@/lib/operational-manual/store';
 import { retrieveManualRules, formatManualTaskContext, type ManualIndex, type ManualMatter } from '@/lib/operational-manual/core';
 
@@ -11,7 +12,14 @@ import { createEmptyDocument } from '@/lib/legal-engine/types';
 import { createGenerationTraceContext } from '@/lib/legal-engine/generationTrace';
 import { DEFAULT_LAWYER_PROFILE } from '@/lib/workspace/lawyerProfileTypes';
 
-const manual: ManualIndex = JSON.parse(readFileSync('data/documents/operational-manual/v1.0/index.json', 'utf8'));
+const manualIndexPath = resolve(process.cwd(), 'data/documents/operational-manual/v1.0/index.json');
+const manualIndexAvailable = existsSync(manualIndexPath);
+if (!manualIndexAvailable) {
+  console.warn(`[SKIP] manualMethodologyContext: falta el índice del manual operativo: ${manualIndexPath}`);
+}
+const manual: ManualIndex = manualIndexAvailable
+  ? JSON.parse(readFileSync(manualIndexPath, 'utf8'))
+  : {} as ManualIndex;
 const asMatter = (value: string): ManualMatter => value as ManualMatter;
 const MANUAL_HEADER = 'GUÍA OPERATIVA INTERNA LEX PLANTILLAS';
 
@@ -47,7 +55,7 @@ function appealFixture() {
 const runBlock = ({ doc, block, trace }: ReturnType<typeof appealFixture>) =>
   generateLegalBlock(block, doc, {} as any, undefined, undefined, undefined, DEFAULT_LAWYER_PROFILE, undefined, trace);
 
-describe('la Guía Operativa llega al generador como metodología interna, nunca como autoridad', () => {
+describe.skipIf(!manualIndexAvailable)('la Guía Operativa llega al generador como metodología interna, nunca como autoridad', () => {
   beforeEach(() => {
     vi.stubEnv('GROQ_API_KEY', 'offline-manual-key');
     vi.stubEnv('GEMINI_API_KEY', '');

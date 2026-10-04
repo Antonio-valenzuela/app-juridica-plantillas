@@ -31,6 +31,8 @@ export interface AppealReasoningBlock {
   id: string; resolutionId: string; section: string; kind: 'REASONING' | 'OPERATIVE' | 'OTHER';
   origin: AppealOrigin; impact: AppealImpact; appliedRule: AppealClassificationRule;
   classificationReason: string; decisionOrigins: AppealOrigin[];
+  pages: number[]; sourceSpans: AppealOrigin[]; sourceText: string;
+  canonicalSection?: string; ocrReadingDoubtful?: boolean;
 }
 export interface AppealCandidate extends AppealReasoning {
   reasoningId: string; proposedReview: string; legalSupport: 'sin soporte';
@@ -40,6 +42,7 @@ export interface AppealCandidate extends AppealReasoning {
 export interface AppealCandidateReview {
   bindingKey: string; resolutionId: string; blocks: AppealReasoningBlock[]; reasonings: AppealReasoning[];
   candidates: AppealCandidate[]; statements: AppealStatement[]; globalOutcome: AppealGlobalOutcome; warnings: string[];
+  documentType: string; representedRole: 'actor' | 'demandado' | null; representedNames: string[];
 }
 const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
 const decisionAnchor = /\b(?:este\s+(?:juzgado|tribunal|[óo]rgano)\s+(?:declara|considera|estima|concluye|determina|desestima|rechaza|reconoce|tiene\s+por)|se\s+(?:declara|desestima|estima|rechaza|condena|absuelve|determina|reconoce)|(?:la\s+)?acci[óo]n[^.!?]{0,100}?\s+resulta\s+(?:in)?fundada|no\s+(?:se\s+)?(?:acredit[óo]|demostr[óo]|prob[óo])|carece\s+de\s+(?:valor|eficacia|alcance)|(?:es|resulta)\s+insuficiente\s+para|no\s+se\s+actualiza|resulta\s+inaplicable)\b/i;
@@ -51,28 +54,141 @@ type BlockKind = AppealReasoningBlock['kind'];
 interface SourceBlock {
   id: string; section: string; kind: BlockKind; parentSection: string;
   origin?: AppealOrigin; segments: Array<{ page: number; start: number; end: number; text: string }>;
+  canonicalSection?: string; ocrReadingDoubtful?: boolean;
 }
 const operativeHeading = /^(?:PROPOSICIONES|PUNTOS\s+RESOLUTIVOS|RESOLUTIVOS|SE\s+RESUELVE|RESUELVE|POR\s+LO\s+EXPUESTO|POR\s+TANTO)$/;
-const ordinalHeading = /^(?:UNICO|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SEPTIMO|OCTAVO|NOVENO|DECIMO|UNDECIMO|DUODECIMO|DECIMOTERCERO|DECIMOCUARTO|DECIMOQUINTO|DECIMOSEXTO|DECIMOSEPTIMO|DECIMOOCTAVO|DECIMONOVENO|VIGESIMO)$/;
 const romanHeading = /^[IVXLCDM]{1,12}$/;
 
-function headingForLine(key: string, previous: Pick<SourceBlock, 'section' | 'kind' | 'parentSection'>): { section: string; kind: BlockKind; parentSection: string } | undefined {
-  const generic = key.match(/^(VISTOS?|RESULTANDOS?|CONSIDERANDOS?|FUNDAMENTOS(?:\s+Y\s+DECISION)?|PROPOSICIONES|PUNTOS\s+RESOLUTIVOS|RESOLUTIVOS|SE\s+RESUELVE|RESUELVE|POR\s+LO\s+EXPUESTO|POR\s+TANTO)\b/);
+const ordinalWords = new Set([
+  'UNICO', 'UNICA', 'PRIMERO', 'PRIMERA', 'SEGUNDO', 'SEGUNDA', 'TERCERO', 'TERCERA', 'CUARTO', 'CUARTA',
+  'QUINTO', 'QUINTA', 'SEXTO', 'SEXTA', 'SEPTIMO', 'SEPTIMA', 'OCTAVO', 'OCTAVA', 'NOVENO', 'NOVENA',
+  'DECIMO', 'DECIMA', 'UNDECIMO', 'UNDECIMA', 'DUODECIMO', 'DUODECIMA', 'DECIMOTERCERO', 'DECIMOTERCERA',
+  'DECIMOCUARTO', 'DECIMOCUARTA', 'DECIMOQUINTO', 'DECIMOQUINTA', 'DECIMOSEXTO', 'DECIMOSEXTA',
+  'DECIMOSEPTIMO', 'DECIMOSEPTIMA', 'DECIMOOCTAVO', 'DECIMOOCTAVA', 'DECIMONOVENO', 'DECIMONOVENA',
+  'VIGESIMO', 'VIGESIMA', 'DECIMA PRIMERA', 'DECIMA SEGUNDA', 'DECIMA TERCERA', 'DECIMA CUARTA',
+  'DECIMA QUINTA', 'DECIMA SEXTA', 'DECIMA SEPTIMA', 'DECIMA OCTAVA', 'DECIMA NOVENA',
+  'DECIMO PRIMERO', 'DECIMO SEGUNDO', 'DECIMO TERCERO', 'DECIMO CUARTO', 'DECIMO QUINTO',
+  'DECIMO SEXTO', 'DECIMO SEPTIMO', 'DECIMO OCTAVO', 'DECIMO NOVENO',
+]);
+const compactOrdinalWords = [...ordinalWords].map(word => word.replace(/\s+/g, '')).sort((a, b) => b.length - a.length);
+const compactHeaderForms = [
+  ['RESULTANDOYCONSIDERANDO', 'RESULTANDO Y CONSIDERANDO'], ['PUNTOSRESOLUTIVOS', 'PUNTOS RESOLUTIVOS'],
+  ['FUNDAMENTOSYDECISION', 'FUNDAMENTOS Y DECISION'], ['PORLOEXPUESTO', 'POR LO EXPUESTO'], ['PORTANTO', 'POR TANTO'],
+  ['CONSIDERANDOS', 'CONSIDERANDOS'], ['CONSIDERANDO', 'CONSIDERANDO'],
+  ['RESULTANDOS', 'RESULTANDOS'], ['RESULTANDO', 'RESULTANDO'], ['PROPOSICIONES', 'PROPOSICIONES'],
+  ['RESOLUTIVOS', 'RESOLUTIVOS'], ['FUNDAMENTOS', 'FUNDAMENTOS'], ['SERESUELVE', 'SE RESUELVE'],
+  ['VISTOS', 'VISTOS'], ['VISTO', 'VISTO'], ['RESUELVE', 'RESUELVE'],
+].sort((a, b) => b[0].length - a[0].length);
+
+function normalizedHeadingKey(key: string): string {
+  const compact = key.replace(/\s+/g, '');
+  for (const [compactHeader, displayHeader] of compactHeaderForms) {
+    if (!compact.startsWith(compactHeader)) continue;
+    const suffixWithoutSpaces = compact.slice(compactHeader.length);
+    const ordinalSuffix = compactOrdinalWords.some(word => suffixWithoutSpaces.startsWith(word));
+    const romanSuffix = /^[IVXLCDM]{1,12}(?=[.:)\-]|$)/.test(suffixWithoutSpaces);
+    if (suffixWithoutSpaces && !/^[.:)\-]/.test(suffixWithoutSpaces) && !ordinalSuffix && !romanSuffix) continue;
+    let consumed = 0, end = 0;
+    while (end < key.length && consumed < compactHeader.length) {
+      if (!/\s/.test(key[end])) consumed++;
+      end++;
+    }
+    const suffix = key.slice(end).trimStart();
+    key = `${displayHeader}${suffix ? ` ${suffix}` : ''}`;
+    break;
+  }
+  return key.replace(/\b(DECIMA|UNDECIMA)[“”"'’]\s*(?=(?:PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA|SEPTIMA|OCTAVA|NOVENA)\b)/g, '$1 ');
+}
+
+function leadingOrdinal(text: string): string | undefined {
+  const match = text.match(/^([A-Z]+)(?:\s+([A-Z]+))?(?=\s|[.:)-]|$)/);
+  const compound = match?.[2] ? `${match[1]} ${match[2]}` : '';
+  if (compound && ordinalWords.has(compound)) return compound;
+  return match && ordinalWords.has(match[1]) ? match[1] : undefined;
+}
+
+const ordinalValues: Record<string, number> = {
+  UNICO: 1, UNICA: 1, PRIMERO: 1, PRIMERA: 1, SEGUNDO: 2, SEGUNDA: 2,
+  TERCERO: 3, TERCERA: 3, CUARTO: 4, CUARTA: 4, QUINTO: 5, QUINTA: 5,
+  SEXTO: 6, SEXTA: 6, SEPTIMO: 7, SEPTIMA: 7, OCTAVO: 8, OCTAVA: 8,
+  NOVENO: 9, NOVENA: 9, DECIMO: 10, DECIMA: 10, UNDECIMO: 11, UNDECIMA: 11,
+  DUODECIMO: 12, DUODECIMA: 12, DECIMOTERCERO: 13, DECIMOTERCERA: 13,
+  DECIMOCUARTO: 14, DECIMOCUARTA: 14, DECIMOQUINTO: 15, DECIMOQUINTA: 15,
+  DECIMOSEXTO: 16, DECIMOSEXTA: 16, DECIMOSEPTIMO: 17, DECIMOSEPTIMA: 17,
+  DECIMOOCTAVO: 18, DECIMOOCTAVA: 18, DECIMONOVENO: 19, DECIMONOVENA: 19,
+  VIGESIMO: 20, VIGESIMA: 20,
+};
+const decimalUnits: Record<string, number> = {
+  PRIMERO: 1, PRIMERA: 1, SEGUNDO: 2, SEGUNDA: 2, TERCERO: 3, TERCERA: 3,
+  CUARTO: 4, CUARTA: 4, QUINTO: 5, QUINTA: 5, SEXTO: 6, SEXTA: 6,
+  SEPTIMO: 7, SEPTIMA: 7, OCTAVO: 8, OCTAVA: 8, NOVENO: 9, NOVENA: 9,
+};
+
+function ordinalValue(token: string): number | undefined {
+  const normalized = fold(token).replace(/\s+/g, ' ');
+  if (ordinalValues[normalized]) return ordinalValues[normalized];
+  const [tens, unit] = normalized.split(' ');
+  if ((tens === 'DECIMA' || tens === 'DECIMO') && decimalUnits[unit]) return 10 + decimalUnits[unit];
+  return undefined;
+}
+
+function romanValue(token: string): number | undefined {
+  if (!/^[IVXLCDM]+$/.test(token) || token === 'VIL') return undefined;
+  const values: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
+  let total = 0;
+  for (let i = 0; i < token.length; i++) total += values[token[i]] < (values[token[i + 1]] || 0) ? -values[token[i]] : values[token[i]];
+  const canonical = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']] as const;
+  let remainder = total, encoded = '';
+  for (const [value, glyph] of canonical) while (remainder >= value) { encoded += glyph; remainder -= value; }
+  return encoded === token ? total : undefined;
+}
+
+interface NumberedHeading { token: string; sequenceType: 'ROMAN' | 'ORDINAL'; hasTitle: boolean }
+interface HeadingDescription { section: string; kind: BlockKind; parentSection: string; numbered?: NumberedHeading }
+
+function hasUppercaseRomanTitle(raw: string): boolean {
+  const match = raw.trim().match(/^[IVXLCDM]{1,12}\s*[.):\-]\s*(.+)$/i);
+  if (!match) return false;
+  let title = match[1].trim();
+  const terminal = title.lastIndexOf('.');
+  if (terminal > 2) title = title.slice(0, terminal + 1);
+  const letters = [...title].filter(char => /\p{L}/u.test(char));
+  if (letters.length < 5 || title.split(/\s+/).length < 2) return false;
+  return letters.filter(char => char === char.toUpperCase()).length / letters.length >= 0.78;
+}
+
+const operativeOrdinalLead = /^(?:SE\s+(?:DECLARA|ABSUELVE|CONDENA|RECHAZA|DESESTIMA)|EN\s+CONSECUENCIA|A\s+MAYOR\s+ABUNDAMIENTO|RESPECTO\b|EN\s+CUANTO\b|SUBSISTEN\b|UNA\s+VEZ\b|NOTIFIQUESE\b)/;
+
+function headingForLine(key: string, raw: string, previous: Pick<SourceBlock, 'section' | 'kind' | 'parentSection'>): HeadingDescription | undefined {
+  key = normalizedHeadingKey(key);
+  const generic = key.match(/^(VISTOS?|RESULTANDO\s+Y\s+CONSIDERANDO|RESULTANDOS?|CONSIDERANDOS?|FUNDAMENTOS(?:\s+Y\s+DECISION)?|PROPOSICIONES|PUNTOS\s+RESOLUTIVOS|RESOLUTIVOS|SE\s+RESUELVE|RESUELVE|POR\s+LO\s+EXPUESTO|POR\s+TANTO)\b/);
   if (generic) {
     const base = generic[1];
     const tail = key.slice(generic[0].length).trimStart();
-    const item = tail.match(/^(UNICO|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SEPTIMO|OCTAVO|NOVENO|DECIMO|UNDECIMO|DUODECIMO|DECIMOTERCERO|DECIMOCUARTO|DECIMOQUINTO|DECIMOSEXTO|DECIMOSEPTIMO|DECIMOOCTAVO|DECIMONOVENO|VIGESIMO|[IVXLCDM]{1,12})(?=\b|\s*[.:)-])/);
+    const ordinal = leadingOrdinal(tail);
+    const roman = tail.match(/^([IVXLCDM]{1,12})(?=\b|\s*[.:)-])/)?.[1];
+    const item = ordinal || roman;
     if (!item && tail && !/^[:.)-](?:\s|$)/.test(tail)) return undefined;
-    const section = `${base}${item ? ` ${item[1]}` : ''}`;
+    const section = `${base}${item ? ` ${item}` : ''}`;
     const kind: BlockKind = operativeHeading.test(base) ? 'OPERATIVE'
-      : /^(?:CONSIDERANDOS?|FUNDAMENTOS)/.test(base) ? 'REASONING' : 'OTHER';
-    return { section, kind, parentSection: base };
+      : /^(?:CONSIDERANDOS?|FUNDAMENTOS|RESULTANDO Y CONSIDERANDO)/.test(base) ? 'REASONING' : 'OTHER';
+    return { section, kind, parentSection: base, ...(ordinal ? { numbered: { token: ordinal, sequenceType: 'ORDINAL' as const, hasTitle: true } } : roman ? { numbered: { token: roman, sequenceType: 'ROMAN' as const, hasTitle: true } } : {}) };
   }
-  const marker = key.match(/^([IVXLCDM]{1,12}|UNICO|PRIMERO|SEGUNDO|TERCERO|CUARTO|QUINTO|SEXTO|SEPTIMO|OCTAVO|NOVENO|DECIMO|UNDECIMO|DUODECIMO|DECIMOTERCERO|DECIMOCUARTO|DECIMOQUINTO|DECIMOSEXTO|DECIMOSEPTIMO|DECIMOOCTAVO|DECIMONOVENO|VIGESIMO)\s*(?:[.):\-])(?=\s|$)/);
-  if (!marker || (!romanHeading.test(marker[1]) && !ordinalHeading.test(marker[1]))) return undefined;
-  const parentSection = previous.kind === 'OTHER' ? marker[1] : previous.parentSection;
-  const kind: BlockKind = previous.kind;
-  return { section: `${kind === 'OTHER' ? '' : `${parentSection} `}${marker[1]}`.trim(), kind, parentSection };
+  const marker = key.match(/^([IVXLCDM]{1,12}|[A-Z]+(?:\s+[A-Z]+)?)\s*([.):\-])(?:\s*(.*))?$/);
+  if (!marker) return undefined;
+  const token = marker[1].replace(/\s+/g, ' ');
+  const isRoman = romanHeading.test(token);
+  if (!isRoman && !ordinalWords.has(token)) return undefined;
+  const romanTitle = isRoman && hasUppercaseRomanTitle(raw);
+  if (isRoman && !romanTitle) return undefined;
+  const opensOperative = !isRoman && operativeOrdinalLead.test(marker[3] || '');
+  const kind: BlockKind = previous.kind === 'OPERATIVE' || opensOperative ? 'OPERATIVE'
+    : previous.kind === 'REASONING' || romanTitle ? 'REASONING' : 'OTHER';
+  const parentSection = kind === 'REASONING'
+    ? (previous.kind === 'REASONING' ? previous.parentSection : '')
+    : kind === 'OPERATIVE' ? 'PROPOSICIONES' : token;
+  const section = kind === 'REASONING' && parentSection ? `${parentSection} ${token}` : token;
+  return { section, kind, parentSection, numbered: { token, sequenceType: isRoman ? 'ROMAN' : 'ORDINAL', hasTitle: isRoman ? romanTitle : true } };
 }
 
 function originFor(sourceId: string, page: number, text: string, start: number, end: number): AppealOrigin {
@@ -82,6 +198,76 @@ function originFor(sourceId: string, page: number, text: string, start: number, 
 function sourceBlocks(source: UploadedSourceDocument, resolution: AppealResolution): SourceBlock[] {
   const blocks: SourceBlock[] = [];
   const pages = (source.pages || []).filter(p => p.page >= resolution.startPage && p.page <= resolution.endPage).sort((a, b) => a.page - b.page);
+  const lineRecords: Array<{ page: number; pageText: string; line: ReturnType<typeof lineView>[number]; heading: HeadingDescription }> = [];
+  let probe: Pick<SourceBlock, 'section' | 'kind' | 'parentSection'> = { section: '', kind: 'OTHER', parentSection: '' };
+  for (const page of pages) {
+    for (const line of lineView(page.text)) {
+      const heading = headingForLine(line.key, line.text, probe);
+      if (!heading) continue;
+      lineRecords.push({ page: page.page, pageText: page.text, line, heading });
+      probe = heading;
+    }
+  }
+
+  const numberedGroups = new Map<string, typeof lineRecords>();
+  for (const record of lineRecords) {
+    const numbered = record.heading.numbered;
+    if (!numbered) continue;
+    const groupKey = `${record.heading.kind}:${record.heading.parentSection}:${numbered.sequenceType}`;
+    const group = numberedGroups.get(groupKey) || [];
+    group.push(record);
+    numberedGroups.set(groupKey, group);
+  }
+  const accepted = new Map<string, { canonicalSection?: string; ocrReadingDoubtful?: boolean }>();
+  for (const group of numberedGroups.values()) {
+    const numbered = group.map(record => {
+      const token = record.heading.numbered!.token;
+      const type = record.heading.numbered!.sequenceType;
+      return { record, token, type, value: type === 'ORDINAL' ? ordinalValue(token) : romanValue(token), doubtful: false };
+    });
+    for (let i = 0; i < numbered.length; i++) {
+      const item = numbered[i];
+      if (item.type === 'ROMAN' && item.token === 'VIL' && numbered[i - 1]?.value === 6) {
+        item.value = 7;
+        item.doubtful = true;
+      }
+    }
+    const validSequence = numbered.filter(item => item.value !== undefined);
+    for (const item of validSequence) {
+      const index = validSequence.indexOf(item);
+      const previous = validSequence[index - 1];
+      const next = validSequence[index + 1];
+      const previousDelta = previous?.value === undefined ? undefined : item.value! - previous.value;
+      const nextDelta = next?.value === undefined ? undefined : next.value - item.value!;
+      let isCoherent = false;
+      if (item.type === 'ORDINAL') {
+        isCoherent = item.value === 1
+          || (previousDelta !== undefined && previousDelta > 0 && previousDelta <= 3)
+          || (nextDelta !== undefined && nextDelta > 0 && nextDelta <= 3);
+      } else if (previousDelta === 0) {
+        // Duplicate numbering, including literal VII after OCR VIL was positioned as VII.
+        isCoherent = false;
+      } else if (item.doubtful) {
+        isCoherent = previous?.value === 6;
+      } else if (item.token.length >= 3) {
+        isCoherent = true;
+      } else {
+        const adjacent = previousDelta === 1 || nextDelta === 1;
+        const monotonicRun = previousDelta !== undefined && nextDelta !== undefined
+          && previousDelta > 0 && nextDelta > 0 && previousDelta <= 3 && nextDelta <= 3;
+        isCoherent = adjacent || monotonicRun;
+      }
+      if (!isCoherent) continue;
+      const canonicalSection = item.doubtful
+        ? `${item.record.heading.parentSection ? `${item.record.heading.parentSection} ` : ''}VII`
+        : undefined;
+      accepted.set(`${item.record.page}:${item.record.line.start}`, {
+        ...(canonicalSection ? { canonicalSection } : {}),
+        ...(item.doubtful ? { ocrReadingDoubtful: true } : {}),
+      });
+    }
+  }
+
   let serial = 0;
   let current: SourceBlock = { id: `${resolution.id}:block:${serial++}`, section: 'Texto previo a cabeceras', kind: 'OTHER', parentSection: '', segments: [] };
   const append = (page: number, text: string, start: number, end: number) => {
@@ -93,7 +279,9 @@ function sourceBlocks(source: UploadedSourceDocument, resolution: AppealResoluti
   for (const page of pages) {
     let segmentStart = 0;
     for (const line of lineView(page.text)) {
-      const heading = headingForLine(line.key, current);
+      const metadata = accepted.get(`${page.page}:${line.start}`);
+      if (!metadata && lineRecords.some(record => record.page === page.page && record.line.start === line.start && record.heading.numbered)) continue;
+      const heading = headingForLine(line.key, line.text, current);
       if (!heading) continue;
       append(page.page, page.text, segmentStart, line.start);
       finish();
@@ -102,6 +290,7 @@ function sourceBlocks(source: UploadedSourceDocument, resolution: AppealResoluti
         ...heading,
         origin: originFor(source.id, page.page, page.text, line.start, line.end),
         segments: [],
+        ...metadata,
       };
       segmentStart = line.start;
     }
@@ -220,6 +409,7 @@ export function extractAppealReasoningCandidates(sources: UploadedSourceDocument
   const result: AppealCandidateReview = {
     bindingKey: JSON.stringify([context.sourceFingerprint, resolution.id, context.documentType, context.parties.map(p => [p.role, p.name]), context.representedNames]),
     resolutionId: resolution.id, blocks: [], reasonings: [], candidates: [], statements: [], globalOutcome: { impact: 'UNDETERMINED', appliedRule: 1, findings: [], classificationReason: 'No fue posible determinar el resultado global hasta validar la resolución y las partes.' }, warnings: [],
+    documentType: context.documentType, representedRole: null, representedNames: [],
   };
   if (!isCivilFamilyAppeal(context.documentType)) return result;
   const represented = context.parties.filter(p => context.representedNames.includes(p.name));
@@ -227,6 +417,8 @@ export function extractAppealReasoningCandidates(sources: UploadedSourceDocument
     result.warnings.push('La representación no permite atribuir una afectación; confirma las partes.'); return result;
   }
   const representedRole = represented[0].role;
+  result.representedRole = representedRole;
+  result.representedNames = represented.map(p => p.name);
   const source = sources.find(s => s.id === resolution.sourceId);
   if (!source) { result.warnings.push('No se encontró la fuente de la resolución seleccionada.'); return result; }
   const blocks = sourceBlocks(source, resolution);
@@ -306,7 +498,17 @@ export function extractAppealReasoningCandidates(sources: UploadedSourceDocument
       impact = 'NEUTRAL'; appliedRule = 4;
       classificationReason = 'El bloque es de encuadre procesal/metodológico y no contiene una decisión adversa o favorable identificable.';
     }
-    result.blocks.push({ id: block.id, resolutionId: resolution.id, section: block.section, kind: block.kind, origin: blockOrigin(block, source.id), impact, appliedRule, classificationReason, decisionOrigins });
+    const sourceSpans = block.segments.map(segment => ({
+      sourceId: source.id, page: segment.page, start: segment.start, end: segment.end, excerpt: segment.text,
+    }));
+    const pages = [...new Set(sourceSpans.map(span => span.page).concat(block.origin ? [block.origin.page] : []))];
+    result.blocks.push({
+      id: block.id, resolutionId: resolution.id, section: block.section, kind: block.kind,
+      origin: blockOrigin(block, source.id), impact, appliedRule, classificationReason, decisionOrigins,
+      pages, sourceSpans, sourceText: block.segments.map(segment => segment.text).join('\n'),
+      ...(block.canonicalSection ? { canonicalSection: block.canonicalSection } : {}),
+      ...(block.ocrReadingDoubtful ? { ocrReadingDoubtful: true } : {}),
+    });
   }
   result.warnings.push('Las citas SOURCE_CITED no son autoridades verificadas. Las referencias a constancias y hechos acreditados son atribuciones de la resolución, no comprobación independiente de autos.');
   return result;

@@ -17,7 +17,7 @@ import { ContestacionesAnalysisPanel } from './ContestacionesAnalysisPanel';
 import { ContestacionesConfigPanel } from './ContestacionesConfigPanel';
 import { ContestacionesChecklist } from './ContestacionesChecklist';
 import { AppealResolutionReviewPanel } from './AppealResolutionReviewPanel';
-import { AppealReasoningCandidatesPanel } from './AppealReasoningCandidatesPanel';
+import { AppealReasoningAiReview } from './AppealReasoningCandidatesPanel';
 import { extractAppealReasoningCandidates } from '@/lib/legal-engine/case-extraction/appealReasoningCandidates';
 import { extractAppealResolutionReview, isCivilFamilyAppeal, validateAppealConfirmation, type AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 
@@ -930,7 +930,7 @@ export function CaseDocumentsReader({
           />
 
           {appealReview && <AppealResolutionReviewPanel key={`${selectedResponseType}:${appealReview.sourceFingerprint}`} review={appealReview} onChange={setAppealConfirmation} disabled={isGenerating} />}
-          {appealCandidates && <AppealReasoningCandidatesPanel review={appealCandidates} />}
+          {appealCandidates && <AppealReasoningAiReview key={appealCandidates.bindingKey} review={appealCandidates} />}
           <ContestacionesChecklist
             appealMode={Boolean(appealReview)}
             hasDocument={Boolean(selectedDoc)}
