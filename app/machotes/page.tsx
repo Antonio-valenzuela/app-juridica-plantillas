@@ -5,6 +5,7 @@ import { WorkspaceDocumentEditor } from './components/WorkspaceDocumentEditor';
 import { WorkspaceDraftGeneratorModal } from './components/WorkspaceDraftGeneratorModal';
 import { TemplateLibraryManager, TemplateItem } from './components/TemplateLibraryManager';
 import { CaseDocumentsReader } from './components/CaseDocumentsReader';
+import type { AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { LawyerStyleProfileCard } from './components/LawyerStyleProfileCard';
 import { GenerationStatusBar, GenerationStatusData } from './components/GenerationStatusBar';
 type GenerationFlowLabel = 'documento' | 'contestacion' | 'recurso' | 'escrito_inicial' | 'universal';
@@ -59,7 +60,7 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { createGenerationIdentityFactory } from '@/lib/legal-engine/generationIdentity';
 import { WorkspaceModulesView, type WorkspaceModule } from './components/WorkspaceModulesView';
 import type { WorkspaceCaseSummary } from '@/lib/workspace/cases';
-import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
+import { getSafeApiErrorMessage, getGenerationErrorPresentation } from '@/lib/apiErrorMessage';
 import { compactSourceDocumentsForGeneration, buildContestacionesWorkflowPayload } from '@/lib/legal-engine/generationRequest';
 import { getCachedUploadAnalysis, rememberUploadAnalysis } from '@/lib/uploadAnalysisCache';
 import { toActiveCaseContext } from '@/lib/workspace/activeCaseContext';
@@ -534,7 +535,7 @@ export default function MachotesPage() {
           setIsUniversalGenerating(false);
           genIsGeneratingRef.current = false;
           generationOriginTabRef.current = null;
-          const message = getSafeApiErrorMessage({ message: j.error, errorCode: j.errorCode }, 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.');
+          const message = getGenerationErrorPresentation({ message: j.error, errorCode: j.errorCode }).message;
           setActiveGenJob({ ...next, status: 'failed', error: message });
           notify('error', message);
           window.setTimeout(() => setActiveGenJob(null), 7000);
@@ -679,7 +680,7 @@ export default function MachotesPage() {
             genIsGeneratingRef.current = false;
             setIsUniversalGenerating(false);
             generationOriginTabRef.current = null;
-            const message = getSafeApiErrorMessage({ message: d.error, errorCode: d.errorCode }, 'La generación falló en una sección. Revisa los datos e inténtalo de nuevo.');
+            const message = getGenerationErrorPresentation({ message: d.error, errorCode: d.errorCode }).message;
             setActiveGenJob({ ...parsed, status: 'failed', error: message, errorCode: d.errorCode || null, errorMetadata: d.errorMetadata || null });
             notify('error', message);
             return;
@@ -1550,7 +1551,7 @@ export default function MachotesPage() {
           notify('warning', 'Generación ya en curso — continuando progreso…');
           return;
         }
-        throw new Error(getSafeApiErrorMessage(data, 'Error al iniciar generación'));
+        throw new Error(getGenerationErrorPresentation({ ...data, message: data.message || data.error }).message);
       }
 
       const jobId = data.jobId as string;
@@ -1561,7 +1562,7 @@ export default function MachotesPage() {
       try { localStorage.setItem('jr_active_gen_job', JSON.stringify(initJob)); } catch {}
       startGenPolling(jobId);
     } catch (err: any) {
-      notify('error', `Fallo al iniciar generación: ${getSafeApiErrorMessage(err, 'No fue posible iniciar la generación.')}`);
+      notify('error', `Fallo al iniciar generación: ${getGenerationErrorPresentation(err).message}`);
       setIsUniversalGenerating(false);
       genIsGeneratingRef.current = false;
       generationOriginTabRef.current = null;
@@ -1732,6 +1733,7 @@ export default function MachotesPage() {
 
   /* Generar Contestación con Machote - ASÍNCRONO (sin timeout global 30s) */
   const handleGenerateContestacion = async (request: string | {
+    appealConfirmation?: AppealConfirmation;
     userInstructions: string;
     selectedDocumentType?: string;
     documentTypeLabel?: string;
@@ -1831,6 +1833,7 @@ export default function MachotesPage() {
           },
           documentTypeLabel: requestedDocumentLabel,
           selectedDocumentType: requestedDocumentType,
+          appealConfirmation: typeof request === 'string' ? undefined : request.appealConfirmation,
           matter: requestedMatter,
           caseParties: contestacionCaseParties.length > 0 ? contestacionCaseParties : undefined,
           generationExtension: generationExtensionFromUi || { generationMode: 'standard' },
@@ -1851,7 +1854,7 @@ export default function MachotesPage() {
           notify('warning', 'Generación ya en curso — continuando…');
           return;
         }
-        throw new Error(getSafeApiErrorMessage(data, 'Error al iniciar generación'));
+        throw new Error(getGenerationErrorPresentation({ ...data, message: data.message || data.error }).message);
       }
       const jobId = data.jobId as string;
       if (!jobId) throw new Error('JobId no recibido del servidor');
@@ -1861,7 +1864,7 @@ export default function MachotesPage() {
       startGenPolling(jobId);
     } catch (error: any) {
       console.error('[handleGenerateContestacion] Error:', error);
-      notify('error', `Fallo en la generación: ${getSafeApiErrorMessage(error, 'La generación no pudo completarse.')}`);
+      notify('error', `Fallo en la generación: ${getGenerationErrorPresentation(error).message}`);
       setIsUniversalGenerating(false);
       genIsGeneratingRef.current = false;
       generationOriginTabRef.current = null;

@@ -315,6 +315,7 @@ export interface ArgumentExtractionContext {
 }
 
 export interface RichCaseAnalysis {
+  appealResolutionReview?: import('./appealResolutionReview').AppealResolutionReview;
   /** Instruction/source projection for drafting; never upgrades factual or legal status. */
   draftingProjection?: import('../draftingPropagation').DraftingProjection;
   parties: CaseParty[];

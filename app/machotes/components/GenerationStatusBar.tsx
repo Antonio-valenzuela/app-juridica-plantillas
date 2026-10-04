@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { getGenerationErrorPresentation } from '@/lib/apiErrorMessage';
 
 export interface GenerationStatusData {
   status: string;
@@ -12,6 +13,7 @@ export interface GenerationStatusData {
   aiProvider?: string | null;
   documentReadiness?: string | null;
   error?: string;
+  errorCode?: string | null;
 }
 
 interface GenerationStatusBarProps {
@@ -101,7 +103,8 @@ export function GenerationStatusBar({
               <p className="text-sm font-black text-red-700">
                 No se pudo completar la generación
               </p>
-              <p className="text-xs text-red-600">{job.error || 'Error no especificado.'}</p>
+              <p className="text-xs text-red-600">{getGenerationErrorPresentation({ errorCode: job.errorCode, message: job.error }).category}: {getGenerationErrorPresentation({ errorCode: job.errorCode, message: job.error }).cause}</p>
+              <details className="text-xs text-red-600"><summary>Ver detalle</summary><p>{getGenerationErrorPresentation({ errorCode: job.errorCode, message: job.error }).detail}</p></details>
             </>
           )}
 

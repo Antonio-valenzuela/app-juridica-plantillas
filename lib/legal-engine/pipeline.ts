@@ -1,3 +1,4 @@
+import { extractAppealResolutionReview, isCivilFamilyAppeal, validateAppealConfirmation, selectAppealSources, type AppealConfirmation } from './case-extraction/appealResolutionReview';
 import { 
   UniversalLegalDocument, 
   PipelineStage, 
@@ -760,6 +761,9 @@ export interface DraftingPlan {
 }
 
 export interface PipelineInput {
+  /** Request-boundary contract; historical internal consumers remain unchanged. */
+  requireAppealConfirmation?: boolean;
+  appealConfirmation?: AppealConfirmation;
   /** Consentimiento explícito para enviar este expediente privado a Gemini/Groq/NVIDIA. */
   externalProviderOptIn?: boolean;
   prompt?: string;
@@ -3585,11 +3589,18 @@ export async function runGenerationPipeline(
   input: PipelineInput,
   callbacks?: PipelineCallbacks
 ): Promise<UniversalLegalDocument> {
+  const suppliedSources = input.sourceDocuments || input.existingDocument?.sourceDocuments || [];
+  const appealReview = isCivilFamilyAppeal(input.selectedDocumentType) && (input.requireAppealConfirmation || input.appealConfirmation)
+    ? extractAppealResolutionReview(suppliedSources) : undefined;
+  const confirmedAppeal = appealReview ? validateAppealConfirmation(appealReview, input.appealConfirmation) : undefined;
+  if (confirmedAppeal && !confirmedAppeal.eligible) {
+    throw Object.assign(new Error('NEEDS_USER_INPUT: confirma partes, resolución, destinatario y notificación.'), { code: 'NEEDS_USER_INPUT' });
+  }
   if (input.forceAiUnavailable) {
     throw new Error('Generación jurídica bloqueada: proveedor de generación no disponible.');
   }
 
-  const rawSources = input.sourceDocuments || input.existingDocument?.sourceDocuments || [];
+  const rawSources = confirmedAppeal?.selected ? selectAppealSources(suppliedSources, confirmedAppeal.selected) : suppliedSources;
   const sources: UploadedSourceDocument[] = rawSources.map((source) =>
     markDocumentAsSource({ ...source }, source.id)
   );
@@ -3851,7 +3862,7 @@ export async function runGenerationPipeline(
       input.referenceDocumentText || '',
       { includeReferenceInAnalysis: input.workflow?.flow !== 'NEW_WRITING' }
     );
-    const effectiveInputAnalysis = input.workflow?.analysis || (input as any).caseAnalysis;
+    const effectiveInputAnalysis = confirmedAppeal?.selected ? undefined : (input.workflow?.analysis || (input as any).caseAnalysis);
     // Rich orchestration is explicit for callers that provide a rich analysis
     // or enable the trace-backed phase. Historical callers that only provide
     // the legacy workflow contract continue through the legacy compatibility
@@ -3891,6 +3902,16 @@ export async function runGenerationPipeline(
     doc.flow = input.flow || input.workflow?.flow || doc.flow || (sources.length > 0 ? 'DOCUMENT_ANALYSIS' : undefined);
     doc.intake = input.intake || input.workflow?.intake || doc.intake;
     doc.caseAnalysis = caseAnalysis;
+    if (confirmedAppeal?.selected && input.appealConfirmation) {
+      const confirmation = input.appealConfirmation;
+      caseAnalysis.parties = {
+        actor: confirmation.parties.filter(p => p.role === 'actor').map(p => p.name).join('; '),
+        demandado: confirmation.parties.filter(p => p.role === 'demandado').map(p => p.name).join('; '),
+        autoridadResponsable: confirmedAppeal.selected.court,
+      };
+      // No adoption of allegations or merits; only confirmed identity and selected source range.
+      (doc.generationMetadata as any).appealResolutionConfirmation = { ...confirmation, resolution: confirmedAppeal.selected, opportunity: '[A VERIFICAR]' };
+    }
     traceContext?.snapshotCaseAnalysis(caseAnalysis);
 
     doc.parties = {
@@ -3903,8 +3924,10 @@ export async function runGenerationPipeline(
     };
 
     // A5: las partes confirmadas (manual > detected) pisan a las inferidas del texto crudo.
-    applySavedCaseParties(doc, input.savedParties);
-    (doc as any).caseParties = input.savedParties;
+    const effectiveSavedParties = confirmedAppeal?.selected && input.appealConfirmation ? input.appealConfirmation.parties : input.savedParties;
+    if (confirmedAppeal?.selected) doc.parties = { ...caseAnalysis.parties };
+    applySavedCaseParties(doc, effectiveSavedParties);
+    (doc as any).caseParties = effectiveSavedParties;
 
     const caseContext = buildCaseContext(
       sources,

@@ -16,8 +16,10 @@ import { extractDecisionReasonings, linkArgumentsToDecisionReasonings } from './
 import type { ExtractionCandidate, ExtractionStats, PartyRole, RichCaseAnalysis } from './types';
 import type { RichEntity } from './deduplication';
 import type { UploadedSourceDocument } from '../types';
+import { extractAppealResolutionReview, isCivilFamilyAppeal } from './appealResolutionReview';
 
 export interface RichExtractionOptions {
+  documentType?: string;
   referenceText?: string;
   includeReferenceInAnalysis?: boolean;
   trace?: GenerationTraceContext;
@@ -87,6 +89,7 @@ export function extractRichCaseAnalysis(
   const amounts = candidates.filter((candidate) => candidate.kind === 'AMOUNT').map(normalizeAmountCandidate);
 
   const provisional: RichCaseAnalysis = {
+    ...(isCivilFamilyAppeal(options.documentType) ? { appealResolutionReview: extractAppealResolutionReview(sources) } : {}),
     parties: deduplicate(partyResult.parties),
     assertions: deduplicate(assertions),
     claims: deduplicate(claimsResult.claims),

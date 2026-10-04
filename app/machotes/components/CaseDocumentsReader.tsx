@@ -16,6 +16,8 @@ import { ContestacionesExpedienteCard, type ExpedienteFichaData } from './Contes
 import { ContestacionesAnalysisPanel } from './ContestacionesAnalysisPanel';
 import { ContestacionesConfigPanel } from './ContestacionesConfigPanel';
 import { ContestacionesChecklist } from './ContestacionesChecklist';
+import { AppealResolutionReviewPanel } from './AppealResolutionReviewPanel';
+import { extractAppealResolutionReview, isCivilFamilyAppeal, validateAppealConfirmation, type AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 
 export interface CaseDocumentsReaderProps {
   documents: CaseDocument[];
@@ -32,6 +34,7 @@ export interface CaseDocumentsReaderProps {
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
     generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
     draftDepth?: DraftDepth;
+    appealConfirmation?: AppealConfirmation;
   }) => void;
   onOpenEditor?: () => void;
   isGenerating?: boolean;
@@ -244,6 +247,18 @@ export function CaseDocumentsReader({
   const [generationMode, setGenerationMode] = useState<'automatic' | 'personal_template' | 'reference_document'>('automatic');
   const [draftDepth, setDraftDepth] = useState<DraftDepth>('PROFESSIONAL_20');
   const [selectedMachoteId, setSelectedMachoteId] = useState<string>('');
+  const [appealConfirmation, setAppealConfirmation] = useState<AppealConfirmation>();
+  const appealReview = useMemo(() => isCivilFamilyAppeal(selectedResponseType) ? extractAppealResolutionReview(sourceDocs) : undefined, [sourceDocs, selectedResponseType]);
+  useEffect(() => { setAppealConfirmation(undefined); }, [selectedResponseType, appealReview?.sourceFingerprint]);
+  const confirmedAppeal = appealReview ? validateAppealConfirmation(appealReview, appealConfirmation) : undefined;
+  const pendingAppealField = 'Pendiente de confirmar en el paso 1';
+  const appealFicha = appealReview ? {
+    expediente: pendingAppealField,
+    actor: confirmedAppeal?.eligible ? appealConfirmation!.parties.filter(p => p.role === 'actor').map(p => p.name).join('; ') || pendingAppealField : pendingAppealField,
+    demandado: confirmedAppeal?.eligible ? appealConfirmation!.parties.filter(p => p.role === 'demandado').map(p => p.name).join('; ') || pendingAppealField : pendingAppealField,
+    autoridad: confirmedAppeal?.eligible ? confirmedAppeal.selected!.court : pendingAppealField,
+    materia: confirmedAppeal?.eligible ? selectedResponseType.includes('familiar') ? 'Familiar' : 'Civil' : pendingAppealField,
+  } : undefined;
 
   // Reconstrucción del análisis del caso
   const caseAnalysis: CaseAnalysis = useMemo(() => {
@@ -436,7 +451,8 @@ export function CaseDocumentsReader({
 
   const hasDirectInstruction = customPrompt.trim().length >= 10;
   const effectiveCompatible = currentDocCompatibility.compatible || hasDirectInstruction || selectedResponseType === 'redaccion_libre';
-  const generationBlockReason = getContestacionesGenerationBlockReason({
+  const generationBlockReason = (appealReview && !validateAppealConfirmation(appealReview, appealConfirmation).eligible
+    ? 'Selecciona la resolución y confirma partes, destinatario y notificación en el paso 1 para continuar.' : null) || getContestacionesGenerationBlockReason({
     hasDocument: Boolean(selectedDoc),
     compatible: effectiveCompatible,
     compatibilityReason: currentDocCompatibility.reason,
@@ -447,6 +463,7 @@ export function CaseDocumentsReader({
 
   /* Instrucción enriquecida para el motor jurídico */
   const buildContestacionInstruction = (): string => {
+    if (appealReview) return customPrompt.trim(); // No inherited demand/labor findings in appeal requests.
     const parts: string[] = [];
     if (customPrompt.trim()) {
       parts.push(`INSTRUCCIONES DE DEFENSA DEL ABOGADO:\n${customPrompt.trim()}`);
@@ -470,6 +487,7 @@ export function CaseDocumentsReader({
       documentTypeLabel: effectiveLabel,
       generationMode,
       draftDepth,
+      ...(appealReview ? { appealConfirmation } : {}),
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
     });
@@ -875,20 +893,21 @@ export function CaseDocumentsReader({
           </div>
 
           <ContestacionesExpedienteCard
-            caseFicha={caseFicha}
-            caseAnalysis={caseAnalysis}
-            inferredMatter={inferredMatter}
+            caseFicha={appealFicha || caseFicha}
+            caseAnalysis={appealReview ? null : caseAnalysis}
+            inferredMatter={appealReview ? null : inferredMatter}
           />
 
-          <ContestacionesAnalysisPanel
+          {appealReview ? <section className="rounded-xl border border-slate-200 bg-white p-3.5"><h2 className="text-base font-bold">Análisis de la apelación</h2><p className="text-sm text-slate-600">No aplica todavía: se construirá en la fase de razonamientos y agravios</p></section> : <ContestacionesAnalysisPanel
             hasDocument={Boolean(selectedDoc)}
             analysisAvailable={analysisAvailable}
             caseAnalysis={caseAnalysis}
-          />
+          />}
 
           <ContestacionesConfigPanel
             selectedDocumentType={selectedResponseType}
             onDocumentTypeChange={(val) => {
+              setAppealConfirmation(undefined);
               userHasManuallyChangedDocTypeRef.current = true;
               setSelectedResponseType(val);
             }}
@@ -905,7 +924,9 @@ export function CaseDocumentsReader({
             disabled={isGenerating}
           />
 
+          {appealReview && <AppealResolutionReviewPanel key={`${selectedResponseType}:${appealReview.sourceFingerprint}`} review={appealReview} onChange={setAppealConfirmation} disabled={isGenerating} />}
           <ContestacionesChecklist
+            appealMode={Boolean(appealReview)}
             hasDocument={Boolean(selectedDoc)}
             analysisCompleted={analysisAvailable || hasDirectInstruction}
             configDefined={Boolean(selectedResponseType)}

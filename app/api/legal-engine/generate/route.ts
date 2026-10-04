@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractAppealResolutionReview, isCivilFamilyAppeal, validateAppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { z } from 'zod';
 import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { UploadedSourceDocument, UniversalLegalDocument, CaseWorkflow } from '@/lib/legal-engine/types';
@@ -119,6 +120,14 @@ export async function POST(req: NextRequest) {
   const externalProviderOptIn = explicitExternalProviderConsent(body.externalProviderOptIn);
   if (Buffer.byteLength(JSON.stringify(body), 'utf8') > maxGenerationInputChars()) {
     return NextResponse.json({ ok: false, errorCode: 'GENERATION_INPUT_TOO_LARGE', message: 'La solicitud de generación excede el tamaño permitido.' }, { status: 413 });
+  }
+  // New request contract, limited to civil/family appeals; never changes legal/export gates.
+  const requiresAppealConfirmation = isCivilFamilyAppeal(body.selectedDocumentType || body.taxonomy?.documentType || body.documentType);
+  if (requiresAppealConfirmation) {
+    const review = extractAppealResolutionReview(Array.isArray(body.sourceDocuments) ? body.sourceDocuments : []);
+    if (!validateAppealConfirmation(review, body.appealConfirmation).eligible) {
+      return NextResponse.json({ ok: false, errorCode: 'NEEDS_USER_INPUT', state: 'NEEDS_USER_INPUT', message: 'Confirma partes, resolución, destinatario y notificación antes de generar.' }, { status: 422 });
+    }
   }
 
   let draftDepth: 'PROFESSIONAL_20' | 'EXTENSIVE_40' | undefined;
@@ -274,6 +283,7 @@ export async function POST(req: NextRequest) {
   if (wantSync) {
     try {
       const doc = await runGenerationPipeline({
+        requireAppealConfirmation: requiresAppealConfirmation, appealConfirmation: body.appealConfirmation,
         userInstruction, sourceDocuments: sourcesArr, allowUnvalidatedSource,
         referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension: effectiveGenerationExtension,
         draftDepth,
@@ -399,6 +409,8 @@ export async function POST(req: NextRequest) {
         {
           userInstruction,
           sourceDocuments: sourcesArr,
+          requireAppealConfirmation: requiresAppealConfirmation,
+          appealConfirmation: body.appealConfirmation,
           allowUnvalidatedSource,
           referenceDocumentText: referenceDocumentText as string | undefined,
           referenceDocumentId: referenceDocumentId as string | undefined,

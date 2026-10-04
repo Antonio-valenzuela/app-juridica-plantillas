@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { isCivilFamilyAppeal } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
 import type { DraftDepth } from '@/lib/legal-engine/draftDepth';
 import type { TemplateItem } from './TemplateLibraryManager';
@@ -53,7 +54,7 @@ export function ContestacionesConfigPanel({
             </svg>
           </div>
           <h2 className="text-base font-bold text-slate-900">
-            Configuración de la contestación
+            {isCivilFamilyAppeal(selectedDocumentType) ? 'Configuración de la apelación' : 'Configuración de la contestación'}
           </h2>
         </div>
       </div>
