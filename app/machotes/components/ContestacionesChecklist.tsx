@@ -63,11 +63,17 @@ export function ContestacionesChecklist({
     isGenerating,
     blockReason,
   });
+  const generationButtonTone = isGenerating || isAllReady
+    ? 'bg-[#0B2545] text-white hover:bg-slate-900'
+    : 'bg-slate-200 text-slate-400 cursor-not-allowed';
 
+  // Cada flujo muestra SOLO sus requisitos. "Análisis de la demanda" es un
+  // requisito de Contestación: en Apelación no existe demanda que analizar, y
+  // mostrarlo allí confunde al abogado sobre lo que falta por completar.
   const checklistItems = [
     { label: 'Documento fuente cargado y legible', completed: hasDocument },
     { label: 'Resumen del expediente completado', completed: hasDocument },
-    { label: 'Análisis de la demanda revisado', completed: !appealMode && analysisCompleted },
+    ...(appealMode ? [] : [{ label: 'Análisis de la demanda revisado', completed: analysisCompleted }]),
     { label: appealMode ? 'Configuración de la apelación definida' : 'Configuración de la contestación definida', completed: configDefined },
     { label: 'Revisar lineamientos específicos de la autoridad', completed: false },
   ];
@@ -131,7 +137,7 @@ export function ContestacionesChecklist({
             type="button"
             onClick={onGenerate}
             disabled={!isAllReady || isGenerating}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#0B2545] px-4 py-2.5 text-sm font-bold text-white shadow-xs transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+            className={`flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold shadow-xs transition disabled:cursor-not-allowed ${generationButtonTone}`}
           >
             {isGenerating ? (
               <>

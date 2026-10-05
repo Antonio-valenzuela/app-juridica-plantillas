@@ -27,7 +27,6 @@ import { evaluateSourceOutputCompatibility } from '@/lib/legal-engine/sourceOutp
 import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
-import { markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import type { UniversalLegalDocument } from '@/lib/legal-engine/types';
 import {
   createSyntheticImageBuffer,
@@ -45,41 +44,6 @@ beforeAll(() => {
 afterEach(() => {
   delete process.env.OCR_PROVIDER;
 });
-
-function prepareDocForExport(doc: UniversalLegalDocument): UniversalLegalDocument {
-  const petitionSection = doc.sections.find((s) => /petitorio|peticion/i.test(s.title || s.id))
-    || doc.sections[doc.sections.length - 1];
-
-  const sections = doc.sections.map((s) => ({
-    ...s,
-    type: s === petitionSection ? 'petition' : s.type,
-    validationErrors: [],
-    content: (s.content || []).map((b) => ({
-      ...b,
-      isPending: false,
-      text: (b.text || '').replace(/\[(?:DATO\s*PENDIENTE[^:]*|DATO\s*ANONIMIZADO[^:]*)\s*:\s*([^\]]+)\]/gi, '$1'),
-    })),
-  }));
-
-  const withPreflight: any = {
-    ...doc,
-    sections,
-    validation: { isValid: true, errors: [], warnings: [] },
-    missingFields: [],
-    anonymizedFields: [],
-    caseContext: {
-      ...(doc.caseContext || {}),
-      missingFields: [],
-      anonymizedFields: [],
-    },
-    generationMetadata: {
-      ...doc.generationMetadata,
-      preflight: { status: 'READY', missingFields: [] },
-    },
-    qualityGate: { passed: true, canMarkAsFinal: true },
-  };
-  return markDocumentAsReadyToExport(withPreflight as UniversalLegalDocument, { explicit: true });
-}
 
 async function uploadThroughApi(buffer: Buffer, fileName: string, mimeType: string) {
   const formData = new FormData();
@@ -330,7 +294,7 @@ describe('LOOP 9.1 — OCR en PDF Escaneado Real y Pipeline Completo', () => {
     expect(generatedDoc).toBeDefined();
     expect(generatedDoc.sections.length).toBeGreaterThanOrEqual(1);
 
-    const exportableDoc = prepareDocForExport(generatedDoc);
+    const exportableDoc = generatedDoc;
     await expect(exportUniversalToDocx(exportableDoc))
       .rejects.toThrow(/FINAL_DOCUMENT_MATERIALIZATION_NOT_VERIFIED|QualityGate|REQUIRES_REVIEW/i);
     await expect(exportUniversalToPdf(exportableDoc))

@@ -32,6 +32,9 @@ export const SEED_MARKER_PATTERNS: readonly RegExp[] = [
 
 /** Patrones de dependencias fácticas no resueltas generadas por el motor o la IA */
 export const UNRESOLVED_FACTUAL_DEPENDENCY_PATTERNS: readonly RegExp[] = [
+  // Normalization uses these canonical prefixes. They remain unresolved, just
+  // like their legacy forms; normalization must never remove a hard failure.
+  /\[\s*(?:PENDIENTE|NO\s+VERIFICADO)\s*:[^\]]*\]/gi,
   /\[\s*DATO\s+PENDIENTE\s+DE\s+EXPEDIENTE\b[^\]]*\]/gi,
   /\[\s*REQUIERE\s+INSTRUCCI[ÓO]N\s+DEL\s+ABOGADO\b[^\]]*\]/gi,
   /\[\s*DATO\s+NO\s+DISPONIBLE\s+EN\s+EXPEDIENTE\b[^\]]*\]/gi,

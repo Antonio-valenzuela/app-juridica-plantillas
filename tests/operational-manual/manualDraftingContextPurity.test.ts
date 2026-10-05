@@ -31,11 +31,14 @@ const DESPACHO_STYLE = /Estilo\s+y\s+Conocimiento\s+Operativo|Conocimiento\s+Ope
 const RESPONSE_FORMAT = /FORMATO\s+DE\s+RESPUESTA|Conclusi[óo]n\s+ejecutiva|Salida\s+esperada|CATEGOR[ÍI]A\s*:?\s*Hallazgos|REGLA\s+OPERATIVA\s+DEL\s+ASISTENTE|PLAN\s+ESTRAT[ÉE]GICO|ACCI[ÓO]N\s+PROPUESTA|REGLAS\s+DE\s+LA\s+IA/i;
 
 const TASKS: Array<{ name: string; matter: ManualMatter; stage: string; title: string; task: string }> = [
-  { name: 'apelacion',    matter: 'CIVIL',   stage: 'argument',   title: 'AGRAVIOS',                task: 'AGRAVIOS metodologia del agravio silogismo premisa mayor premisa menor conclusion incongruencia' },
-  { name: 'apelacion_bg', matter: 'CIVIL',   stage: 'background', title: 'ANTECEDENTES PROCESALES', task: 'ANTECEDENTES PROCESALES antecedentes cronologia sintesis verificacion' },
-  { name: 'contestacion', matter: 'LABORAL', stage: 'argument',   title: 'AGREGADOS',               task: 'AGREGADOS contestacion laboral terminacion existencia preexisting payroll' },
-  { name: 'demanda',      matter: 'CIVIL',   stage: 'argument',   title: 'HECHOS',                  task: 'HECHOS demanda hecho prestacion legitima interest configuracion' },
-  { name: 'amparo',       matter: 'AMPARO',  stage: 'argument',   title: 'CONCEPTOS DE VIOLACIÓN',   task: 'CONCEPTOS DE VIOLACION concepto de violacion premisa mayor premisa menor conclusion' },
+  { name: 'apelacion',    matter: 'CIVIL',   stage: 'argument', title: 'AGRAVIOS', task: 'AGRAVIOS metodologia del agravio silogismo premisa mayor premisa menor conclusion incongruencia' },
+  { name: 'contestacion', matter: 'CIVIL',   stage: 'argument', title: 'EXCEPCIONES', task: 'EXCEPCIONES Y DEFENSAS contestacion excepciones defensa civil' },
+  { name: 'demanda',      matter: 'CIVIL',   stage: 'argument', title: 'HECHOS', task: 'HECHOS demanda hecho prestacion' },
+  { name: 'amparo',       matter: 'AMPARO',  stage: 'argument', title: 'CONCEPTOS DE VIOLACIÓN', task: 'CONCEPTOS DE VIOLACION concepto de violacion premisa mayor premisa menor conclusion' },
+];
+const EXCLUDED_RULE_IDS = [
+  'lex-manual-1.0-p208-032-8505926e71', 'lex-manual-1.0-p208-033-a893b13467',
+  'lex-manual-1.0-p209-037-353daee9b9', 'lex-manual-1.0-p210-003-071f4cbc09',
 ];
 
 describe.skipIf(!available)('el contexto metodológico del Manual no arrastra estilo del despacho ni formato de respuesta', () => {
@@ -46,7 +49,7 @@ describe.skipIf(!available)('el contexto metodológico del Manual no arrastra es
         budgetChars: 4500, measureContext: rules => formatManualTaskContext(rules).length,
       });
       const leaked = selection.selected.filter(fragment => DESPACHO_STYLE.test(fragment.originalText));
-      expect(leaked.map(f => `p${f.physicalPage}: ${f.originalText.trim().slice(0, 80)}`)).toEqual([]);
+      expect(leaked.map(f => f.stableRuleId)).toEqual([]);
     });
 
     it(`${task.name} (${task.matter}/${task.stage}/${task.title}) no incluye secciones de FORMATO DE RESPUESTA`, () => {
@@ -55,7 +58,18 @@ describe.skipIf(!available)('el contexto metodológico del Manual no arrastra es
         budgetChars: 4500, measureContext: rules => formatManualTaskContext(rules).length,
       });
       const leaked = selection.selected.filter(fragment => RESPONSE_FORMAT.test(fragment.originalText));
-      expect(leaked.map(f => `p${f.physicalPage}: ${f.originalText.trim().slice(0, 80)}`)).toEqual([]);
+      expect(leaked.map(f => f.stableRuleId)).toEqual([]);
+    });
+
+    it(`${task.name} (${task.title}) excluye alcances internos antes de rankear y formatear`, () => {
+      const selection = retrieveManualRules(manual, {
+        matter: task.matter, caseType: task.name, stage: task.stage, task: task.task,
+        budgetChars: 4500, measureContext: rules => formatManualTaskContext(rules).length,
+      });
+      const formatted = formatManualTaskContext(selection.selected);
+      expect(selection.selected.filter(fragment => EXCLUDED_RULE_IDS.includes(fragment.stableRuleId)).map(f => f.stableRuleId)).toEqual([]);
+      expect(EXCLUDED_RULE_IDS.filter(id => formatted.includes(id))).toEqual([]);
+      expect(selection.selected.every(fragment => (fragment as any).scope === 'DRAFTING')).toBe(true);
     });
   }
 

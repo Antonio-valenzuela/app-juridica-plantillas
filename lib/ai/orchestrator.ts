@@ -55,6 +55,7 @@ Tu función es analizar el resultado producido por el modelo sobre una consulta 
 
   try {
     const { result: judgeRes } = await defaultProviderRouter.route({
+      externalProviderOptIn: request.externalProviderOptIn === true,
       systemPrompt: judgePrompt,
       userMessage: judgeUserMessage,
       mode: "deep",

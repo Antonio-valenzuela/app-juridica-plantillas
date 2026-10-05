@@ -1,4 +1,6 @@
-import { DocumentTemplates } from '@/lib/legal-engine/documentTemplates';
+import { DocumentTemplates, registerFamilyDerivedTemplates, createFamilyDerivedTemplate, type DocumentTemplate } from '@/lib/legal-engine/documentTemplates';
+import { FAMILY_BLUEPRINTS, composeFamilyStructure, familyBlueprintFor } from '@/lib/legal-engine/documentFamilyBlueprints';
+import { WRITING_TYPE_EVIDENCE, WRITING_TYPE_EVIDENCE_BLOCKERS } from './writingTypeEvidence.generated';
 
 export type CatalogNodeKind = 'AREA' | 'PROCEDURE' | 'FAMILY' | 'DOCUMENT_TYPE' | 'LEGACY_ALIAS';
 export type CatalogStatus =
@@ -8,6 +10,8 @@ export type CatalogStatus =
   | 'REQUIRES_OFFICIAL_FORM'
   | 'ASSISTED_DRAFT'
   | 'NOT_APPLICABLE';
+export type FunctionalStatus = 'PASS' | 'FAIL' | 'BLOCKED_EXTERNAL';
+export type HumanReviewStatus = 'APPROVED' | 'PENDING' | 'NOT_REQUIRED';
 export type UiVisibility = 'VISIBLE' | 'HIDDEN' | 'LEGACY_ONLY';
 
 export interface LegalArea { id: string; label: string; description: string; aliases: readonly string[]; uiVisibility: UiVisibility; }
@@ -27,6 +31,9 @@ export interface SourceCompatibilityDeclaration {
 export interface CatalogDocumentBase {
   id: string; label: string; description: string; areaId: string; procedureId: string; familyId: string;
   aliases: readonly string[]; strategyId: string | null; templateId: string | null; implemented: boolean;
+  functionalStatus: FunctionalStatus | 'NOT_APPLICABLE'; humanReview: HumanReviewStatus;
+  functionalStatusReason?: string;
+  capabilities: { selectableInContestaciones: boolean };
   sourceCompatibility: SourceCompatibilityDeclaration | null; requiredFields: readonly string[];
   requiredSections: readonly string[]; outputFilename: string | null; jurisdiction: string;
   legalStage: string; partyRole: string; uiVisibility: UiVisibility; status: CatalogStatus;
@@ -51,7 +58,39 @@ export interface LegalCatalogStats {
 }
 export interface CatalogSearchResult {
   id: string; label: string; description: string; kind: CatalogNodeKind; status: CatalogStatus;
+  functionalStatus?: FunctionalStatus | 'NOT_APPLICABLE'; humanReview?: HumanReviewStatus;
   areaId?: string; procedureId?: string; familyId?: string; targetId?: string;
+}
+
+// PASS solo puede incorporarse con evidencia de aceptación completa por ID.
+// La evidencia la produce `tests/catalog/writingTypeEvidence.test.ts`
+// (recorrido determinista: contrato → generación → secciones → DOCX → PDF →
+// lifecycle fail-closed) y se materializa en `writingTypeEvidence.generated`.
+// Este archivo NO es una lista manual: es el resultado de esa ejecución.
+//
+// FUNCTIONAL_STATUS_OVERRIDES queda vacío y reservado a excepciones
+// justificadas; el estado funcional se COMPUTA a partir de la evidencia.
+const FUNCTIONAL_STATUS_OVERRIDES: Readonly<Record<string, FunctionalStatus>> = Object.freeze({});
+const HUMAN_REVIEW_OVERRIDES: Readonly<Record<string, HumanReviewStatus>> = Object.freeze({});
+
+/** EVIDENCIA → EVALUADOR → functionalStatus (sin overrides). */
+export function computeFunctionalStatus(id: string): FunctionalStatus {
+  const override = FUNCTIONAL_STATUS_OVERRIDES[id];
+  if (override) return override;
+  return WRITING_TYPE_EVIDENCE[id] === true ? 'PASS' : 'FAIL';
+}
+
+export function functionalStatusBlockers(id: string): readonly string[] {
+  return WRITING_TYPE_EVIDENCE_BLOCKERS[id] || [];
+}
+
+function functionalStatusReasonFor(id: string, computed: FunctionalStatus): string | undefined {
+  if (FUNCTIONAL_STATUS_OVERRIDES[id]) return undefined;
+  if (computed === 'PASS') return undefined;
+  const blockers = functionalStatusBlockers(id);
+  return blockers.length
+    ? `Evidencia funcional incompleta: ${blockers.join('+')}.`
+    : 'No hay evidencia determinista por ID que demuestre el contrato funcional completo.';
 }
 
 export const LEGAL_AREAS: readonly LegalArea[] = [
@@ -81,6 +120,23 @@ type CatalogDocumentSeed = { id: string; sourceCompatibility?: SourceCompatibili
 type CatalogGroup = { areaId: string; procedureId: string; procedureLabel: string; familyId: string; familyLabel: string; ids: readonly CatalogDocumentSeed[]; };
 const document = (id: string, sourceCompatibility?: SourceCompatibilityDeclaration): CatalogDocumentSeed => ({ id, sourceCompatibility });
 const group = (areaId: string, procedureId: string, procedureLabel: string, familyId: string, familyLabel: string, ids: readonly (string | CatalogDocumentSeed)[]): CatalogGroup => ({ areaId, procedureId, procedureLabel, familyId, familyLabel, ids: ids.map((entry) => typeof entry === 'string' ? document(entry) : entry) });
+
+const CONTESTACIONES_DOCUMENT_TYPE_OPTIONS = [
+  { id: 'contestacion_demanda_civil' },
+  { id: 'contestacion_demanda_laboral' },
+  { id: 'contestacion_demanda_mercantil' },
+  { id: 'apelacion_civil', label: 'Apelación Civil' },
+  { id: 'apelacion_mercantil', label: 'Apelación Mercantil' },
+  { id: 'apelacion_familiar', label: 'Apelación Familiar' },
+  { id: 'demanda_amparo_directo' },
+  { id: 'demanda_amparo_indirecto' },
+  { id: 'recurso_revision_amparo_directo' },
+  { id: 'recurso_revision_amparo', label: 'Recurso de Revisión en Amparo' },
+  { id: 'recurso_queja_amparo', label: 'Recurso de Queja en Amparo' },
+  { id: 'recurso_reclamacion' },
+  { id: 'incidente_procesal', label: 'Incidente Procesal / de Nulidad' },
+] as const;
+const contestacionesDocumentTypeIds = new Set<string>(CONTESTACIONES_DOCUMENT_TYPE_OPTIONS.map((option) => option.id));
 
 const PROPOSED_GROUPS: readonly CatalogGroup[] = [
   group('civil', 'civil_declarativo', 'Juicios declarativos y orales', 'civil_demandas', 'Demandas y contestaciones civiles', [document('demanda_ordinaria_civil', { sourceRequired: false, acceptedSourceTypes: ['CONTRATO_CIVIL', 'CONVENIO_CIVIL', 'REQUERIMIENTO_CIVIL', 'COMUNICACION_CIVIL', 'PRUEBA_DOCUMENTAL_CIVIL', 'DOCUMENTO_CIVIL_AUXILIAR'], optionalSourceTypes: [], incompatibleMatterIds: ['mercantil', 'laboral', 'amparo', 'penal'], }), 'demanda_oral_civil', 'demanda_ejecutiva_civil', 'demanda_responsabilidad_civil', 'demanda_cumplimiento_contrato', 'demanda_rescision_contrato', 'demanda_pago_pesos', 'demanda_danos_perjuicios', 'demanda_prescripcion', 'demanda_usucapion', 'demanda_accion_reivindicatoria', 'demanda_interdicto', 'demanda_arrendamiento']),
@@ -501,7 +557,68 @@ for (const entry of allGroups) for (const seed of entry.ids) {
   if (seed.sourceCompatibility) sourceCompatibilityById.set(seed.id, seed.sourceCompatibility);
   if (!rowsById.has(seed.id)) rowsById.set(seed.id, entry);
 }
-const templateKeys = new Set(Object.keys(DocumentTemplates));
+/* ══ MOTOR DE FAMILIAS ═══════════════════════════════════════════════════
+ *
+ * Un tipo canónico declarado sin plantilla propia no es una opción sin
+ * backend: se materializa desde el blueprint de su familia. El motor compone
+ * la estructura con bloques reutilizables y declara la compatibilidad de
+ * fuente que le corresponde al comportamiento procesal de la familia, de modo
+ * que ningún tipo catalogado caiga al fallback genérico por falta de plantilla.
+ */
+const FAMILY_ENGINE_SOURCES: Record<string, SourceCompatibilityDeclaration> = {
+  demanda: { sourceRequired: false, acceptedSourceTypes: ['CONTRATO_CIVIL', 'CONVENIO_CIVIL', 'REQUERIMIENTO_CIVIL', 'COMUNICACION_CIVIL', 'PRUEBA_DOCUMENTAL_CIVIL', 'DOCUMENTO_CIVIL_AUXILIAR'], optionalSourceTypes: [], incompatibleMatterIds: [] },
+  recurso: { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'LAUDO', 'ACUERDO'], incompatibleMatterIds: [] },
+  escrito_tramite: { sourceRequired: false, acceptsAnySource: true, acceptedSourceTypes: [], optionalSourceTypes: ['ACUERDO', 'SENTENCIA_O_RESOLUCION', 'REQUERIMIENTO_CIVIL', 'COMUNICACION_CIVIL'], incompatibleMatterIds: [] },
+  prueba_cierre: { sourceRequired: true, acceptedSourceTypes: ['DEMANDA_CIVIL', 'ESCRITO_INICIAL_CIVIL', 'PRUEBA_DOCUMENTAL_CIVIL', 'DOCUMENTO_CIVIL_AUXILIAR'], incompatibleMatterIds: [] },
+  convenio: { sourceRequired: false, acceptedSourceTypes: ['CONVENIO_CIVIL', 'CONTRATO_CIVIL', 'ACUERDO'], incompatibleMatterIds: [] },
+  audiencia: { sourceRequired: false, acceptsAnySource: true, acceptedSourceTypes: [], optionalSourceTypes: ['DENUNCIA', 'QUERELLA', 'SENTENCIA_O_RESOLUCION', 'LAUDO'], incompatibleMatterIds: [] },
+  petitorio: { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'LAUDO', 'ACUERDO'], incompatibleMatterIds: [] },
+};
+
+/** Tipos canónicos sin plantilla propia que el motor de familias materializa. */
+function buildFamilyDerivedTypes(): Array<{ tipo: string; familyId: string; template: DocumentTemplate; sourceCompatibility: SourceCompatibilityDeclaration }> {
+  const derived: Array<{ tipo: string; familyId: string; template: any; sourceCompatibility: SourceCompatibilityDeclaration }> = [];
+  for (const id of rowsById.keys()) {
+    if (DocumentTemplates[id] || FAMILY_IDENTIFIER_IDS.has(id)) continue;
+    const row = rowsById.get(id)!;
+    if (!familyBlueprintFor(row.familyId)) continue;
+    const estructura = composeFamilyStructure(row.familyId, id);
+    if (!estructura || !estructura.length) continue;
+    const blueprint = familyBlueprintFor(row.familyId)!;
+    const label = LEGACY_LABELS[id] || labelFromId(id);
+    derived.push({
+      tipo: id, familyId: row.familyId,
+      template: createFamilyDerivedTemplate({
+        tipo: id, etiqueta: label, familyId: row.familyId,
+        materia: blueprint.materia, via: blueprint.via,
+        procedimiento: blueprint.procedimiento,
+        subtipo: `${label} — ${blueprint.procedimiento}`,
+        objetivoProcesal: blueprint.objetivoProcesal,
+        estructura, camposObligatorios: [...blueprint.camposObligatorios],
+        reglas: [...blueprint.reglas],
+        reglasArgumentacion: blueprint.reglasArgumentacion ? [...blueprint.reglasArgumentacion] : undefined,
+        reglasPrueba: blueprint.reglasPrueba ? [...blueprint.reglasPrueba] : undefined,
+      }),
+      sourceCompatibility: FAMILY_ENGINE_SOURCES[blueprint.engine] || FAMILY_ENGINE_SOURCES.escrito_tramite,
+    });
+  }
+  return derived as any;
+}
+
+const familyDerivedTypes = buildFamilyDerivedTypes();
+registerFamilyDerivedTemplates(familyDerivedTypes);
+for (const entry of familyDerivedTypes) sourceCompatibilityById.set(entry.tipo, entry.sourceCompatibility);
+const FAMILY_DERIVED_IDS = new Set(familyDerivedTypes.map((entry) => entry.tipo));
+
+/**
+ * Tipos con plantilla real pero NO generables por contrato de producto:
+ * formulario oficial exigido por la autoridad o borrador asistido declarado.
+ * No se les declara fuente: no existe ruta de generación, y declararla los
+ * acreditaría indebidamente.
+ */
+void FAMILY_BLUEPRINTS;
+
+const templateKeys = new Set([...Object.keys(DocumentTemplates), ...FAMILY_DERIVED_IDS]);
 const implementedIds = new Set([...templateKeys]);
 
 function buildDocumentIdentifier(id: string): CatalogDocumentIdentifier {
@@ -510,17 +627,26 @@ function buildDocumentIdentifier(id: string): CatalogDocumentIdentifier {
   const template = DocumentTemplates[id];
   const isFamily = FAMILY_IDENTIFIER_IDS.has(id);
   const label = LEGACY_LABELS[id] || labelFromId(id);
-  const base: CatalogDocumentBase = {
+const base: CatalogDocumentBase = {
     id, label, description: template?.objetivoProcesal || `Tipo documental catalogado: ${label}.`, areaId: source.areaId, procedureId: source.procedureId, familyId: source.familyId,
     aliases: id === 'contestacion_demanda_mercantil' ? ['contestación mercantil'] : [], strategyId: template?.tipo || null, templateId: template?.tipo || null,
     implemented: implementedIds.has(id), sourceCompatibility: sourceCompatibilityById.get(id) || null, requiredFields: template?.camposObligatorios || [], requiredSections: template?.estructura || [],
+    functionalStatus: isFamily ? 'NOT_APPLICABLE' : computeFunctionalStatus(id),
+    humanReview: isFamily ? 'NOT_REQUIRED' : HUMAN_REVIEW_OVERRIDES[id] || 'PENDING',
+    functionalStatusReason: isFamily ? undefined : functionalStatusReasonFor(id, computeFunctionalStatus(id)),
+    capabilities: { selectableInContestaciones: contestacionesDocumentTypeIds.has(id) },
     outputFilename: template ? `${label} - {date}.docx` : null, jurisdiction: template?.jurisdiccion || 'según autoridad competente', legalStage: template?.procedimiento || source.procedureLabel,
-    partyRole: template?.rolAutor || 'por definir', uiVisibility: 'VISIBLE', status: implementedIds.has(id) ? 'IMPLEMENTED' : OFFICIAL_FORM_IDS.has(id) ? 'REQUIRES_OFFICIAL_FORM' : ASSISTED_DRAFT_IDS.has(id) ? 'ASSISTED_DRAFT' : 'CATALOG_ONLY',
+    partyRole: template?.rolAutor || 'por definir', uiVisibility: 'VISIBLE', status: OFFICIAL_FORM_IDS.has(id) ? 'REQUIRES_OFFICIAL_FORM' : ASSISTED_DRAFT_IDS.has(id) ? 'ASSISTED_DRAFT' : implementedIds.has(id) ? 'IMPLEMENTED' : 'CATALOG_ONLY',
   };
   if (isFamily) return { ...base, kind: 'FAMILY', implemented: false, strategyId: null, templateId: null, sourceCompatibility: null, status: 'NOT_APPLICABLE', uiVisibility: 'VISIBLE' };
+  // CONTRACTO DE FORMULARIO OFICIAL / BORRADOR ASISTIDO (no negociable):
+  // un tipo REQUIRES_OFFICIAL_FORM o ASSISTED_DRAFT NO es generable. Puede
+  // tener plantilla y campos, pero no strategy, ni fuente declarada, ni ruta de
+  // generación: la autoridad exige el formulario oficial. Mantener esto
+  // fail-closed es lo que impide "certificar" un tipo que aún no lo está.
   if (base.status !== 'IMPLEMENTED') return { ...base, kind: 'DOCUMENT_TYPE', implemented: false, strategyId: null, templateId: null, sourceCompatibility: null };
   if (!base.sourceCompatibility) throw new Error(`Implemented catalog document without source compatibility: ${id}`);
-  return { ...base, kind: 'DOCUMENT_TYPE' };
+  return { ...base, kind: 'DOCUMENT_TYPE', implemented: true };
 }
 
 const aliasIdentifiers: readonly LegacyAlias[] = [
@@ -544,6 +670,78 @@ export const DOCUMENT_FAMILIES: readonly DocumentFamily[] = [...familyMap.values
 export const CANONICAL_DOCUMENT_TYPES: readonly CanonicalDocumentType[] = canonicalDocuments;
 export const LEGACY_ALIASES: readonly LegacyAlias[] = aliasIdentifiers;
 export const LEGAL_CATALOG_REGISTRY: LegalCatalogRegistry = Object.freeze({ areas: LEGAL_AREAS, procedures: LEGAL_PROCEDURES, families: DOCUMENT_FAMILIES, documents: CANONICAL_DOCUMENT_TYPES, aliases: LEGACY_ALIASES, documentIdentifiers });
+
+export function getContestacionesDocumentOptions(options: { includeUncertifiedDrafts?: boolean } = {}): Array<{ value: string; label: string }> {
+  const documentOptions = CONTESTACIONES_DOCUMENT_TYPE_OPTIONS.flatMap((option) => {
+    const entry = getCatalogDocument(option.id);
+    if (entry?.kind !== 'DOCUMENT_TYPE' || entry.status !== 'IMPLEMENTED' || !entry.implemented || !entry.capabilities.selectableInContestaciones) return [];
+    const certified = entry.functionalStatus === 'PASS';
+    if (!certified && !(options.includeUncertifiedDrafts && entry.functionalStatus === 'FAIL')) return [];
+    const label = ('label' in option ? option.label : undefined) || entry.label;
+    return [{ value: entry.id, label: certified ? label : `En desarrollo (sin certificar) — ${label}` }];
+  });
+  return [...documentOptions, { value: 'redaccion_libre', label: 'Redacción Libre — Escribir directamente lo que quiero' }];
+}
+
+export function getContestacionesDeclaredDocumentTypes(): Array<{ id: string; label: string }> {
+  return CONTESTACIONES_DOCUMENT_TYPE_OPTIONS.flatMap((option) => {
+    const entry = getCatalogDocument(option.id);
+    if (entry?.kind !== 'DOCUMENT_TYPE' || !entry.capabilities.selectableInContestaciones) return [];
+    return [{ id: entry.id, label: ('label' in option ? option.label : undefined) || entry.label }];
+  });
+}
+
+export function getFunctionalDocumentTypes(): readonly CanonicalDocumentType[] {
+  return CANONICAL_DOCUMENT_TYPES.filter((entry) => entry.functionalStatus === 'PASS');
+}
+
+export function getTypesInDevelopment(): readonly CanonicalDocumentType[] {
+  return CANONICAL_DOCUMENT_TYPES.filter((entry) => entry.functionalStatus !== 'PASS');
+}
+
+export function getFunctionalDocumentStatus(idOrAlias: string): FunctionalStatus | undefined {
+  const entry = getCatalogDocument(idOrAlias);
+  const canonical = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+  return canonical?.kind === 'DOCUMENT_TYPE' && canonical.functionalStatus !== 'NOT_APPLICABLE'
+    ? canonical.functionalStatus
+    : undefined;
+}
+
+/**
+ * Los tipos funcionalmente no acreditados solo se pueden generar como DRAFT
+ * cuando el abogado activó explícitamente el modo asistido y el tipo tiene
+ * implementación/plantilla real. BLOCKED_EXTERNAL, formularios oficiales y
+ * entradas de catálogo no se habilitan por esta excepción.
+ */
+export function canGenerateDocumentDraft(idOrAlias: string, includeUncertifiedDrafts = false): boolean {
+  const entry = getCatalogDocument(idOrAlias);
+  const canonical = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+  if (canonical?.kind !== 'DOCUMENT_TYPE') return false;
+  if (canonical.functionalStatus === 'PASS') return true;
+  return includeUncertifiedDrafts
+    && canonical.functionalStatus === 'FAIL'
+    && canonical.status === 'IMPLEMENTED'
+    && canonical.implemented
+    && Boolean(DocumentTemplates[canonical.id])
+    && canonical.sourceCompatibility !== null;
+}
+
+/**
+ * FINAL exige acreditación técnica FUNCIONAL **y** aprobación humana.
+ *
+ * `functionalStatus = PASS` acredita que el motor funciona de punta a punta
+ * (contrato, pipeline, generación determinista, DOCX, PDF, lifecycle
+ * fail-closed). NO autoriza por sí solo la exportación FINAL: mientras la
+ * revisión humana siga PENDING, FINAL continúa bloqueado y el documento
+ * depende además de sus propios gates (pendingFields, autoridades,
+ * provenance, coverage, qualityGate, preflight, lifecycle).
+ */
+export function canExportDocumentFinal(idOrAlias: string): boolean {
+  const entry = getCatalogDocument(idOrAlias);
+  const canonical = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+  if (canonical?.kind !== 'DOCUMENT_TYPE') return false;
+  return canonical.functionalStatus === 'PASS' && canonical.humanReview === 'APPROVED';
+}
 
 const identifierById = new Map<string, CatalogDocumentIdentifier>();
 for (const entry of documentIdentifiers) {
@@ -626,6 +824,70 @@ const LEGACY_DOCUMENT_CATEGORIES: Record<string, string> = {
 };
 export function getLegacyDocumentTypes(): LegacyDocumentTypeProjection[] {
   return LEGACY_DOCUMENT_IDENTIFIER_IDS.map((id) => { const entry = getCatalogDocument(id); return { value: id, label: LEGACY_LABELS[id] || entry?.label || labelFromId(id), category: entry?.kind === 'FAMILY' ? 'familia' : LEGACY_DOCUMENT_CATEGORIES[id] || 'documento', description: entry?.kind === 'LEGACY_ALIAS' ? entry.reason : entry?.description }; });
+}
+/**
+ * Subconjunto legacy que el selector Universal puede enviar como escrito:
+ * una familia no es un tipo generable; solo se admiten documentos canónicos
+ * IMPLEMENTED o alias activos cuyo destino tiene contrato, plantilla y evidencia funcional PASS.
+ */
+export function getUniversalDocumentTypes(options: { includeUncertifiedDrafts?: boolean } = {}): LegacyDocumentTypeProjection[] {
+  return getLegacyDocumentTypes().filter((option) => {
+    const entry = getCatalogDocument(option.value);
+    const target = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+    const statusAllowed = target?.kind === 'DOCUMENT_TYPE'
+      && (target.functionalStatus === 'PASS'
+        || (options.includeUncertifiedDrafts === true && target.functionalStatus === 'FAIL'));
+    return target?.kind === 'DOCUMENT_TYPE'
+      && target.status === 'IMPLEMENTED'
+      && statusAllowed
+      && target.implemented
+      && Boolean(DocumentTemplates[target.id]);
+  }).map((option) => {
+    const entry = getCatalogDocument(option.value);
+    const target = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+    return target?.kind === 'DOCUMENT_TYPE' && target.functionalStatus !== 'PASS'
+      ? { ...option, label: `En desarrollo (sin certificar) — ${option.label}` }
+      : option;
+  });
+}
+
+export function getInitialWritingDocumentOptions(options: { includeUncertifiedDrafts?: boolean } = {}): LegacyDocumentTypeProjection[] {
+  const legacyOptions = getLegacyDocumentTypes().filter((option) => {
+    if (!['inicial', 'promocion', 'otro'].includes(option.category || '')
+      && !(options.includeUncertifiedDrafts === true && option.category === 'amparo')) return false;
+    const entry = getCatalogDocument(option.value);
+    const target = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+    const statusAllowed = target?.kind === 'DOCUMENT_TYPE'
+      && (target.functionalStatus === 'PASS'
+        || (options.includeUncertifiedDrafts === true && target.functionalStatus === 'FAIL'));
+    return target?.kind === 'DOCUMENT_TYPE'
+      && target.status === 'IMPLEMENTED'
+      && target.implemented
+      && statusAllowed;
+  }).map((option) => {
+    const entry = getCatalogDocument(option.value);
+    const target = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+    return target?.kind === 'DOCUMENT_TYPE' && target.functionalStatus !== 'PASS'
+      ? { ...option, label: `En desarrollo (sin certificar) — ${option.label}` }
+      : option;
+  });
+  const canonicalDemandOptions = CANONICAL_DOCUMENT_TYPES.flatMap((entry) => {
+    if (!entry.id.startsWith('demanda_')) return [];
+    const statusAllowed = entry.functionalStatus === 'PASS'
+      || (options.includeUncertifiedDrafts === true && entry.functionalStatus === 'FAIL');
+    if (entry.status !== 'IMPLEMENTED' || !entry.implemented || !statusAllowed || !DocumentTemplates[entry.id]) return [];
+    return [{
+      value: entry.id,
+      label: entry.functionalStatus === 'PASS'
+        ? entry.label
+        : `En desarrollo (sin certificar) — ${entry.label}`,
+      category: 'inicial',
+      description: entry.description,
+    }];
+  });
+  const merged = new Map<string, LegacyDocumentTypeProjection>();
+  for (const option of [...legacyOptions, ...canonicalDemandOptions]) merged.set(option.value, option);
+  return [...merged.values()];
 }
 const LEGACY_MATTER_LABELS: Record<string, string> = {
   amparo: 'Amparo', constitucional: 'Constitucional', civil: 'Civil', familiar: 'Familiar', mercantil: 'Mercantil', laboral: 'Laboral', penal: 'Penal', administrativo: 'Administrativo', fiscal: 'Fiscal', agrario: 'Agrario', electoral: 'Electoral', seguridad_social: 'Seguridad Social', propiedad_intelectual: 'Propiedad Intelectual', corporativo: 'Corporativo', ambiental: 'Ambiental', energia: 'Energía', salud: 'Salud', financiero: 'Financiero', aduanero: 'Aduanero', migratorio: 'Migratorio', inmobiliario: 'Inmobiliario', contratacion_publica: 'Contratación Pública', responsabilidad_patrimonial: 'Responsabilidad Patrimonial', transparencia: 'Transparencia y Datos Personales', notarial: 'Notarial', derechos_humanos: 'Derechos Humanos', procesal: 'Procesal General', otro: 'Otro',

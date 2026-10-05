@@ -1,6 +1,6 @@
 import { fetch } from "undici";
 import type { AIHealthResult, AIProviderResult, AIRequest, LegalAIProvider } from "./types";
-import { redactSecrets, sanitizeAiError } from "./types";
+import { sanitizeAiError } from "./types";
 
 export interface GeminiCompletionOptions {
   prompt: string;
@@ -142,29 +142,17 @@ export async function generateGeminiCompletion(
     const latencyMs = Date.now() - startMs;
 
     if (!response.ok) {
-      const errText = await response.text();
-      const sanitizedBody = redactSecrets(errText.slice(0, 2000));
+      const requestId = response.headers.get("x-request-id") || response.headers.get("request-id") || response.headers.get("x-correlation-id") || "unavailable";
+      console.error(`[GEMINI] GEMINI_HTTP_ERROR ${JSON.stringify({ status: response.status, requestId })}`);
       if (response.status === 429) {
-        console.warn(`[GEMINI] 429 RATE_LIMIT detectada. Delegando inmediatamente al siguiente provider...`);
         throw new GeminiCompletionError(
-          `[Gemini Provider] HTTP 429: ${sanitizedBody}`,
+          `[Gemini Provider] HTTP 429 requestId=${requestId}`,
           429,
           "RATE_LIMIT"
         );
       }
-      console.error(
-        `[GEMINI] GEMINI_HTTP_ERROR ${JSON.stringify({
-          status: response.status,
-          statusText: response.statusText,
-          body: sanitizedBody,
-          endpoint,
-          model,
-          latencyMs,
-          GEMINI_API_KEY_PRESENT: true,
-        })}`
-      );
       throw new GeminiCompletionError(
-        `[Gemini Provider] HTTP ${response.status}: ${sanitizedBody}`,
+        `[Gemini Provider] HTTP ${response.status} requestId=${requestId}`,
         response.status,
         response.status === 429 ? "RATE_LIMIT" : response.status >= 500 ? "SERVER_ERROR" : "HTTP_ERROR"
       );

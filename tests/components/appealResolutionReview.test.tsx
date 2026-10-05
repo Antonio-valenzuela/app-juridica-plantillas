@@ -1,5 +1,18 @@
 // @vitest-environment jsdom
 import React from 'react';
+// Component-only approved catalog fixture. Production availability is tested
+// separately and remains FAIL; this mock is not functional certification.
+vi.mock('@/lib/catalog/legalCatalog', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/catalog/legalCatalog')>();
+  const approved = new Set(['apelacion_civil', 'apelacion_familiar', 'contestacion_demanda_civil']);
+  return { ...actual,
+    getContestacionesDocumentOptions: () => [
+      ...actual.getContestacionesDeclaredDocumentTypes().filter(item => approved.has(item.id)).map(item => ({ value: item.id, label: item.label })),
+      { value: 'redaccion_libre', label: 'Redacción libre' },
+    ],
+    getFunctionalDocumentStatus: (id: string) => approved.has(id) ? 'PASS' : actual.getFunctionalDocumentStatus(id),
+  };
+});
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, screen, cleanup } from '@testing-library/react';
 import { CaseDocumentsReader } from '@/app/machotes/components/CaseDocumentsReader';
@@ -20,7 +33,7 @@ describe('phase 1 appeal review discovery', () => {
   });
   it('exposes the mandatory review without trusting a legacy misclassified analysis', () => {
     const { container } = render(<CaseDocumentsReader documents={[{ id: 'anonymous-scan', name: 'anonymous-decisions.pdf', type: 'pdf', status: 'READY', pages: appealResolutionSource.pages } as any]} sourceDocs={[appealResolutionSource]} onSelectDocument={vi.fn()} />);
-    const select = container.querySelector('select')!;
+    const select = screen.getAllByRole('combobox').find(element => element.querySelector('option[value="apelacion_civil"]'))!;
     fireEvent.change(select, { target: { value: 'apelacion_civil' } });
     const html = container.innerHTML;
     expect(html).toContain('Resoluciones detectadas');

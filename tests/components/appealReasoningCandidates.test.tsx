@@ -1,5 +1,18 @@
 // @vitest-environment jsdom
 import React from 'react';
+// Component-only approved catalog fixture. Production availability is tested
+// separately and remains FAIL; this mock is not functional certification.
+vi.mock('@/lib/catalog/legalCatalog', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/catalog/legalCatalog')>();
+  const approved = new Set(['apelacion_civil', 'apelacion_familiar', 'contestacion_demanda_civil']);
+  return { ...actual,
+    getContestacionesDocumentOptions: () => [
+      ...actual.getContestacionesDeclaredDocumentTypes().filter(item => approved.has(item.id)).map(item => ({ value: item.id, label: item.label })),
+      { value: 'redaccion_libre', label: 'Redacción libre' },
+    ],
+    getFunctionalDocumentStatus: (id: string) => approved.has(id) ? 'PASS' : actual.getFunctionalDocumentStatus(id),
+  };
+});
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { CaseDocumentsReader } from '@/app/machotes/components/CaseDocumentsReader';
@@ -12,7 +25,7 @@ it('removes candidates when another resolution is selected, without restoring th
   const text = 'JUZGADO DE PRUEBA\nAUTO: TRÁMITE\nACTORES: PERSONA ALFA\nDEMANDADOS: PERSONA BETA\nLOCALIDAD A 12 DOCE DE AGOSTO DE 2026\nVISTOS: autos\nSe rechaza la solicitud de los actores porque no fue acreditada.';
   const source = { ...civilReasoningSource, pages: [{ page: 1, text, chars: text.length }, ...civilReasoningSource.pages!] };
   const { container } = render(<CaseDocumentsReader documents={[{ id: source.id, name: 'decisions.pdf', type: 'pdf', status: 'READY', pages: source.pages } as any]} sourceDocs={[source]} onSelectDocument={vi.fn()} />);
-  fireEvent.change(container.querySelector('select')!, { target: { value: 'apelacion_civil' } });
+  fireEvent.change(screen.getAllByRole('combobox').find(element => element.querySelector('option[value="apelacion_civil"]'))!, { target: { value: 'apelacion_civil' } });
   const review = within(screen.getByLabelText('Confirmación de apelación'));
   fireEvent.click(review.getAllByRole('radio')[1]);
   fireEvent.click(review.getByRole('checkbox', { name: 'PERSONA ALFA (actor)' }));
@@ -28,7 +41,7 @@ it('removes candidates when another resolution is selected, without restoring th
 it('shows a read-only candidate panel only after confirmation, and invalidates it on party/resolution/type changes', () => {
   const props = { documents: [{ id: civilReasoningSource.id, name: 'anonymous.pdf', type: 'pdf', status: 'READY', pages: civilReasoningSource.pages } as any], sourceDocs: [civilReasoningSource], onSelectDocument: vi.fn() };
   const { container, rerender } = render(<CaseDocumentsReader {...props} />);
-  fireEvent.change(container.querySelector('select')!, { target: { value: 'apelacion_civil' } });
+  fireEvent.change(screen.getAllByRole('combobox').find(element => element.querySelector('option[value="apelacion_civil"]'))!, { target: { value: 'apelacion_civil' } });
   expect(screen.queryByLabelText('Agravios candidatos')).toBeNull();
   const review = within(screen.getByLabelText('Confirmación de apelación'));
   fireEvent.click(review.getByRole('radio'));
@@ -47,7 +60,7 @@ it('shows a read-only candidate panel only after confirmation, and invalidates i
   const other = structuredClone(civilReasoningSource); other.id = 'other';
   rerender(<CaseDocumentsReader {...props} sourceDocs={[other]} />);
   expect(screen.queryByLabelText('Agravios candidatos')).toBeNull();
-  fireEvent.change(container.querySelector('select')!, { target: { value: 'contestacion_demanda_civil' } });
+  fireEvent.change(screen.getAllByRole('combobox').find(element => element.querySelector('option[value="apelacion_civil"]'))!, { target: { value: 'contestacion_demanda_civil' } });
   expect(screen.queryByLabelText('Agravios candidatos')).toBeNull();
 });
 

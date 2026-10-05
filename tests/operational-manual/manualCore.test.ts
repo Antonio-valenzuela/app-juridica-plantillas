@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildManualIndex, retrieveManualRules, auditOperationalManual } from '../../lib/operational-manual/core';
+import { buildManualIndex, retrieveManualRules, formatManualTaskContext, auditOperationalManual } from '../../lib/operational-manual/core';
 import { createEmptyDocument } from '../../lib/legal-engine/types';
 import { createGenerationTraceContext } from '../../lib/legal-engine/generationTrace';
 
@@ -41,6 +41,31 @@ describe('manual operativo', () => {
     expect(broken.manifest.processedPages).toBe(212);
     expect(broken.manifest.emptyPages).toEqual([40]);
     expect(broken.manifest.active).toBe(false);
+  });
+  it('avisa si el índice interno referencia paginación lógica mayor que las páginas físicas', () => {
+    const withLogicalToc = pages.map((page, index) => index === 0
+      ? { ...page, text: 'ÍNDICE\n11. Estilo y Conocimiento Operativo del Despacho ........ 219–223\n' }
+      : page);
+    const indexed = buildManualIndex(withLogicalToc, { manualId: 'lex-operativo', version: '1.0', sourceHash: 'toc' });
+    expect(indexed.manifest.warnings).toContain('LOGICAL_PAGE_REFERENCE_OUT_OF_RANGE:223>212');
+    expect(indexed.manifest.active).toBe(true);
+  });
+  it('excluye perfil interno y formato del asistente antes de seleccionar y al formatear', () => {
+    const sectionPages = pages.map((page, index) => {
+      if (index === 0) return { ...page, text: 'ÍNDICE\n11. Estilo y Conocimiento Operativo del Despacho\n12. Formato de respuesta del asistente\n13. Metodología de agravios\n' };
+      if (index === 207) return { ...page, text: '11. Estilo y Conocimiento Operativo del Despacho\npráctica interna del despacho para asuntos civiles\n' };
+      if (index === 208) return { ...page, text: 'continuación de criterios internos del despacho\n' };
+      if (index === 209) return { ...page, text: '12. Formato de respuesta del asistente\nSalida esperada en JSON para el asistente\n' };
+      if (index === 210) return { ...page, text: '13. Metodología de agravios\nAnalizar el agravio con premisa y conclusión verificables\n' };
+      return page;
+    });
+    const index = buildManualIndex(sectionPages, { manualId: 'lex-operativo', version: '1.0', sourceHash: 'scope' });
+    const result = retrieveManualRules(index, { matter: 'CIVIL', task: 'agravios metodología interna despacho JSON', budgetChars: 4000 });
+    const excluded = index.fragments.filter(fragment => fragment.physicalPage >= 208 && fragment.physicalPage <= 210);
+    expect(excluded.some(fragment => fragment.scope === 'INTERNAL_PROFILE_ONLY')).toBe(true);
+    expect(excluded.some(fragment => fragment.scope === 'ASSISTANT_OUTPUT_FORMAT')).toBe(true);
+    expect(result.selected.every(fragment => fragment.scope === 'DRAFTING')).toBe(true);
+    expect(formatManualTaskContext(excluded)).not.toMatch(/práctica interna|Salida esperada en JSON/i);
   });
   it('GenerationTrace conserva versión, regla, página y hallazgo sin alterar el gate', () => {
     const trace = createGenerationTraceContext({ doc: createEmptyDocument(), options: { enabled: true } });

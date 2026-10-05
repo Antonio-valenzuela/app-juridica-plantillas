@@ -82,6 +82,7 @@ describe('ANTECEDENTES visible materialization', () => {
       documentTypeLabel: 'Recurso de revisión en amparo directo',
       matter: 'Amparo',
       jurisdiction: 'Federal',
+      targetSection: 'sec-recurso_revision_amparo_directo-4',
       userInstruction: 'Preparar recurso de revisión en amparo directo con antecedentes.',
       sourceDocuments: [sourceWithVisibleProceduralEvent()],
       issueProviderInvoker: provider,

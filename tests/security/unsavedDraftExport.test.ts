@@ -30,6 +30,7 @@ import { POST as exportPdf } from '@/app/api/legal-engine/export/pdf/route';
 import { POST as exportDocx } from '@/app/api/legal-engine/export/docx/route';
 
 const document = { id: 'draft-local-1', title: 'Borrador de prueba', generationMetadata: {} };
+const uncertifiedDocument = { ...document, documentType: 'contestacion_demanda_civil' };
 const preparedDocument = { ...document, generationMetadata: { auditTrace: undefined } };
 
 function request(path: string, payload: Record<string, unknown>, headers: Record<string, string> = {}) {
@@ -84,6 +85,17 @@ describe('exportación local de borrador no persistido', () => {
     }
     expect(list).not.toHaveBeenCalled();
     expect((await exportPdf(request('/api/legal-engine/export/pdf', { document, exportMode: 'FINAL' }, { 'X-Unsaved-Draft-Export': 'true' }))).status).toBe(422);
+  });
+  it('bloquea FINAL en API para tipos sin certificar, aunque el modo llegue manipulado desde el cliente', async () => {
+    for (const [handler, format] of [[exportPdf, 'pdf'], [exportDocx, 'docx']] as const) {
+      const response = await handler(request(`/api/legal-engine/export/${format}`, {
+        document: uncertifiedDocument,
+        exportMode: 'FINAL',
+      }, { 'X-Unsaved-Draft-Export': 'true' }));
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({ errorCode: 'UNCERTIFIED_TYPE_FINAL_BLOCKED' });
+    }
+    expect(mocks.prepareUniversalDocumentForExport).not.toHaveBeenCalled();
   });
   it('DRAFT efímero no evita el rechazo de capacidad local inválida', async () => {
     mocks.desktopDraftRepository.mockReturnValue({ ok: false, response: Response.json({ error: 'UNAUTHORIZED' }, { status: 401 }) });

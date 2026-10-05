@@ -24,7 +24,7 @@ describe('J9 NVIDIA ONLY — sin Gemini/Groq/OpenRouter', () => {
       content: 'respuesta nvidia',
       latencyMs: 100,
     });
-    const res = await runLegalAI({ userMessage: 'test' });
+    const res = await runLegalAI({ externalProviderOptIn: true, userMessage: 'test' });
     expect(res.provider).toBe('nvidia');
     expect(res.success).toBe(true);
     vi.restoreAllMocks();
@@ -40,7 +40,7 @@ describe('J9 NVIDIA ONLY — sin Gemini/Groq/OpenRouter', () => {
       latencyMs: 100,
       errorCode: 'NVIDIA_ERROR',
     });
-    const res = await runFastMode({ userMessage: 'test fallback' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test fallback' });
     expect(res.provider).toBe('local');
     expect(res.success).toBe(true);
     vi.restoreAllMocks();
@@ -51,7 +51,7 @@ describe('J9 NVIDIA ONLY — sin Gemini/Groq/OpenRouter', () => {
     vi.spyOn(NVIDIAProvider.prototype, 'generate').mockImplementation(async () => {
       throw new Error('timeout');
     });
-    const res = await runFastMode({ userMessage: 'timeout test' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'timeout test' });
     expect(res.provider).toBe('local');
     vi.restoreAllMocks();
   });
@@ -65,7 +65,7 @@ describe('J9 NVIDIA ONLY — sin Gemini/Groq/OpenRouter', () => {
       content: 'contenido',
       latencyMs: 50,
     });
-    const res = await runLegalAI({ userMessage: 'metadata' });
+    const res = await runLegalAI({ externalProviderOptIn: true, userMessage: 'metadata' });
     expect(res.provider).toBe('nvidia');
     expect(res.model).toBe('meta/llama-3.2-11b-vision-instruct');
     expect(JSON.stringify(res)).not.toMatch(/nvapi-/i);
@@ -90,7 +90,7 @@ describe('J9 NVIDIA ONLY — sin Gemini/Groq/OpenRouter', () => {
       }),
       latencyMs: 100,
     });
-    const deep = await runDeepReviewMode({ userMessage: 'deep', mode: 'deep' });
+    const deep = await runDeepReviewMode({ externalProviderOptIn: true, userMessage: 'deep', mode: 'deep' });
     expect(deep.providerSummary.nvidiaCompleted).toBe(true);
     expect(deep.providerSummary.fallbackUsed).toBe(false);
     vi.restoreAllMocks();

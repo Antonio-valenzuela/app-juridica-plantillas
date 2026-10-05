@@ -25,7 +25,7 @@ describe.skipIf(!existsSync(source))('importación PDF canónico local', () => {
     expect(penal.selected.some((fragment) => /● jurisprudencia;/i.test(fragment.originalText))).toBe(true);
     expect(civil.selected.some((fragment) => /civil/i.test(fragment.originalText))).toBe(true);
     expect(penal.selected.some((fragment) => /pruebas civiles/i.test(fragment.originalText))).toBe(false);
-    expect([...penal.selected, ...civil.selected].some((fragment) => /PB\s+JUR[IÍ]DICO|EDGARDO\s+PALACIOS/i.test(fragment.originalText))).toBe(false);
+    expect([...penal.selected, ...civil.selected].some((fragment) => /Estilo\s+y\s+Conocimiento\s+Operativo\s+del\s+Despacho|FORMATO\s+DE\s+RESPUESTA\s+DEL\s+ASISTENTE/i.test(fragment.originalText))).toBe(false);
     expect(penal.usedChars).toBeLessThanOrEqual(4500);
     expect(civil.usedChars).toBeLessThanOrEqual(4500);
   });

@@ -32,7 +32,7 @@ export interface AppealReasoningBlock {
   origin: AppealOrigin; impact: AppealImpact; appliedRule: AppealClassificationRule;
   classificationReason: string; decisionOrigins: AppealOrigin[];
   pages: number[]; sourceSpans: AppealOrigin[]; sourceText: string;
-  canonicalSection?: string; ocrReadingDoubtful?: boolean;
+  canonicalSection?: string; ocrReadingDoubtful?: boolean; unrecognizedContinuation?: boolean;
 }
 export interface AppealCandidate extends AppealReasoning {
   reasoningId: string; proposedReview: string; legalSupport: 'sin soporte';
@@ -54,10 +54,10 @@ type BlockKind = AppealReasoningBlock['kind'];
 interface SourceBlock {
   id: string; section: string; kind: BlockKind; parentSection: string;
   origin?: AppealOrigin; segments: Array<{ page: number; start: number; end: number; text: string }>;
-  canonicalSection?: string; ocrReadingDoubtful?: boolean;
+  canonicalSection?: string; ocrReadingDoubtful?: boolean; unrecognizedContinuation?: boolean;
 }
 const operativeHeading = /^(?:PROPOSICIONES|PUNTOS\s+RESOLUTIVOS|RESOLUTIVOS|SE\s+RESUELVE|RESUELVE|POR\s+LO\s+EXPUESTO|POR\s+TANTO)$/;
-const romanHeading = /^[IVXLCDM]{1,12}$/;
+const romanHeading = /^[IVXLCDM1LY]{1,12}$/;
 
 const ordinalWords = new Set([
   'UNICO', 'UNICA', 'PRIMERO', 'PRIMERA', 'SEGUNDO', 'SEGUNDA', 'TERCERO', 'TERCERA', 'CUARTO', 'CUARTA',
@@ -86,7 +86,7 @@ function normalizedHeadingKey(key: string): string {
     if (!compact.startsWith(compactHeader)) continue;
     const suffixWithoutSpaces = compact.slice(compactHeader.length);
     const ordinalSuffix = compactOrdinalWords.some(word => suffixWithoutSpaces.startsWith(word));
-    const romanSuffix = /^[IVXLCDM]{1,12}(?=[.:)\-]|$)/.test(suffixWithoutSpaces);
+    const romanSuffix = /^[IVXLCDM1LY]{1,12}(?=[.:)\-]|$)/.test(suffixWithoutSpaces);
     if (suffixWithoutSpaces && !/^[.:)\-]/.test(suffixWithoutSpaces) && !ordinalSuffix && !romanSuffix) continue;
     let consumed = 0, end = 0;
     while (end < key.length && consumed < compactHeader.length) {
@@ -133,7 +133,7 @@ function ordinalValue(token: string): number | undefined {
 }
 
 function romanValue(token: string): number | undefined {
-  if (!/^[IVXLCDM]+$/.test(token) || token === 'VIL') return undefined;
+  if (!/^[IVXLCDM]+$/.test(token)) return undefined;
   const values: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
   let total = 0;
   for (let i = 0; i < token.length; i++) total += values[token[i]] < (values[token[i + 1]] || 0) ? -values[token[i]] : values[token[i]];
@@ -143,11 +143,37 @@ function romanValue(token: string): number | undefined {
   return encoded === token ? total : undefined;
 }
 
+interface RomanReading { value: number; canonical: string; ocrConfusable: boolean }
+function romanToken(value: number): string | undefined {
+  if (!Number.isInteger(value) || value < 1 || value > 3999) return undefined;
+  const canonical = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']] as const;
+  let remainder = value, encoded = '';
+  for (const [amount, glyph] of canonical) while (remainder >= amount) { encoded += glyph; remainder -= amount; }
+  return encoded;
+}
+function romanReadings(token: string): RomanReading[] {
+  const literal = token.replace(/\s+/g, '').toUpperCase();
+  const direct = romanValue(literal);
+  const readings = new Map<number, RomanReading>();
+  if (direct !== undefined) readings.set(direct, { value: direct, canonical: literal, ocrConfusable: false });
+  const alternatives: Array<[string, string]> = [['1', 'I'], ['L', 'I'], ['Y', 'V']];
+  const chars = [...literal];
+  for (let index = 0; index < chars.length; index++) {
+    const replacement = alternatives.find(([from]) => chars[index] === from)?.[1];
+    if (!replacement) continue;
+    const candidate = [...chars]; candidate[index] = replacement;
+    const canonical = candidate.join('');
+    const value = romanValue(canonical);
+    if (value !== undefined && !readings.has(value)) readings.set(value, { value, canonical, ocrConfusable: true });
+  }
+  return [...readings.values()];
+}
+
 interface NumberedHeading { token: string; sequenceType: 'ROMAN' | 'ORDINAL'; hasTitle: boolean }
 interface HeadingDescription { section: string; kind: BlockKind; parentSection: string; numbered?: NumberedHeading }
 
 function hasUppercaseRomanTitle(raw: string): boolean {
-  const match = raw.trim().match(/^[IVXLCDM]{1,12}\s*[.):\-]\s*(.+)$/i);
+  const match = raw.trim().match(/^(?:[IVXLCDM1LY]\s*){1,12}[.):\-]\s*(.+)$/i);
   if (!match) return false;
   let title = match[1].trim();
   const terminal = title.lastIndexOf('.');
@@ -157,16 +183,38 @@ function hasUppercaseRomanTitle(raw: string): boolean {
   return letters.filter(char => char === char.toUpperCase()).length / letters.length >= 0.78;
 }
 
+function stripObservedRomanMarginNoise(raw: string): string {
+  const text = raw.trim();
+  const prefixes = [
+    /^(?:Ñ|N)\s*-\s*1\s+/i,
+    /^ÓN\s+E\s*-\s+/i,
+    /^UE\s*[:.)-]\s*-\s+/i,
+    /^1\s+(?=[IVXLCDM1LY]{1,12}\s*[.):\-])/i,
+    /^TO\s+(?=[IVXLCDM1LY]{1,12}\s*[.):\-])/i,
+    /^MA\s+(?=[IVXLCDM1LY]{1,12}\s*[.):\-])/i,
+    /^ES\s*-\s+(?=[IVXLCDM1LY]{1,12}\s*[.):\-])/i,
+  ];
+  for (const prefix of prefixes) {
+    if (!prefix.test(text)) continue;
+    const candidate = text.replace(prefix, '');
+    if (hasUppercaseRomanTitle(candidate)) return candidate;
+  }
+  return text;
+}
+
 const operativeOrdinalLead = /^(?:SE\s+(?:DECLARA|ABSUELVE|CONDENA|RECHAZA|DESESTIMA)|EN\s+CONSECUENCIA|A\s+MAYOR\s+ABUNDAMIENTO|RESPECTO\b|EN\s+CUANTO\b|SUBSISTEN\b|UNA\s+VEZ\b|NOTIFIQUESE\b)/;
 
 function headingForLine(key: string, raw: string, previous: Pick<SourceBlock, 'section' | 'kind' | 'parentSection'>): HeadingDescription | undefined {
   key = normalizedHeadingKey(key);
+  if (/^[LEI1]\s*(?:[:.)-]\s*)?(?:[-|]\s*)?PODER JUDICIAL\b/.test(key)) return undefined;
+  const headingText = stripObservedRomanMarginNoise(raw);
+  if (headingText !== raw.trim()) key = normalizedHeadingKey(fold(headingText));
   const generic = key.match(/^(VISTOS?|RESULTANDO\s+Y\s+CONSIDERANDO|RESULTANDOS?|CONSIDERANDOS?|FUNDAMENTOS(?:\s+Y\s+DECISION)?|PROPOSICIONES|PUNTOS\s+RESOLUTIVOS|RESOLUTIVOS|SE\s+RESUELVE|RESUELVE|POR\s+LO\s+EXPUESTO|POR\s+TANTO)\b/);
   if (generic) {
     const base = generic[1];
     const tail = key.slice(generic[0].length).trimStart();
     const ordinal = leadingOrdinal(tail);
-    const roman = tail.match(/^([IVXLCDM]{1,12})(?=\b|\s*[.:)-])/)?.[1];
+    const roman = tail.match(/^([IVXLCDM1LY]{1,12})(?=\b|\s*[.:)-])/)?.[1];
     const item = ordinal || roman;
     if (!item && tail && !/^[:.)-](?:\s|$)/.test(tail)) return undefined;
     const section = `${base}${item ? ` ${item}` : ''}`;
@@ -174,21 +222,28 @@ function headingForLine(key: string, raw: string, previous: Pick<SourceBlock, 's
       : /^(?:CONSIDERANDOS?|FUNDAMENTOS|RESULTANDO Y CONSIDERANDO)/.test(base) ? 'REASONING' : 'OTHER';
     return { section, kind, parentSection: base, ...(ordinal ? { numbered: { token: ordinal, sequenceType: 'ORDINAL' as const, hasTitle: true } } : roman ? { numbered: { token: roman, sequenceType: 'ROMAN' as const, hasTitle: true } } : {}) };
   }
-  const marker = key.match(/^([IVXLCDM]{1,12}|[A-Z]+(?:\s+[A-Z]+)?)\s*([.):\-])(?:\s*(.*))?$/);
+  const marker = key.match(/^([IVXLCDM1LY]{1,12}|[A-Z]+(?:\s+[A-Z]+)?)\s*([.):\-])(?:\s*(.*))?$/);
   if (!marker) return undefined;
   const token = marker[1].replace(/\s+/g, ' ');
   const isRoman = romanHeading.test(token);
   if (!isRoman && !ordinalWords.has(token)) return undefined;
-  const romanTitle = isRoman && hasUppercaseRomanTitle(raw);
+  const romanTitle = isRoman && hasUppercaseRomanTitle(headingText);
   if (isRoman && !romanTitle) return undefined;
   const opensOperative = !isRoman && operativeOrdinalLead.test(marker[3] || '');
-  const kind: BlockKind = previous.kind === 'OPERATIVE' || opensOperative ? 'OPERATIVE'
-    : previous.kind === 'REASONING' || romanTitle ? 'REASONING' : 'OTHER';
+  const kind: BlockKind = isRoman
+    ? previous.kind === 'OPERATIVE' ? 'OTHER' : 'REASONING'
+    : previous.kind === 'OPERATIVE' || opensOperative ? 'OPERATIVE'
+      : previous.kind === 'REASONING' ? 'REASONING' : 'OTHER';
   const parentSection = kind === 'REASONING'
     ? (previous.kind === 'REASONING' ? previous.parentSection : '')
     : kind === 'OPERATIVE' ? 'PROPOSICIONES' : token;
   const section = kind === 'REASONING' && parentSection ? `${parentSection} ${token}` : token;
   return { section, kind, parentSection, numbered: { token, sequenceType: isRoman ? 'ROMAN' : 'ORDINAL', hasTitle: isRoman ? romanTitle : true } };
+}
+
+function unrecognizedRomanHeading(lineText: string): boolean {
+  const match = lineText.trim().match(/^([IVXLCDM1LY]{1,12})\s*[.):\-]\s*(.+)$/i);
+  return Boolean(match && match[1].length >= 3 && match[2].trim().split(/\s+/).length >= 2 && !hasUppercaseRomanTitle(lineText));
 }
 
 function originFor(sourceId: string, page: number, text: string, start: number, end: number): AppealOrigin {
@@ -218,52 +273,46 @@ function sourceBlocks(source: UploadedSourceDocument, resolution: AppealResoluti
     group.push(record);
     numberedGroups.set(groupKey, group);
   }
-  const accepted = new Map<string, { canonicalSection?: string; ocrReadingDoubtful?: boolean }>();
+  const accepted = new Map<string, { canonicalSection?: string; ocrReadingDoubtful?: boolean; forceOther?: boolean }>();
   for (const group of numberedGroups.values()) {
-    const numbered = group.map(record => {
-      const token = record.heading.numbered!.token;
-      const type = record.heading.numbered!.sequenceType;
-      return { record, token, type, value: type === 'ORDINAL' ? ordinalValue(token) : romanValue(token), doubtful: false };
-    });
-    for (let i = 0; i < numbered.length; i++) {
-      const item = numbered[i];
-      if (item.type === 'ROMAN' && item.token === 'VIL' && numbered[i - 1]?.value === 6) {
-        item.value = 7;
-        item.doubtful = true;
-      }
-    }
-    const validSequence = numbered.filter(item => item.value !== undefined);
-    for (const item of validSequence) {
-      const index = validSequence.indexOf(item);
-      const previous = validSequence[index - 1];
-      const next = validSequence[index + 1];
-      const previousDelta = previous?.value === undefined ? undefined : item.value! - previous.value;
-      const nextDelta = next?.value === undefined ? undefined : next.value - item.value!;
-      let isCoherent = false;
-      if (item.type === 'ORDINAL') {
-        isCoherent = item.value === 1
-          || (previousDelta !== undefined && previousDelta > 0 && previousDelta <= 3)
-          || (nextDelta !== undefined && nextDelta > 0 && nextDelta <= 3);
-      } else if (previousDelta === 0) {
-        // Duplicate numbering, including literal VII after OCR VIL was positioned as VII.
-        isCoherent = false;
-      } else if (item.doubtful) {
-        isCoherent = previous?.value === 6;
-      } else if (item.token.length >= 3) {
-        isCoherent = true;
+    let previousValue: number | undefined;
+    for (const record of group) {
+      const { token, sequenceType } = record.heading.numbered!;
+      let canonicalSection: string | undefined;
+      let doubtful = false;
+      let forceOther = false;
+      if (sequenceType === 'ORDINAL') {
+        const value = ordinalValue(token);
+        doubtful = value === undefined || (previousValue !== undefined && value <= previousValue);
+        if (value !== undefined) previousValue = value;
       } else {
-        const adjacent = previousDelta === 1 || nextDelta === 1;
-        const monotonicRun = previousDelta !== undefined && nextDelta !== undefined
-          && previousDelta > 0 && nextDelta > 0 && previousDelta <= 3 && nextDelta <= 3;
-        isCoherent = adjacent || monotonicRun;
+        const readings = romanReadings(token);
+        const direct = readings.find(reading => !reading.ocrConfusable);
+        let chosen = direct;
+        forceOther = readings.length === 0;
+        if (!direct && readings.length) {
+          const forward = readings.filter(reading => previousValue === undefined || reading.value > previousValue)
+            .sort((left, right) => left.value - right.value);
+          chosen = forward[0] || readings[0];
+          doubtful = true;
+        } else if (direct && previousValue !== undefined && direct.value === previousValue) {
+          const duplicateReading = romanToken(previousValue + 1);
+          if (duplicateReading) canonicalSection = `${record.heading.parentSection ? `${record.heading.parentSection} ` : ''}${duplicateReading}`;
+          doubtful = true;
+        } else if (direct && previousValue !== undefined && direct.value !== previousValue + 1) {
+          doubtful = true;
+        }
+        if (chosen?.ocrConfusable) {
+          canonicalSection = `${record.heading.parentSection ? `${record.heading.parentSection} ` : ''}${chosen.canonical}`;
+          doubtful = true;
+        }
+        if (chosen) previousValue = canonicalSection && !direct ? chosen.value : previousValue !== undefined && direct?.value === previousValue ? previousValue + 1 : chosen.value;
+        else doubtful = true;
       }
-      if (!isCoherent) continue;
-      const canonicalSection = item.doubtful
-        ? `${item.record.heading.parentSection ? `${item.record.heading.parentSection} ` : ''}VII`
-        : undefined;
-      accepted.set(`${item.record.page}:${item.record.line.start}`, {
+        accepted.set(`${record.page}:${record.line.start}`, {
         ...(canonicalSection ? { canonicalSection } : {}),
-        ...(item.doubtful ? { ocrReadingDoubtful: true } : {}),
+        ...(doubtful ? { ocrReadingDoubtful: true } : {}),
+        ...(forceOther ? { forceOther: true } : {}),
       });
     }
   }
@@ -280,7 +329,28 @@ function sourceBlocks(source: UploadedSourceDocument, resolution: AppealResoluti
     let segmentStart = 0;
     for (const line of lineView(page.text)) {
       const metadata = accepted.get(`${page.page}:${line.start}`);
-      if (!metadata && lineRecords.some(record => record.page === page.page && record.line.start === line.start && record.heading.numbered)) continue;
+      if (metadata?.forceOther) {
+        append(page.page, page.text, segmentStart, line.start);
+        finish();
+        current = {
+          id: `${resolution.id}:block:${source.id}:${page.page}:${line.start}:${serial++}`,
+          section: 'Continuación con numeral OCR no reconocido', kind: 'OTHER', parentSection: '',
+          origin: originFor(source.id, page.page, page.text, line.start, line.end), segments: [], ocrReadingDoubtful: true, unrecognizedContinuation: true,
+        };
+        segmentStart = line.end;
+        continue;
+      }
+      if (!metadata && unrecognizedRomanHeading(line.text)) {
+        append(page.page, page.text, segmentStart, line.start);
+        finish();
+        current = {
+          id: `${resolution.id}:block:${source.id}:${page.page}:${line.start}:${serial++}`,
+          section: 'Continuación con encabezado OCR no reconocido', kind: 'OTHER', parentSection: '',
+          origin: originFor(source.id, page.page, page.text, line.start, line.end), segments: [], unrecognizedContinuation: true,
+        };
+        segmentStart = line.end;
+        continue;
+      }
       const heading = headingForLine(line.key, line.text, current);
       if (!heading) continue;
       append(page.page, page.text, segmentStart, line.start);
@@ -297,6 +367,12 @@ function sourceBlocks(source: UploadedSourceDocument, resolution: AppealResoluti
     append(page.page, page.text, segmentStart, page.text.length);
   }
   finish();
+  const last = blocks.at(-1);
+  if (last?.origin && last.segments.some(segment => segment.page > last.origin!.page)) last.unrecognizedContinuation = true;
+  const lastReasoning = blocks.filter(block => block.kind === 'REASONING').at(-1);
+  if (lastReasoning?.origin && lastReasoning.segments.some(segment => segment.page > lastReasoning.origin!.page)) {
+    lastReasoning.unrecognizedContinuation = true;
+  }
   return blocks;
 }
 
@@ -508,6 +584,7 @@ export function extractAppealReasoningCandidates(sources: UploadedSourceDocument
       pages, sourceSpans, sourceText: block.segments.map(segment => segment.text).join('\n'),
       ...(block.canonicalSection ? { canonicalSection: block.canonicalSection } : {}),
       ...(block.ocrReadingDoubtful ? { ocrReadingDoubtful: true } : {}),
+      ...(block.unrecognizedContinuation ? { unrecognizedContinuation: true } : {}),
     });
   }
   result.warnings.push('Las citas SOURCE_CITED no son autoridades verificadas. Las referencias a constancias y hechos acreditados son atribuciones de la resolución, no comprobación independiente de autos.');

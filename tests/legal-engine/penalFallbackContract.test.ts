@@ -15,7 +15,7 @@ it('unknown penal facts do not become an asserted crime/victim/participant in de
   const block: LegalBlock = { id: 'missing-facts', kind: 'antecedentes', sectionType: 'background', title: 'Antecedentes penales', level: 1, order: 1, text: '', sourceElementIndices: [], pages: { start: 1, end: 1 }, aiNeed: 'PRESERVE_DIRECT', requiresAi: false, classificationReason: 'Deterministic regression', elementCount: 0, charCount: 0 };
   const output = await generateLegalBlock(block, doc, {} as DocumentIndex, undefined, undefined, undefined, DEFAULT_LAWYER_PROFILE);
   expect(output.text).not.toMatch(/Se investigan hechos|cometidos en agravio|probable part[ií]cipe/);
-  expect(output.text).toContain('[DATO PENDIENTE: Delito investigado]');
+  expect(output.text).toContain('[PENDIENTE: Delito investigado]');
 });
 it.each(['apelacion', 'amparo', 'penal'] as const)('does not affirm timeliness or the requested merits without support: %s', async matter => {
   const doc = controlledDocument(matter);

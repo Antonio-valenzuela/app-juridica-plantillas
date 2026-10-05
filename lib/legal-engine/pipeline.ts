@@ -577,7 +577,7 @@ function enforceContestacionRoleIntegrity(
     if (firmaSection.isManuallyEdited || firmaSection.content.some((block) => block.isManuallyEdited)) {
       recordManualConflict(firmaSection, 'la reconstrucción determinística de la firma');
     } else {
-      firmaSection.content = [buildContestacionSignatureBlock(firmaSection.id, contesta)];
+      firmaSection.content = [buildContestacionSignatureBlock(firmaSection.id, contesta, { includePendingSignatoryMarker: true })];
     }
   }
   // La AUTORIDAD RESPONSABLE jamás ocupa el lugar del DEMANDADO en prosa.
@@ -1930,6 +1930,12 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
           + `PARTES: ${firmanteName} contra ${demandadoName}`;
       }
       if (/comparecencia|personalidad/.test(identityKey)) {
+        if (doc.documentType === 'demanda_ordinaria_civil') {
+          const personality = doc.caseContext?.civil?.personality;
+          return `Comparece ${firmanteName}, ${personality?.status === 'CONFIRMED' && personality.value
+            ? personality.value
+            : '[DATO PENDIENTE: confirmar personalidad y su soporte documental con el abogado]'}, ante Usted con el debido respeto.`;
+        }
         return `Comparece ${firmanteName}, en su carácter de parte interesada en el presente procedimiento, `
           + `cuyo instrumento de personalidad se acredita con la documentación que obra en autos.`;
       }
@@ -2302,6 +2308,13 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       return `PRUEBAS:\n\n${confirmedEvidence.map((item, index) => `${index + 1}. ${item.type ? `${item.type}: ` : ''}${item.description}${item.page ? ` (página ${item.page})` : ''}`).join('\n')}`;
     }
     case 'petition':
+      if (doc.documentType === 'demanda_ordinaria_civil') {
+        const requests = (doc.caseContext?.civil?.requests || []).filter(request => request.status === 'CONFIRMED');
+        return 'PUNTOS PETITORIOS:\n\nPRIMERO. Tener por presentado el escrito en el carácter confirmado por el abogado.\n'
+          + (requests.length
+            ? requests.map((request, index) => `${index + 2}. ${request.description}`).join('\n')
+            : '[DATO PENDIENTE: confirmar peticiones concretas congruentes con la acción y las prestaciones; no se presume un resultado de fondo].');
+      }
       if (doc.flow === 'DOCUMENT_ANALYSIS' && ['apelacion_civil', 'apelacion_penal', 'demanda_amparo_indirecto'].includes(doc.documentType)) {
         // Filing language must not certify opportunity or invent a requested
         // merits outcome when the verified contract has not supplied it.
@@ -3376,21 +3389,47 @@ export async function generateSection(
             applySectionCoverageTransition(doc, sec, sectionBlock, trace);
             sec.content = [sectionBlock];
           } else {
-            const fallbackText = isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
-              ? getRevisionAmparoDirectoSectionText(doc, sec.title, caseAnalysis)
-              : buildDeterministicBlockText({ id: sec.id, title: sec.title, sectionType: sec.type, level: 1, order: sec.order, text: '', sourceElementIndices: [], pages: { start: 1, end: 1 }, aiNeed: 'REQUIRES_AI', requiresAi: true, classificationReason: 'fallback' } as any, doc, caseAnalysis);
-            if (fallbackText && fallbackText.trim().length > 0) {
-              const fallbackBlock = createContentBlock(fallbackText, 'GENERATED_ARGUMENT', {
-                provenance: 'TEMPLATE_STRUCTURE',
+            const planningOnlyReviewTasks = tasks.filter((task) =>
+              Boolean(task.legalDraftingContract)
+              && (task.legalIssueIds || []).some((issueId) =>
+                doc.legalIssueMatrix?.issues.some((issue) => issue.id === issueId && issue.planningOnly),
+              ),
+            );
+            if (planningOnlyReviewTasks.length > 0) {
+              sec.content = planningOnlyReviewTasks.map((task) => {
+                const block = createContentBlock(renderDraftingReview(task.legalDraftingContract!), 'GENERATED_ARGUMENT', { provenance: 'TEMPLATE_STRUCTURE' });
+                block.id = `review-block-${task.id}`;
+                block.generationStatus = 'partial';
+                block.generatedBy = 'DETERMINISTIC';
+                block.generationRequirement = 'DETERMINISTIC';
+                block.fallbackStatus = undefined;
+                block.issueDraftValidationStatus = 'VALID_NON_FINAL';
+                block.generationTaskId = task.id;
+                block.generationTaskIds = [task.id];
+                block.legalIssueIds = task.legalIssueIds || [];
+                block.coverageItemIds = [];
+                block.factIds = task.factIds || [];
+                block.evidenceIds = task.evidenceIds || [];
+                trace?.recordDraftBlock(block, undefined, sec.id);
+                return block;
               });
-              fallbackBlock.id = `block-${sec.id}-fallback`;
-              fallbackBlock.generationStatus = 'partial';
-              fallbackBlock.generationRequirement = 'AI_REQUIRED';
-              fallbackBlock.fallbackStatus = 'DETERMINISTIC_FALLBACK';
-              fallbackBlock.issueDraftValidationStatus = 'VALID_NON_FINAL';
-              sec.content = [fallbackBlock];
             } else {
-              sec.content = [];
+              const fallbackText = isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
+                ? getRevisionAmparoDirectoSectionText(doc, sec.title, caseAnalysis)
+                : buildDeterministicBlockText({ id: sec.id, title: sec.title, sectionType: sec.type, level: 1, order: sec.order, text: '', sourceElementIndices: [], pages: { start: 1, end: 1 }, aiNeed: 'REQUIRES_AI', requiresAi: true, classificationReason: 'fallback' } as any, doc, caseAnalysis);
+              if (fallbackText && fallbackText.trim().length > 0) {
+                const fallbackBlock = createContentBlock(fallbackText, 'GENERATED_ARGUMENT', {
+                  provenance: 'TEMPLATE_STRUCTURE',
+                });
+                fallbackBlock.id = `block-${sec.id}-fallback`;
+                fallbackBlock.generationStatus = 'partial';
+                fallbackBlock.generationRequirement = 'AI_REQUIRED';
+                fallbackBlock.fallbackStatus = 'DETERMINISTIC_FALLBACK';
+                fallbackBlock.issueDraftValidationStatus = 'VALID_NON_FINAL';
+                sec.content = [fallbackBlock];
+              } else {
+                sec.content = [];
+              }
             }
           }
           return {
@@ -3420,7 +3459,39 @@ export async function generateSection(
         }
 
         const assembled = assembleIssueDraftBlocks(sec, allOutcomes, trace);
-        if (assembled.blocks.length > 0) {
+        const planningOnlyReviewTasks = tasks.filter((task) =>
+          Boolean(task.legalDraftingContract)
+          && (task.legalIssueIds || []).some((issueId) =>
+            doc.legalIssueMatrix?.issues.some((issue) => issue.id === issueId && issue.planningOnly),
+          ),
+        );
+        const planningOnlyTaskIds = new Set(planningOnlyReviewTasks.map((task) => task.id));
+        const planningOnlyReviewBlocks = planningOnlyReviewTasks.map((task) => {
+          const block = createContentBlock(renderDraftingReview(task.legalDraftingContract!), 'GENERATED_ARGUMENT', { provenance: 'TEMPLATE_STRUCTURE' });
+          block.id = `review-block-${task.id}`;
+          block.generationStatus = 'partial';
+          block.generatedBy = 'DETERMINISTIC';
+          block.generationRequirement = 'DETERMINISTIC';
+          block.fallbackStatus = undefined;
+          block.issueDraftValidationStatus = 'VALID_NON_FINAL';
+          block.generationTaskId = task.id;
+          block.generationTaskIds = [task.id];
+          block.legalIssueIds = task.legalIssueIds || [];
+          block.coverageItemIds = [];
+          block.factIds = task.factIds || [];
+          block.evidenceIds = task.evidenceIds || [];
+          trace?.recordDraftBlock(block, undefined, sec.id);
+          return block;
+        });
+        const assembledNonPlanningBlocks = assembled.blocks.filter((block) =>
+          !planningOnlyTaskIds.has(block.generationTaskId || '')
+          && !(block.generationTaskIds || []).some((taskId) => planningOnlyTaskIds.has(taskId)),
+        );
+        if (planningOnlyReviewBlocks.length > 0) {
+          // A blocked, planning-only issue still needs a source-grounded review projection;
+          // generic fallback text would otherwise hide the challenged act and its blocker.
+          sec.content = [...assembledNonPlanningBlocks, ...planningOnlyReviewBlocks];
+        } else if (assembled.blocks.length > 0) {
           sec.content = assembled.blocks;
         } else if (tasks.some(t => t.legalDraftingContract)) {
           // Preserve each unit as a review-only block. None of these blocks
@@ -4894,6 +4965,33 @@ export async function runGenerationPipeline(
       // Preservar IDs y metadatos de pipeline, reemplazar secciones
       doc.sections = sanitized.sections;
       doc.updatedAt = sanitized.updatedAt;
+      for (const contract of documentAssemblyContracts) {
+        if (!contract.required || !contract.requiresAcceptedSubstantiveBlock) continue;
+
+        const assembledSection = assembly.sections.find((section) => section.sectionId === contract.sectionId);
+        if (assembledSection && assembledSection.blockIds.length > 0) continue;
+
+        const section = doc.sections.find((candidate) => candidate.id === contract.sectionId);
+        if (!section) continue;
+
+        const warningCode = `REQUIRED_SECTION_GENERATION_PENDING:${section.id}`;
+        const pendingMarker = '[DATO PENDIENTE / GENERACIÓN PENDIENTE DE REVISIÓN]';
+        if (!(section.content || []).some((block) => block.text.includes(pendingMarker))) {
+          section.content = [...(section.content || []), createContentBlock(
+            `${pendingMarker}\nNo fue posible generar contenido verificable para la sección «${contract.title || section.title}». Complete únicamente con información respaldada en el expediente y sométala a revisión.`,
+            'GENERATED_ARGUMENT',
+            {
+              provenance: 'TEMPLATE_STRUCTURE',
+              trust: 'PENDING',
+              generatedBy: 'DETERMINISTIC',
+              generationRequirement: 'AI_REQUIRED',
+              generationStatus: 'pending',
+            },
+          )];
+        }
+        section.validationWarnings = Array.from(new Set([...(section.validationWarnings || []), warningCode]));
+        traceContext?.addWarning(warningCode);
+      }
       (doc as UniversalLegalDocument & { sanitizeReport?: typeof report }).sanitizeReport = report;
       if (report.truncatedWarnings.length) doc.validation.warnings.push(...report.truncatedWarnings);
       if (report.coherenceWarnings.length) doc.validation.warnings.push(...report.coherenceWarnings);
@@ -5007,6 +5105,15 @@ export async function runGenerationPipeline(
     doc.semanticEvaluation = docSemanticEval;
 
     doc.validation = validateDocument(doc);
+    doc.validation.warnings.push(...doc.sections.flatMap((section) =>
+      (section.validationWarnings || [])
+        .filter((warning) => warning.startsWith('REQUIRED_SECTION_GENERATION_PENDING:'))
+        .map(() => ({
+          checkId: 'REQUIRED_SECTION_GENERATION_PENDING',
+          message: `La sección obligatoria «${section.title}» requiere desarrollo respaldado y revisión del abogado.`,
+          sectionId: section.id,
+        })),
+    ));
     const requestContractErrors = validateGenerationRequestContract(doc);
     if (requestContractErrors.length) {
       doc.validation.isValid = false;

@@ -8,5 +8,8 @@ describe('auditoria E2E final de preparación legal con seis expedientes reales'
     expect(summary.counts.total).toBe(summary.requestedCaseCount);
     expect(summary.counts.docx).toBeGreaterThanOrEqual(0);
     expect(summary.counts.pdf).toBeGreaterThanOrEqual(0);
-  }, 180000);
+  // Six sequential local OCR/generation/DOCX/PDF cases exceeded 180s in the
+  // complete offline regression (187.5s measured from their per-case traces).
+  // Keep all assertions unchanged and allow a bounded runtime margin.
+  }, 300_000);
 });

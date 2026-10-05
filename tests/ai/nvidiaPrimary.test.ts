@@ -17,13 +17,13 @@ describe('BLOCK B/J — NVIDIA ONLY (4 escenarios + metadata)', () => {
       content: 'respuesta nvidia',
       latencyMs: 100,
     });
-    const res = await runFastMode({ userMessage: 'test nvidia primary' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test nvidia primary' });
     expect(res.provider).toBe('nvidia');
   });
 
   it('2. NVIDIA no disponible → local', async () => {
     vi.spyOn(NVIDIAProvider.prototype, 'isAvailable').mockResolvedValue(false);
-    const res = await runFastMode({ userMessage: 'test fallback local' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test fallback local' });
     expect(res.provider).toBe('local');
   });
 
@@ -37,7 +37,7 @@ describe('BLOCK B/J — NVIDIA ONLY (4 escenarios + metadata)', () => {
       latencyMs: 100,
       errorCode: 'NVIDIA_ERROR',
     });
-    const res = await runFastMode({ userMessage: 'test nvidia fail' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test nvidia fail' });
     expect(res.provider).toBe('local');
   });
 
@@ -56,7 +56,7 @@ describe('BLOCK B/J — NVIDIA ONLY (4 escenarios + metadata)', () => {
       localCalled = true;
       return { provider: 'local', model: 'local-static', success: true, content: 'should not', latencyMs: 0 };
     });
-    const res = await runFastMode({ userMessage: 'test no fallback' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test no fallback' });
     expect(res.provider).toBe('nvidia');
     expect(localCalled).toBe(false);
   });
@@ -70,7 +70,7 @@ describe('BLOCK B/J — NVIDIA ONLY (4 escenarios + metadata)', () => {
       content: 'contenido',
       latencyMs: 50,
     });
-    const res = await runFastMode({ userMessage: 'metadata' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'metadata' });
     expect(res.provider).toBe('nvidia');
     expect(JSON.stringify(res)).not.toMatch(/nvapi-/i);
   });

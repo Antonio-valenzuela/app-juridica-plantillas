@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { requireCaseAccess } from '@/lib/cases/access';
-import { checkRateLimit, extractIp } from '@/lib/security/rateLimit';
+import { requireWorkspaceExecutionAccess, executionOwnerKey } from '@/lib/security/workspaceExecutionAccess';
+import { checkRequestRateLimit } from '@/lib/security/rateLimit';
+import { checkGenerationAdmission, maxGenerationInputChars } from '@/lib/security/aiCostControls';
 import { explicitExternalProviderConsent } from '@/lib/ai/caseProviderConsent';
 import { runLegalAI } from '@/lib/ai/orchestrator';
 import {
@@ -55,14 +56,30 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const access = await requireCaseAccess(request);
-  if (!access.ok) return access.response;
+  const auth = await requireWorkspaceExecutionAccess(request, true);
+  if (!auth.ok) return auth.response;
 
-  const limited = checkRateLimit(extractIp(request), 30);
-  if (!limited.ok) return NextResponse.json({ ok: false, error: 'rate_limit' }, { status: 429 });
+  const rateLimit = checkRequestRateLimit(request, 'generation', 10, executionOwnerKey(auth.context));
+  if (!rateLimit.ok) {
+    return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas solicitudes de generación. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
+  }
+  const owner = {
+    organizationId: auth.context.organizationId,
+    userId: auth.context.userId,
+    desktopOwnerId: auth.context.desktopOwnerId,
+  };
+  const admission = await checkGenerationAdmission(owner);
+  if (!admission.ok) {
+    const status = admission.errorCode === 'GENERATION_CONCURRENCY_LIMIT' ? 429 : 503;
+    return NextResponse.json({ ok: false, errorCode: admission.errorCode, message: status === 429 ? 'Ya hay demasiadas generaciones activas para este workspace.' : 'La capacidad de generación no está disponible.' }, { status });
+  }
 
   try {
-    const parsed = requestSchema.safeParse(await request.json());
+    const rawBody = await request.json().catch(() => ({}));
+    if (Buffer.byteLength(JSON.stringify(rawBody), 'utf8') > maxGenerationInputChars()) {
+      return NextResponse.json({ ok: false, errorCode: 'GENERATION_INPUT_TOO_LARGE', message: 'La solicitud de generación excede el tamaño permitido.' }, { status: 413 });
+    }
+    const parsed = requestSchema.safeParse(rawBody);
     if (!parsed.success) return NextResponse.json({ ok: false, error: 'invalid_request' }, { status: 400 });
     const body = parsed.data;
     if (!isCivilFamilyAppeal(body.documentType)) return NextResponse.json({ ok: false, error: 'unsupported_appeal_type' }, { status: 400 });

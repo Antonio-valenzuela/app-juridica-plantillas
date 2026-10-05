@@ -28,5 +28,8 @@ describe.sequential('FASE 2 E2E source grounding with six real sources', () => {
       expect(result.files.docx).toContain('DRAFT.docx');
       expect(result.files.pdf).toContain('DRAFT.pdf');
     }
-  }, 180_000);
+  // Six sequential local OCR/generation/DOCX/PDF cases exceeded 180s when
+  // run alongside the full regression; this is runtime headroom, not a change
+  // to any source, routing, provenance, DRAFT, or FINAL assertion.
+  }, 300_000);
 });

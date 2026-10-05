@@ -8,6 +8,7 @@ import { normalizeUnresolvedFieldMarkers, extractUnresolvedFieldMarkers } from '
 import { readDocumentExportReadiness, markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import { buildWorkspacePageModel } from '@/lib/legal-engine/generationUi';
 import type { ExportMode } from '@/lib/legal-engine/exportModes';
+import { canExportDocumentFinal } from '@/lib/catalog/legalCatalog';
 import { LexIcon } from '@/components/layout/LexIcon';
 
 interface WorkspaceDocumentEditorProps {
@@ -140,6 +141,7 @@ export function WorkspaceDocumentEditor({
   }, [document]);
 
   const isReadyToExport = exportReadiness === 'READY_TO_EXPORT' || exportReadiness === 'FINAL_DOCUMENT';
+  const finalExportAvailable = isReadyToExport && canExportDocumentFinal(document?.documentType || '');
 
   const hasExportableContent = useMemo(() => {
     return Boolean(document?.sections.some((section) => section.content.some((block) => block.text.trim().length > 0)));
@@ -863,7 +865,7 @@ export function WorkspaceDocumentEditor({
                     )}
                     <div className="my-1 border-t border-slate-100" />
                     <div className="px-3.5 pt-1 pb-1 text-[10px] uppercase tracking-wide text-slate-600">Exportar final</div>
-                    {isReadyToExport ? (
+                    {finalExportAvailable ? (
                       <>
                         {onExportDocx && (
                           <button
@@ -890,7 +892,9 @@ export function WorkspaceDocumentEditor({
                       </>
                     ) : (
                       <div className="px-3.5 py-2 text-[11px] leading-snug text-slate-500">
-                        Disponible cuando se resuelvan los pendientes de revisión.
+                        {document?.documentType && !canExportDocumentFinal(document.documentType)
+                          ? 'Exportación FINAL no disponible: tipo en desarrollo (sin certificar).'
+                          : 'Disponible cuando se resuelvan los pendientes de revisión.'}
                       </div>
                     )}
                   </div>, window.document.body

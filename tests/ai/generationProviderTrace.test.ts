@@ -15,7 +15,7 @@ describe('provider trace semantics', () => {
     const oldChain = process.env.AI_PROVIDER_CHAIN;
     process.env.AI_PROVIDER_CHAIN = 'nvidia,local';
     try {
-      const result = await runFastMode({ userMessage: 'contenido jurídico', mode: 'fast' });
+      const result = await runFastMode({ externalProviderOptIn: true, userMessage: 'contenido jurídico', mode: 'fast' });
 
       expect(result.providerRequested).toBe('nvidia');
       expect(result.providerActuallyUsed).toBe('local');

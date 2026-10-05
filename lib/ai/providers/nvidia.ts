@@ -109,21 +109,9 @@ export async function generateNVIDIACompletion(
     const latencyMs = Date.now() - startMs;
 
     if (!response.ok) {
-      const errText = await response.text();
-      const sanitizedBody = errText.slice(0, 2000).replace(/nvapi-[^\s"']+/gi, "[REDACTED]").replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]");
-      // PASO 3: conservar body real del 404 con contexto completo
-      console.error(
-        `[NVIDIA] NVIDIA_HTTP_ERROR ${JSON.stringify({
-          status: response.status,
-          statusText: response.statusText,
-          body: sanitizedBody,
-          endpoint,
-          model,
-          latencyMs,
-          NVIDIA_API_KEY_PRESENT: true,
-        })}`
-      );
-      throw new NVIDIACompletionError(`[NVIDIA Provider] HTTP ${response.status}: ${errText}`, response.status);
+      const requestId = response.headers.get("x-request-id") || response.headers.get("request-id") || response.headers.get("x-correlation-id") || "unavailable";
+      console.error(`[NVIDIA] NVIDIA_HTTP_ERROR ${JSON.stringify({ status: response.status, requestId })}`);
+      throw new NVIDIACompletionError(`[NVIDIA Provider] HTTP ${response.status} requestId=${requestId}`, response.status);
     }
 
     // Éxito: log sanitizado

@@ -24,7 +24,6 @@ import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
 import { createSourceDocument } from '@/lib/legal-engine/context';
-import { markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import type { UniversalLegalDocument, UploadedSourceDocument } from '@/lib/legal-engine/types';
 import {
   createSyntheticPdfBuffer,
@@ -67,52 +66,6 @@ async function uploadFileThroughApi(
   const res = await POST_analyzeUpload(req);
   const json = await res.json();
   return { ...json, status: res.status };
-}
-
-function prepareDocForExport(doc: UniversalLegalDocument): UniversalLegalDocument {
-  const petitionSection = doc.sections.find((s) => /petitorio|peticion/i.test(s.title || s.id))
-    || doc.sections[doc.sections.length - 1];
-
-  const sections = doc.sections.map((s) => ({
-    ...s,
-    type: s === petitionSection ? 'petition' : s.type,
-    validationErrors: [],
-    content: (s.content || []).map((b) => ({
-      ...b,
-      isPending: false,
-      text: (b.text || '').replace(/\[(?:DATO\s*PENDIENTE[^:]*|DATO\s*ANONIMIZADO[^:]*)\s*:\s*([^\]]+)\]/gi, '$1'),
-    })),
-  }));
-
-  const withPreflight: any = {
-    ...doc,
-    sections,
-    validation: { isValid: true, errors: [], warnings: [] },
-    missingFields: [],
-    anonymizedFields: [],
-    caseContext: {
-      ...(doc.caseContext || {}),
-      missingFields: [],
-      anonymizedFields: [],
-      ...(doc.documentType === 'demanda_ejecutiva_mercantil'
-        ? {
-            commercialEnforcement: {
-              instrument: 'PAGARE',
-              principal: 1500000,
-              hasInstrument: true,
-              isExecutable: true,
-              confirmedByLawyer: true,
-            },
-          }
-        : {}),
-    },
-    generationMetadata: {
-      ...doc.generationMetadata,
-      preflight: { status: 'READY', missingFields: [] },
-    },
-    qualityGate: { passed: true, canMarkAsFinal: true },
-  };
-  return markDocumentAsReadyToExport(withPreflight as UniversalLegalDocument, { explicit: true });
 }
 
 function assertNoMockText(text: string) {
@@ -179,7 +132,7 @@ describe('Flow A — 10 Materias desde archivos binarios reales', () => {
     expect(doc.documentType).toBe('escrito_libre');
     assertNoMockText(docToFullText(doc));
 
-    const exportable = prepareDocForExport(doc);
+    const exportable = doc;
     await expect(exportUniversalToDocx(exportable))
       .rejects.toThrow(/FINAL_DOCUMENT_MATERIALIZATION_NOT_VERIFIED|QualityGate|REQUIRES_REVIEW/i);
   }, 35000);
@@ -227,7 +180,7 @@ describe('Flow A — 10 Materias desde archivos binarios reales', () => {
     expect(doc.sections.length).toBeGreaterThan(0);
     assertNoMockText(docToFullText(doc));
 
-    const exportable = prepareDocForExport(doc);
+    const exportable = doc;
     await expect(exportUniversalToPdf(exportable))
       .rejects.toThrow(/FINAL_DOCUMENT_MATERIALIZATION_NOT_VERIFIED|QualityGate|REQUIRES_REVIEW/i);
   }, 35000);

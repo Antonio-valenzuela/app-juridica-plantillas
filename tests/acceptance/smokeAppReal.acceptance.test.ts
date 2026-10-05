@@ -27,7 +27,6 @@ import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 import { DocumentTemplates } from '@/lib/legal-engine/documentTemplates';
 import { evaluateSourceOutputCompatibility, SOURCE_DOCUMENT_INCOMPATIBLE } from '@/lib/legal-engine/sourceOutputCompatibility';
 import { createSourceDocument } from '@/lib/legal-engine/context';
-import { markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import type { UniversalLegalDocument, UploadedSourceDocument } from '@/lib/legal-engine/types';
 import { createSyntheticPdfBuffer } from './helpers/syntheticFixtures';
 
@@ -37,41 +36,6 @@ beforeAll(() => {
   }
   process.env.DEMO_MODE_ENABLED = 'true';
 });
-
-function prepareDocForExport(doc: UniversalLegalDocument): UniversalLegalDocument {
-  const petitionSection = doc.sections.find((s) => /petitorio|peticion/i.test(s.title || s.id))
-    || doc.sections[doc.sections.length - 1];
-
-  let sections = doc.sections.map((s) => ({
-    ...s,
-    type: s === petitionSection ? 'petition' : s.type,
-    validationErrors: [],
-    content: (s.content || []).map((b) => ({
-      ...b,
-      isPending: false,
-      text: (b.text || '').replace(/\[(?:DATO\s*PENDIENTE[^:]*|DATO\s*ANONIMIZADO[^:]*)\s*:\s*([^\]]+)\]/gi, '$1'),
-    })),
-  }));
-
-  const withPreflight: any = {
-    ...doc,
-    sections,
-    validation: { isValid: true, errors: [], warnings: [] },
-    missingFields: [],
-    anonymizedFields: [],
-    caseContext: {
-      ...(doc.caseContext || {}),
-      missingFields: [],
-      anonymizedFields: [],
-    },
-    generationMetadata: {
-      ...doc.generationMetadata,
-      preflight: { status: 'READY', missingFields: [] },
-    },
-    qualityGate: { passed: true, canMarkAsFinal: true },
-  };
-  return markDocumentAsReadyToExport(withPreflight as UniversalLegalDocument, { explicit: true });
-}
 
 describe('LOOP 9.1 — Objetivo 3: Smoke Test de App Real (UI / API)', () => {
   let uploadedPdfSource: UploadedSourceDocument;
@@ -255,7 +219,7 @@ describe('LOOP 9.1 — Objetivo 3: Smoke Test de App Real (UI / API)', () => {
 
   // ── 8. Descarga DOCX funcional ───────────────────────────────────────────────
   it('8. Exportación DOCX bloquea con 422 controlado cuando el gate final no pasa', async () => {
-    const exportable = prepareDocForExport(generatedDocument);
+    const exportable = generatedDocument;
     const req = new NextRequest('http://localhost/api/legal-engine/export/docx', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -271,7 +235,7 @@ describe('LOOP 9.1 — Objetivo 3: Smoke Test de App Real (UI / API)', () => {
 
   // ── 9. Descarga PDF funcional ────────────────────────────────────────────────
   it('9. Exportación PDF bloquea con 422 controlado cuando el gate final no pasa', async () => {
-    const exportable = prepareDocForExport(generatedDocument);
+    const exportable = generatedDocument;
     const req = new NextRequest('http://localhost/api/legal-engine/export/pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

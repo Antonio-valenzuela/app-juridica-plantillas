@@ -111,7 +111,7 @@ describe('LOOP 8B FASE 2B — integración de pipeline mercantil', () => {
     const result = await generateSection(doc, 'hechos');
 
     expect(result.text).not.toMatch(/autoridad responsable|garantías fundamentales|medio de defensa|revocar/i);
-    expect(result.text).toMatch(/DATO PENDIENTE|REQUIERE/i);
+    expect(result.text).toMatch(/\[PENDIENTE:/i);
   });
 
   it('no convierte una fuente larga en MACHOTE cuando el modo es automático', () => {

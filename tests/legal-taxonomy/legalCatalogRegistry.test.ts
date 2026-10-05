@@ -8,6 +8,7 @@ import {
   getCatalogDocument,
   getCatalogStats,
   getLegacyMatters,
+  getUniversalDocumentTypes,
   searchCatalog,
 } from '@/lib/catalog/legalCatalog';
 import { DOCUMENT_TYPES } from '@/lib/legal-taxonomy';
@@ -105,6 +106,28 @@ describe('LOOP 7 — registry jurídico jerárquico', () => {
     }
   });
 
+  it('no promueve formularios oficiales a IMPLEMENTED por el solo hecho de tener plantilla', () => {
+    for (const id of [
+      'solicitud_registro_marca',
+      'contestacion_impedimento',
+      'oposicion_marca',
+      'nulidad_registro',
+      'caducidad_registro',
+      'infraccion_propiedad_industrial',
+      'recurso_propiedad_intelectual',
+      'solicitud_derechos_arco',
+    ]) {
+      const entry = getCatalogDocument(id);
+      expect(entry?.status, id).toBe('REQUIRES_OFFICIAL_FORM');
+      expect(entry?.kind === 'DOCUMENT_TYPE' && entry.implemented, id).toBe(false);
+    }
+  });
+
+  it('blocks explicit routing when the catalog requires an official form', () => {
+    expect(() => resolveDocumentRouting({ selectedDocumentType: 'contestacion_impedimento' }))
+      .toThrow(/DOCUMENT_TYPE_NOT_IMPLEMENTED/);
+  });
+
   it('conserva otro como alias legacy a escrito_libre y no como output nuevo', () => {
     const other = getCatalogDocument('otro');
     expect(other?.kind).toBe('LEGACY_ALIAS');
@@ -123,6 +146,20 @@ describe('LOOP 7 — registry jurídico jerárquico', () => {
     for (const id of ['recurso', 'incidente', 'amparo_directo', 'amparo_indirecto', 'promocion']) {
       expect(getCatalogDocument(id)?.kind, id).toBe('FAMILY');
       expect(getCatalogDocument(id)?.status, id).toBe('NOT_APPLICABLE');
+    }
+  });
+
+  it('no ofrece familias legacy sin plantilla/ruta como tipos generables en Universal', () => {
+    const options = getUniversalDocumentTypes();
+    expect(options).toHaveLength(0);
+    expect(CANONICAL_DOCUMENT_TYPES.filter((document) => document.functionalStatus === 'PASS')).toHaveLength(0);
+    for (const option of options) {
+      const entry = getCatalogDocument(option.value);
+      expect(entry?.kind).not.toBe('FAMILY');
+      expect(entry?.kind === 'DOCUMENT_TYPE' ? entry.status : entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId)?.status : null).toBe('IMPLEMENTED');
+      const route = resolveDocumentRouting({ selectedDocumentType: option.value });
+      expect(route.fallbackUsed, option.value).toBe(false);
+      expect(DocumentTemplates[route.resolvedTemplate], option.value).toBeDefined();
     }
   });
 
@@ -164,8 +201,8 @@ describe('LOOP 7 — registry jurídico jerárquico', () => {
 
     expect(navigatorModule.getCatalogResultAction).toBeDefined();
     expect(navigatorModule.getCatalogResultAction?.({ id: 'civil_demandas', kind: 'FAMILY', status: 'NOT_APPLICABLE' })).toBe('NAVIGATE');
-    expect(navigatorModule.getCatalogResultAction?.({ id: 'contestacion_demanda_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('SELECT');
-    expect(navigatorModule.getCatalogResultAction?.({ id: 'demanda_ordinaria_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('SELECT');
+    expect(navigatorModule.getCatalogResultAction?.({ id: 'contestacion_demanda_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('DISABLED');
+    expect(navigatorModule.getCatalogResultAction?.({ id: 'demanda_ordinaria_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('DISABLED');
   });
 
   it('mantiene contratos estructurales y IDs canónicos seguros', () => {

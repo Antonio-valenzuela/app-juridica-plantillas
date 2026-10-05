@@ -89,7 +89,7 @@ it('recognizes headings through OCR margin noise without changing their source s
   expect(source.pages![0].text.slice(first.origin.start, first.origin.end)).toBe(first.origin.excerpt);
 });
 
-it('accepts only coherent Roman heading sequences, flags VIL as a doubtful VII reading, and keeps full cross-page spans', () => {
+it('retains form-valid Roman headings across sequence gaps, flags OCR doubt, and keeps full spans', () => {
   const source = {
     id: 'roman-sequence-noise',
     pages: [
@@ -113,9 +113,11 @@ it('accepts only coherent Roman heading sequences, flags VIL as a doubtful VII r
   const result = review(source);
   const sectionToken = (section: string) => section.replace(/^CONSIDERANDOS?\s+/, '');
   const roman = result.blocks.filter(b => b.kind === 'REASONING' && ['I', 'II', 'III', 'VI', 'VIL', 'VII', 'C', 'D', 'L', 'MM', 'DL', 'IC'].includes(sectionToken(b.section)));
-  expect(roman.map(b => sectionToken(b.section))).toEqual(['I', 'II', 'III', 'VI', 'VIL']);
+  expect(roman.map(b => sectionToken(b.section))).toEqual(['I', 'II', 'III', 'VI', 'VIL', 'VII', 'C', 'D', 'L', 'MM', 'DL']);
   const doubtful = roman.find(b => sectionToken(b.section) === 'VIL') as any;
   expect(doubtful).toMatchObject({ canonicalSection: 'CONSIDERANDOS VII', ocrReadingDoubtful: true });
+  expect(roman.find(b => sectionToken(b.section) === 'VII')).toMatchObject({ canonicalSection: 'CONSIDERANDOS VIII', ocrReadingDoubtful: true });
+  expect(result.blocks.some(b => b.kind === 'OTHER' && b.unrecognizedContinuation && b.origin.excerpt.startsWith('IC.'))).toBe(true);
   const first = result.blocks.find(b => sectionToken(b.section) === 'I') as any;
   expect(first.pages).toEqual([5, 6]);
   expect(first.sourceSpans.map((span: any) => span.page)).toEqual([5, 6]);
@@ -191,9 +193,8 @@ it('promotes real Roman all-caps title headers to reasoning blocks without a mot
   }
   const doubtful = realSkeletonBlock('VIL') as any;
   expect(doubtful).toMatchObject({ canonicalSection: 'VII', ocrReadingDoubtful: true });
-  expect(doubtful.sourceText).toContain('VII. CAPACIDAD DE LA TESTADORA');
-  expect(realSkeletonBlock('VII')).toBeUndefined();
-  expect(realSkeletonBlock('XV')).toBeUndefined();
+  expect(realSkeletonBlock('VII')).toMatchObject({ canonicalSection: 'VIII', ocrReadingDoubtful: true });
+  expect(realSkeletonBlock('XV')?.kind).toBe('REASONING');
 });
 
 it('recognizes the real feminine and compound ordinal sequence as operative blocks', () => {
@@ -237,4 +238,96 @@ it('normalizes user-identified spaced-letter header forms while preserving their
   expect(review.blocks.some(block => block.section === 'PROPOSICIONES' && block.kind === 'OPERATIVE')).toBe(true);
   expect(review.blocks.every(block => source.pages[0].text.slice(block.origin.start, block.origin.end) === block.origin.excerpt)).toBe(true);
   expect(review.globalOutcome.impact).toBe('ADVERSE');
+});
+
+it('keeps OCR Roman headings by form, uses sequence only to annotate ambiguity, and separates an unrecognized tail', () => {
+  const pages = [
+    { page: 14, text: [
+      'CONSIDERANDOS:',
+      'VI. CARGA DE LA PRUEBA.',
+      'Motivo suficientemente extenso para conservar el bloque.',
+      'VIL. CAPACIDAD DE LA TESTADORA.',
+      'La lectura OCR de este numeral requiere confirmación.',
+      'VII. ALCANCE DE LA PRUEBA TESTIMONIAL.',
+      'Este razonamiento continúa en el mismo documento.',
+      '1X. VALORACIÓN DE LAS CONSTANCIAS.',
+      'La secuencia siguiente también requiere revisión.',
+      'Y. EFECTOS DE LA RESOLUCIÓN.',
+      'La sustitución OCR V/Y no altera el texto fuente.',
+    ].join('\n'), chars: 0 },
+    { page: 38, text: [
+      'XXIV. SOBRE EL TESTAMENTO COMO ACTO SOLEMNE.',
+      'El razonamiento concluye con una valoración probatoria.',
+      'XV. SOBRE EL CRITERIO RELATIVO A LA CAPACIDAD DEL TESTADOR.',
+      'L PODER JUDICIAL DEL ESTADO DE JALISCO',
+    ].join('\n'), chars: 0 },
+    { page: 40, text: [
+      'XXV. título OCR con caja inconsistente.',
+      'Conclusión final sin cabecera legible.',
+    ].join('\n'), chars: 0 },
+    { page: 41, text: '1 : PODER JUDICIAL DEL ESTADO DE JALISCO', chars: 0 },
+  ];
+  const source = { ...appealRealHeadingSkeleton, id: 'roman-form-ocr-regression', pages };
+  const result = reviewRealHeadingSkeleton(source);
+  const sections = result.blocks.filter(block => block.kind === 'REASONING');
+  const block = (section: string) => sections.find(item => item.section === section || item.section.endsWith(` ${section}`));
+
+  expect(block('VIL')).toMatchObject({ canonicalSection: 'CONSIDERANDOS VII', ocrReadingDoubtful: true });
+  expect(block('VII')).toMatchObject({ canonicalSection: 'CONSIDERANDOS VIII', ocrReadingDoubtful: true });
+  expect(block('1X')).toMatchObject({ canonicalSection: 'CONSIDERANDOS IX', ocrReadingDoubtful: true });
+  expect(block('Y')).toMatchObject({ canonicalSection: 'CONSIDERANDOS V', ocrReadingDoubtful: true });
+  expect(block('XV')).toMatchObject({ section: 'CONSIDERANDOS XV', ocrReadingDoubtful: true });
+  expect(block('XXIV')?.pages).not.toContain(40);
+  expect(result.blocks.some(item => item.unrecognizedContinuation && item.kind === 'OTHER' && item.pages.includes(40))).toBe(true);
+  expect(result.blocks.some(item => item.section.includes('PODER JUDICIAL'))).toBe(false);
+  expect(result.blocks.some(item => item.kind === 'REASONING' && item.section === '1')).toBe(false);
+  for (const item of result.blocks) {
+    for (const span of item.sourceSpans) {
+      expect(pages.find(page => page.page === span.page)?.text.slice(span.start, span.end)).toBe(span.excerpt);
+    }
+  }
+});
+
+it('recognizes real OCR margin debris before Roman headings without changing source spans', () => {
+  const pages = [{ page: 11, text: [
+    'ñ - 1 IV.- FIJACIÓN DE LA LITIS.',
+    'La controversia queda delimitada por la resolución.',
+    'ÓN E - XI. SOBRE LA SUPUESTA COACCIÓN, AMENAZA, DOLO Y MANIPULACIÓN.',
+    'Se revisa el planteamiento a partir de las constancias.',
+    '1 XIV. SOBRE EL ARTÍCULO 2847 DEL CÓDIGO CIVIL.',
+    'La disposición se atribuye a la resolución fuente.',
+    'ue : - XV. SOBRE LA IDENTIFICACIÓN VENCIDA.',
+    'El encabezado conserva la procedencia OCR.',
+    '- To XVII. VALOR DEL INSTRUMENTO NOTARIAL.',
+    'El bloque conserva su texto de origen.',
+    'Ma XVIII. SOBRE LA TESIS INVOCADA CON REGISTRO DIGITAL.',
+    'La cita permanece SOURCE_CITED.',
+    'ES - XXVI. SOBRE LA PRETENSIÓN DE CANCELACIÓN DEL REGISTRO.',
+    'La conclusión conserva procedencia.',
+    'IV. Que se haga conforme a las prescripciones de la ley.',
+    'II.10.C. 3/13, página 47.',
+  ].join('\n'), chars: 0 }];
+  const source = { ...appealRealHeadingSkeleton, id: 'ocr-margin-header-regression', pages };
+  const result = reviewRealHeadingSkeleton(source);
+  for (const token of ['IV', 'XI', 'XIV', 'XV', 'XVII', 'XVIII', 'XXVI']) {
+    const block = result.blocks.find(item => item.kind === 'REASONING' && (item.section === token || item.section.endsWith(` ${token}`)));
+    expect(block, `expected noisy OCR heading ${token} to be recognized`).toBeDefined();
+    expect(block?.origin.excerpt).toContain(token);
+    expect(pages[0].text.slice(block!.origin.start, block!.origin.end)).toBe(block!.origin.excerpt);
+  }
+  expect(result.blocks.some(item => item.section === '1')).toBe(false);
+  expect(result.blocks.some(item => item.origin.excerpt.includes('Que se haga conforme'))).toBe(false);
+  expect(result.blocks.some(item => item.origin.excerpt.includes('II.10.C.'))).toBe(false);
+});
+
+it('marks the final reasoning block when its trailing text continues before the operative section', () => {
+  const pages = [
+    { page: 5, text: 'CONSIDERANDOS:\nI. VALORACIÓN DE LAS CONSTANCIAS.', chars: 0 },
+    { page: 6, text: 'La conclusión continúa después del último encabezado de razonamiento.', chars: 0 },
+    { page: 7, text: 'PROPOSICIONES:\nPRIMERA. Notifíquese.', chars: 0 },
+  ];
+  const result = reviewRealHeadingSkeleton({ ...appealRealHeadingSkeleton, id: 'trailing-reasoning-continuation', pages });
+  const finalReasoning = result.blocks.filter(item => item.kind === 'REASONING').at(-1);
+  expect(finalReasoning?.pages).toContain(6);
+  expect(finalReasoning?.unrecognizedContinuation).toBe(true);
 });

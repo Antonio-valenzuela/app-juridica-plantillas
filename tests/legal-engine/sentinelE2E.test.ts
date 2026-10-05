@@ -42,8 +42,8 @@ function getSectionContent(document: UniversalLegalDocument, titlePattern: RegEx
     .join('\n\n');
 }
 
-describe('SENTINEL E2E — Substantive Content Delivery to Final Document', () => {
-  it('injects sentinel content via issueProviderInvoker and reaches final document assembly', async () => {
+describe('SENTINEL E2E — unsupported content is rejected before document assembly', () => {
+  it('calls the mocked provider but rejects unsupported sentinel claims and keeps final blocked', async () => {
     // Provider que retorna contenido sustantivo centinela
     const mockInvoker = vi.fn().mockImplementation(async (request) => {
       const prompt = (request.userMessage || '').toLowerCase();
@@ -80,6 +80,7 @@ describe('SENTINEL E2E — Substantive Content Delivery to Final Document', () =
         matter: 'Amparo',
         jurisdiction: 'Federal',
         userInstruction: 'Interponer recurso de revisión en amparo directo fundado en omisión constitucional.',
+        externalProviderOptIn: true,
         sourceDocuments: [createSentinelSourceDocument()],
         generationId: 'sentinel-e2e-delivery-test',
         traceOptions: { enabled: true },
@@ -87,8 +88,14 @@ describe('SENTINEL E2E — Substantive Content Delivery to Final Document', () =
 
       const attached = result as AssemblyAttachedDocument;
       const assembly = attached.documentAssemblyResult;
+      expect(mockInvoker).toHaveBeenCalled();
 
-    // 1. Verificar que el documento tiene secciones
+    // The mock is only a test sentinel: its claims are not in the source, so
+    // invocation must not be mistaken for admissible legal content.
+    expect(assembly?.readiness).not.toBe('READY');
+    expect(result.lifecycle?.readiness).not.toBe('READY_TO_EXPORT');
+
+    // 1. The document retains its structure, with actionable review markers.
     expect(result.sections.length).toBeGreaterThanOrEqual(7);
 
     // 2. Verificar que el assembly contiene secciones y bloques
@@ -100,33 +107,28 @@ describe('SENTINEL E2E — Substantive Content Delivery to Final Document', () =
     expect(antecedentesText).toMatch(/3 de enero de 2024|se presentó demanda/i);
     expect(result.caseRefs.expediente).toBe('800/2024');
 
-    // 4. Verificar que las secciones sustantivas NO contienen placeholders genéricos de error
+    // No unsupported generated claim may survive into the assembled output.
     const fullAssembledText = (assembly?.sections || [])
       .flatMap((s) => s.blocks)
       .map((b) => b.text)
       .join('\n\n');
+    expect(fullAssembledText).not.toContain(SENTINEL_MARKER);
 
-    expect(fullAssembledText).not.toContain('[DATO PENDIENTE DE EXPEDIENTE: Contenido de INTERÉS EXCEPCIONAL]');
-    expect(fullAssembledText).not.toContain('[DATO PENDIENTE DE EXPEDIENTE: Contenido de BLOQUE DE CONSTITUCIONALIDAD]');
-    console.log('SECTIONS DUMP:', result.sections.map(s => ({
-      title: s.title,
-      type: s.type,
-      blocksCount: s.content?.length || 0,
-      preview: (s.content || []).map(b => b.text).join(' ').slice(0, 100)
-    })));
-
-    // 5. Verificar que las secciones sustantivas tienen desarrollo procesal real
+    // 2. Unsupported provider prose remains a visible review dependency.
     const interesText = getSectionContent(result, /inter[eé]s\s+excepcional/i);
     expect(interesText.length).toBeGreaterThan(100);
-    expect(interesText).not.toContain('DATO PENDIENTE');
+    expect(interesText).toMatch(/DATO PENDIENTE|PENDIENTE/);
+    expect(interesText).not.toContain(SENTINEL_MARKER);
 
     const bloqueText = getSectionContent(result, /bloque\s+de\s+constitucionali/i);
     expect(bloqueText.length).toBeGreaterThan(100);
-    expect(bloqueText).not.toContain('DATO PENDIENTE');
+    expect(bloqueText).toMatch(/DATO PENDIENTE|PENDIENTE/);
+    expect(bloqueText).not.toContain(SENTINEL_MARKER);
 
       const agraviosText = getSectionContent(result, /agravio/i);
       expect(agraviosText.length).toBeGreaterThan(100);
-      expect(agraviosText).not.toContain('DATO PENDIENTE');
+      expect(agraviosText).toMatch(/DATO PENDIENTE|PENDIENTE/);
+      expect(agraviosText).not.toContain(SENTINEL_MARKER);
     } finally {
       spy.mockRestore();
       if (prevKey === undefined) delete process.env.NVIDIA_API_KEY; else process.env.NVIDIA_API_KEY = prevKey;

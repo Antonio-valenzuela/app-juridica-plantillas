@@ -5,6 +5,8 @@ import { WorkspaceDocumentEditor } from './components/WorkspaceDocumentEditor';
 import { WorkspaceDraftGeneratorModal } from './components/WorkspaceDraftGeneratorModal';
 import { TemplateLibraryManager, TemplateItem } from './components/TemplateLibraryManager';
 import { CaseDocumentsReader } from './components/CaseDocumentsReader';
+import { uploadedSourcePageSectionType } from './components/documentPagination';
+import { WritingAvailabilityNotice } from './components/WritingAvailabilityNotice';
 import type { AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { LawyerStyleProfileCard } from './components/LawyerStyleProfileCard';
 import { GenerationStatusBar, GenerationStatusData } from './components/GenerationStatusBar';
@@ -34,7 +36,7 @@ import { buildWorkspaceSnapshot, applyLegalEdits } from '@/lib/workspace/legalEd
 import { extractAgendaEvents, readAgendaEvents, synchronizeDocumentAgenda, writeAgendaEvents } from '@/lib/workspace/agenda';
 import { synchronizeWorkspaceAgenda } from '@/lib/workspace/agendaClient';
 import { MATTERS, JURISDICTIONS, DOCUMENT_TYPES, CUSTOM_VALUE_MAX_LENGTH, sanitizeCustomValue } from '@/lib/legal-taxonomy';
-import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
+import { canGenerateDocumentDraft, getCatalogDocument, getFunctionalDocumentStatus, getInitialWritingDocumentOptions, getUniversalDocumentTypes } from '@/lib/catalog/legalCatalog';
 import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
 import { LegalCatalogNavigator } from '@/components/legal-taxonomy/LegalCatalogNavigator';
 import {
@@ -246,6 +248,14 @@ export default function MachotesPage() {
   // Job asíncrono real X/Y
   const [activeGenJob, setActiveGenJob] = useState<{ jobId: string; total: number; completed: number; percentage: number; currentBlock: string | null; status: string; stage?: string; aiProvider?: string | null; error?: string; errorCode?: string | null; errorMetadata?: Record<string, unknown> | null } | null>(null);
   const [universalViewMode, setUniversalViewMode] = useState<'analysis' | 'editor'>('analysis');
+  useEffect(() => {
+    if (universalViewMode !== 'editor') return;
+    const workspaceScroller = window.document.querySelector<HTMLElement>('.machotes-shell .machotes-main-scroll');
+    if (workspaceScroller) {
+      workspaceScroller.scrollTop = 0;
+      workspaceScroller.scrollLeft = 0;
+    }
+  }, [activeNavTab, universalViewMode]);
   const genPollRef = useRef<number | null>(null);
   const genJobIdRef = useRef<string | null>(null);
   const genStatusFailureRef = useRef<number>(0);
@@ -727,6 +737,7 @@ export default function MachotesPage() {
   const [initialViewMode, setInitialViewMode] = useState<'form' | 'editor'>('form');
   const [initialStep, setInitialStep] = useState(1);
   const [initialWritingsSessionDocIds, setInitialWritingsSessionDocIds] = useState<Set<string>>(new Set());
+  const [showUncertifiedInitialTypes, setShowUncertifiedInitialTypes] = useState(false);
 
   const [universalForm, setUniversalForm] = useState({
     intent: 'redactar' as 'analizar' | 'investigar' | 'redactar',
@@ -741,6 +752,7 @@ export default function MachotesPage() {
     fuentes: { legislacion: true, jurisprudencia: true, expediente: true },
     showAdvanced: false,
   });
+  const [showUncertifiedUniversalTypes, setShowUncertifiedUniversalTypes] = useState(false);
 
   // Aislar documentos de Escritos Iniciales cuando cambia asunto, materia o tipo.
   const prevInitialExpedienteRef = useRef<string>(initialForm.expediente);
@@ -1159,7 +1171,7 @@ export default function MachotesPage() {
 
             return {
               id: `sec-page-${pIdx + 1}`,
-              type: pIdx === 0 ? 'header' : pIdx === pages.length - 1 ? 'closing' : 'argument',
+              type: uploadedSourcePageSectionType(),
               title: `Página ${p.page || pIdx + 1}`,
               order: pIdx + 1,
               isRepeatable: true,
@@ -1452,7 +1464,13 @@ export default function MachotesPage() {
     taxonomy?: any;
     caseParties?: Array<{ role: string; name: string; source?: string }>;
     expediente?: string;
+    uncertifiedDraftAcknowledged?: boolean;
   }) => {
+    const selectedDocumentType = resolveSelectedDocumentType(payload.documentType, payload.taxonomy);
+    if (!selectedDocumentType || !canGenerateDocumentDraft(selectedDocumentType, payload.uncertifiedDraftAcknowledged === true)) {
+      notify('warning', 'No se inició la generación: elija un tipo acreditado o active «En desarrollo (sin certificar)» para crear solo un borrador asistido.');
+      return;
+    }
     // BUG4+14: Bloquear doble submit — un solo flujo activo (sincrónico via ref + estado)
     if (isUniversalGenerating || genIsGeneratingRef.current) {
       console.warn('[handleRunPipeline] Doble click bloqueado — ya hay Job activo', genJobIdRef.current?.slice(0,8));
@@ -1489,7 +1507,6 @@ export default function MachotesPage() {
       ? []
       : ((payload as any).sourceDocs !== undefined ? (payload as any).sourceDocs as UploadedSourceDocument[] : uploadedSourceDocs);
     const payloadExpediente = (payload as any).expediente as string | undefined;
-    const selectedDocumentType = resolveSelectedDocumentType(payload.documentType, payload.taxonomy);
     const writingIntake: WritingIntake | null = effectiveSourceDocs.length === 0
       ? analyzeWritingRequest(payload.userInstruction)
       : null;
@@ -1742,15 +1759,21 @@ export default function MachotesPage() {
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
     generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
     draftDepth?: 'PROFESSIONAL_20' | 'EXTENSIVE_40';
+    uncertifiedDraftAcknowledged?: boolean;
   }) => {
     const userInstructions = typeof request === 'string' ? request : request.userInstructions;
     const selectedDocumentTypeFromUi = typeof request === 'string' ? undefined : request.selectedDocumentType;
+    const uncertifiedDraftAcknowledged = typeof request !== 'string' && request.uncertifiedDraftAcknowledged === true;
     const documentTypeLabelFromUi = typeof request === 'string' ? undefined : request.documentTypeLabel;
     const generationModeFromUi = typeof request === 'string' ? undefined : request.generationMode;
     const generationExtensionFromUi = typeof request === 'string' ? undefined : request.generationExtension;
     const draftDepthFromUi = typeof request === 'string' ? undefined : request.draftDepth;
     const referenceDocumentIdFromUi = typeof request === 'string' ? undefined : request.referenceDocumentId;
     const referenceDocumentTextFromUi = typeof request === 'string' ? undefined : request.referenceDocumentText;
+    if (!selectedDocumentTypeFromUi || !canGenerateDocumentDraft(selectedDocumentTypeFromUi, uncertifiedDraftAcknowledged)) {
+      notify('warning', 'No se inició la generación: elija un tipo acreditado o active «En desarrollo (sin certificar)» para crear solo un borrador asistido.');
+      return;
+    }
     if (isUniversalGenerating || genIsGeneratingRef.current) {
       console.warn('[handleGenerateContestacion] Doble click bloqueado — Job activo', genJobIdRef.current?.slice(0,8));
       notify('warning', 'Ya hay una generación en curso. Por favor espera.');
@@ -2636,8 +2659,14 @@ export default function MachotesPage() {
             </div>
           </div>
         ) : activeNavTab === 'responses_resources' ? (
-          /* TAB 3: CONTESTACIONES Y RECURSOS (PANEL DE COTEJO DOCUMENTAL 1:1) */
-          <div className="contestaciones-workspace-root min-h-screen min-w-0 w-full overflow-x-hidden overflow-y-auto bg-[#F5F7FA]">
+          /* TAB 3: CONTESTACIONES Y RECURSOS (PANEL DE COTEJO DOCUMENTAL 1:1)
+           * Una sola barra vertical principal. Este contenedor crece con el
+           * contenido y NO abre un segundo scroll: `min-h-screen` + `overflow-y`
+           * dentro de un shell `100dvh` con `overflow-hidden` garantizaba una
+           * barra interna adicional que competía con la del navegador.
+           * El scroll interno legítimo queda reservado al visor de documento
+           * (`.contestaciones-document-preview`) y a listas acotadas. */
+          <div className="contestaciones-workspace-root min-h-0 min-w-0 w-full overflow-x-hidden overflow-y-visible bg-[#F5F7FA]">
             <CaseDocumentsReader
               documents={caseDocuments}
               sourceDocs={uploadedSourceDocs}
@@ -2690,6 +2719,12 @@ export default function MachotesPage() {
                   </button>
                 )}
               </div>
+
+              <WritingAvailabilityNotice
+                surface="Escritos Iniciales"
+                showUncertifiedDrafts={showUncertifiedInitialTypes}
+                onShowUncertifiedDraftsChange={setShowUncertifiedInitialTypes}
+              />
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4.5 items-start">
                 {/* Columna Principal: Formulario Estructurado */}
@@ -2751,7 +2786,7 @@ export default function MachotesPage() {
                           <TaxonomySelect
                             label="Tipo de Escrito"
                             value={initialForm.tipoEscrito}
-                            options={DOCUMENT_TYPES.filter((d) => d.category === 'inicial' || d.category === 'promocion' || d.value === 'otro').map((d) => ({ value: d.value, label: d.label }))}
+                            options={getInitialWritingDocumentOptions({ includeUncertifiedDrafts: showUncertifiedInitialTypes }).map((d) => ({ value: d.value, label: d.label }))}
                         onChange={(v) => setInitialForm((prev) => ({ ...prev, tipoEscrito: v }))}
                         customValue={initialForm.tipoEscritoCustom}
                         onCustomChange={(v) => setInitialForm((prev) => ({ ...prev, tipoEscritoCustom: sanitizeCustomValue(v) || v.slice(0, CUSTOM_VALUE_MAX_LENGTH) }))}
@@ -2993,6 +3028,7 @@ export default function MachotesPage() {
                                 taxonomy,
                                 caseParties: partiesForPipeline.length > 0 ? partiesForPipeline : undefined,
                                 expediente: expedienteVal || undefined,
+                                uncertifiedDraftAcknowledged: showUncertifiedInitialTypes,
                               } as any);
                             }}
                             disabled={isUniversalGenerating}
@@ -3194,6 +3230,11 @@ export default function MachotesPage() {
               <div className="universal-analysis-layout mt-4">
                 {/* ── FORMULARIO PRINCIPAL ── */}
                 <div className="universal-analysis-form bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                  <WritingAvailabilityNotice
+                    surface="Universal"
+                    showUncertifiedDrafts={showUncertifiedUniversalTypes}
+                    onShowUncertifiedDraftsChange={setShowUncertifiedUniversalTypes}
+                  />
                   {/* ¿Qué necesitas hacer? */}
                   <div className="space-y-2">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -3294,11 +3335,16 @@ export default function MachotesPage() {
                       label="Tipo de escrito"
                       value={universalForm.tipoEscrito}
                       options={[
-                        ...DOCUMENT_TYPES.map((d) => ({ value: d.value, label: d.label })),
-                        ...(getCatalogDocument(universalForm.tipoEscrito)?.kind === 'DOCUMENT_TYPE'
-                          && !DOCUMENT_TYPES.some((d) => d.value === universalForm.tipoEscrito)
-                          ? [{ value: universalForm.tipoEscrito, label: getCatalogDocument(universalForm.tipoEscrito)?.label || universalForm.tipoEscrito }]
-                          : []),
+                        ...getUniversalDocumentTypes({ includeUncertifiedDrafts: showUncertifiedUniversalTypes }).map((d) => ({ value: d.value, label: d.label })),
+                        ...(() => {
+                          const selectedEntry = getCatalogDocument(universalForm.tipoEscrito);
+                          if (selectedEntry?.kind !== 'DOCUMENT_TYPE'
+                            || selectedEntry.status !== 'IMPLEMENTED'
+                            || (selectedEntry.functionalStatus !== 'PASS' && !showUncertifiedUniversalTypes)
+                            || !selectedEntry.implemented
+                            || DOCUMENT_TYPES.some((document) => document.value === universalForm.tipoEscrito)) return [];
+                          return [{ value: selectedEntry.id, label: selectedEntry.label }];
+                        })(),
                       ]}
                       onChange={(v) => setUniversalForm((prev) => ({ ...prev, tipoEscrito: v }))}
                       customValue={universalForm.tipoEscritoCustom}
@@ -3410,6 +3456,7 @@ export default function MachotesPage() {
                             sourceDocs: uploadedSourceDocs,
                             flowLabel: 'universal',
                             taxonomy: taxonomyU,
+                            uncertifiedDraftAcknowledged: showUncertifiedUniversalTypes,
                           } as any);
                         }}
                         disabled={isUniversalGenerating}

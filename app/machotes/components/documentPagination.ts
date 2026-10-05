@@ -20,6 +20,11 @@ export interface DocumentPageBreakdown {
   sections: PageSectionEntry[];
 }
 
+/** Uploaded physical pages are body content, not Word page headers or closings. */
+export function uploadedSourcePageSectionType(): DocumentNode['type'] {
+  return 'argument';
+}
+
 function fullBlockEntries(section: DocumentNode): PageBlockEntry[] {
   return section.content.map((block) => ({
     block,

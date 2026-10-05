@@ -1,5 +1,6 @@
 import type { CaseAnalysis } from './caseAnalysis';
 import type { UniversalLegalDocument } from './types';
+import { extractUnresolvedFieldMarkers, normalizeUnresolvedFieldMarkers, type UnresolvedFieldMarkerCause } from './pendingFields';
 
 export type LegalAdmissionReason = 'UNCONFIRMED_EVIDENCE' | 'ABSOLUTE_EVIDENCE_VALUATION'
   | 'UNVERIFIED_LEGAL_ASSERTION' | 'UNSUPPORTED_PROOF_RULE' | 'UNSUPPORTED_PETITION';
@@ -44,6 +45,7 @@ export interface GeneratedLegalAdmissionResult {
   admittedCount: number;
   neutralizedCount: number;
   fullyNeutralized: boolean;
+  pendingMarkerCauses: UnresolvedFieldMarkerCause[];
 }
 
 function normalized(value: string): string {
@@ -331,7 +333,9 @@ export function evaluateGeneratedLegalAdmission(input: {
   instruction?: string;
   legalIssueIds?: readonly string[];
 }): GeneratedLegalAdmissionResult {
-  const { text, sectionType } = input;
+  const { sectionType } = input;
+  const text = normalizeUnresolvedFieldMarkers(input.text);
+  const pendingMarkerCauses = [...new Set(extractUnresolvedFieldMarkers(text).map(marker => marker.cause))];
   const context = buildContext(input);
   const segments = segmentPropositions(text);
 
@@ -422,5 +426,6 @@ export function evaluateGeneratedLegalAdmission(input: {
     admittedCount,
     neutralizedCount,
     fullyNeutralized: admittedCount === 0,
+    pendingMarkerCauses,
   };
 }

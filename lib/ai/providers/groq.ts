@@ -1,6 +1,6 @@
 import { fetch } from "undici";
 import type { AIHealthResult, AIProviderResult, AIRequest, LegalAIProvider } from "./types";
-import { redactSecrets, sanitizeAiError } from "./types";
+import { sanitizeAiError } from "./types";
 
 export interface GroqCompletionOptions {
   prompt: string;
@@ -108,10 +108,8 @@ export async function generateGroqCompletion(
     const latencyMs = Date.now() - startMs;
 
     if (!response.ok) {
-      const errText = await response.text();
-      const sanitizedBody = redactSecrets(errText.slice(0, 2000));
+      const requestId = response.headers.get("x-request-id") || response.headers.get("request-id") || response.headers.get("x-correlation-id") || "unavailable";
       if (response.status === 429 && model !== "openai/gpt-oss-120b") {
-        console.warn(`[GROQ] 429 en ${model}. Reintentando con modelo alternativo openai/gpt-oss-120b...`);
         try {
           const fallbackRes = await fetch(endpoint, {
             method: "POST",
@@ -145,19 +143,9 @@ export async function generateGroqCompletion(
           // Si falla el modelo alternativo, proceder con el error normal
         }
       }
-      console.error(
-        `[GROQ] GROQ_HTTP_ERROR ${JSON.stringify({
-          status: response.status,
-          statusText: response.statusText,
-          body: sanitizedBody,
-          endpoint,
-          model,
-          latencyMs,
-          GROQ_API_KEY_PRESENT: true,
-        })}`
-      );
+      console.error(`[GROQ] GROQ_HTTP_ERROR ${JSON.stringify({ status: response.status, requestId })}`);
       throw new GroqCompletionError(
-        `[Groq Provider] HTTP ${response.status}: ${sanitizedBody}`,
+        `[Groq Provider] HTTP ${response.status} requestId=${requestId}`,
         response.status,
         response.status === 429 ? "RATE_LIMIT" : response.status >= 500 ? "SERVER_ERROR" : "HTTP_ERROR"
       );

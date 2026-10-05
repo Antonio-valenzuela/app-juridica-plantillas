@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCoverageMatrix } from '@/lib/legal-engine/coverageMatrix';
+import { getCoverageResolutionBlockReason, isHardCoverageResolutionBlock } from '@/lib/legal-engine/coveragePolicy';
 import { makeFixtureFCaseAnalysis, makeFixtureDocument } from '@/tests/fixtures/richCoverageFixtures';
 import type { ExtractionStats, MissingDataItem } from '@/lib/legal-engine/case-extraction/types';
 
@@ -92,7 +93,9 @@ describe('Coverage builder dispatch', () => {
     expect(fact.status).toBe('needs_client_position');
     expect(fact.metadata?.responseKind).toBeUndefined();
     const missing = matrix.items.find((item) => item.category === 'MISSING_CLIENT_POSITION' && item.factIds?.includes('fixture-f-fact-1'));
-    expect(missing?.blocking).toBe(true);
+    expect(missing?.blocking).toBe(false);
+    expect(getCoverageResolutionBlockReason(missing!)).toBe('MISSING_CLIENT_POSITION_REQUIRED');
+    expect(isHardCoverageResolutionBlock(missing!)).toBe(true);
   });
 
   it('links a confirmed client position only when proposition IDs explicitly match', () => {

@@ -6,6 +6,7 @@ import { exportUniversalToDocx } from '../../lib/legal-engine/exportDocxUniversa
 import { DEFAULT_LAWYER_PROFILE, defaultWorkspaceManager } from '../../lib/workspace/legalWorkspace';
 import { extractStyleFromReferenceDocument } from '../../lib/legal-engine/styleEngine';
 import { runQualityGateCheck } from '../../lib/legal-engine/qualityGate';
+import { createSyntheticDocxBuffer, createSyntheticImageBuffer } from '../acceptance/helpers/syntheticFixtures';
 
 const CANARY_EXPEDIENTE = 'EXP_CANARIO_55441';
 const CANARY_CLIENTE = 'CLIENTE_CANARIO_92831';
@@ -45,7 +46,8 @@ describe('16 Escenarios Obligatorios de Prueba del Motor Jurídico', () => {
 
   // TEST 3: Imagen JPG
   it('TEST 3: Procesamiento e ingestión de archivo JPG de documento jurídico', async () => {
-    const jpgBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+    const jpgBuffer = await createSyntheticImageBuffer('image/jpeg', ['DOCUMENTO JPG SINTETICO']);
+    expect(jpgBuffer.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
     const result = await extractDocument({
       buffer: jpgBuffer,
       fileName: 'foto_sentencia.jpg',
@@ -58,7 +60,8 @@ describe('16 Escenarios Obligatorios de Prueba del Motor Jurídico', () => {
 
   // TEST 4: Imagen PNG
   it('TEST 4: Procesamiento e ingestión de archivo PNG de captura de pantalla', async () => {
-    const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const pngBuffer = await createSyntheticImageBuffer('image/png', ['DOCUMENTO PNG SINTETICO']);
+    expect(pngBuffer.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     const result = await extractDocument({
       buffer: pngBuffer,
       fileName: 'captura_acuerdo.png',
@@ -71,7 +74,8 @@ describe('16 Escenarios Obligatorios de Prueba del Motor Jurídico', () => {
 
   // TEST 5: Documento DOCX
   it('TEST 5: Extracción estructurada de documento Word DOCX', async () => {
-    const docxBuffer = Buffer.from('PK\x03\x04 Documento Word de prueba');
+    const docxBuffer = await createSyntheticDocxBuffer('DOCUMENTO WORD SINTETICO');
+    expect(docxBuffer.subarray(0, 2).toString('ascii')).toBe('PK');
     const result = await extractDocument({
       buffer: docxBuffer,
       fileName: 'promocion.docx',
@@ -79,6 +83,10 @@ describe('16 Escenarios Obligatorios de Prueba del Motor Jurídico', () => {
     });
 
     expect(result.fileName).toBe('promocion.docx');
+    expect(result.text).toContain('DOCUMENTO WORD SINTETICO');
+    expect(result.ocrUsed).toBe(false);
+    expect(result.ocrStatus).toBe('OCR_PROVIDER_NOT_CONFIGURED');
+    expect(result.extractionMethod).toBe('native');
   });
 
   // TEST 6: Documento largo

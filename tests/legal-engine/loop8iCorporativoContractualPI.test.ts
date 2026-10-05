@@ -74,6 +74,11 @@ const PI_TYPES = [
 ] as const;
 
 const ALL_LOOP8I_TYPES = [...CORP_TYPES, ...CONTRACTUAL_TYPES, ...PI_TYPES];
+// Independent contract: these administrative applications require the official form,
+// even when a historical drafting template exists. They are not ordinary generators.
+const OFFICIAL_PI_TYPES = new Set(['solicitud_registro_marca', 'contestacion_impedimento',
+  'oposicion_marca', 'nulidad_registro', 'caducidad_registro',
+  'infraccion_propiedad_industrial', 'recurso_propiedad_intelectual']);
 
 describe('LOOP 8I — Corporativo (15) + Contractual (17) + Propiedad Intelectual (11) = 43 Tipos', () => {
   describe('1. Strategy & Template Completeness (43 Document Types)', () => {
@@ -115,14 +120,17 @@ describe('LOOP 8I — Corporativo (15) + Contractual (17) + Propiedad Intelectua
   });
 
   describe('2. Catalog Status and Classification', () => {
-    it('All 43 types are present in catalog with status IMPLEMENTED and kind DOCUMENT_TYPE', () => {
+    it('separates implemented drafting from the seven official intellectual-property forms', () => {
       for (const id of ALL_LOOP8I_TYPES) {
         const item = getCatalogDocument(id);
         expect(item, `Catalog item ${id} should exist`).toBeDefined();
         expect(item?.kind).toBe('DOCUMENT_TYPE');
-        expect(item?.status).toBe('IMPLEMENTED');
-        expect((item as any)?.implemented).toBe(true);
-        expect((item as any)?.sourceCompatibility).not.toBeNull();
+        expect(item?.status).toBe(OFFICIAL_PI_TYPES.has(id) ? 'REQUIRES_OFFICIAL_FORM' : 'IMPLEMENTED');
+        expect((item as any)?.implemented).toBe(!OFFICIAL_PI_TYPES.has(id));
+        if (OFFICIAL_PI_TYPES.has(id)) {
+          expect((item as any)?.sourceCompatibility).toBeNull();
+          expect(item).toHaveProperty('strategyId', null);
+        } else expect((item as any)?.sourceCompatibility).not.toBeNull();
       }
     });
 
@@ -147,6 +155,10 @@ describe('LOOP 8I — Corporativo (15) + Contractual (17) + Propiedad Intelectua
 
   describe('3. Routing Resolution (resolveDocumentRouting)', () => {
     it.each(ALL_LOOP8I_TYPES)('Resolves route successfully for %s', (docType) => {
+      if (OFFICIAL_PI_TYPES.has(docType)) {
+        expect(() => resolveDocumentRouting({ selectedDocumentType: docType })).toThrow(/DOCUMENT_TYPE_NOT_IMPLEMENTED/);
+        return;
+      }
       const routing = resolveDocumentRouting({ selectedDocumentType: docType });
       expect(routing.resolvedTemplate).toBe(docType);
       expect(routing.resolvedStrategy).toBe(docType);
@@ -327,6 +339,11 @@ describe('LOOP 8I — Corporativo (15) + Contractual (17) + Propiedad Intelectua
         sourceValidated: true,
       });
 
+      if (OFFICIAL_PI_TYPES.has(docType)) {
+        await expect(runGenerationPipeline({ selectedDocumentType: docType, sourceDocuments: [sourceDoc] }))
+          .rejects.toThrow(/DOCUMENT_TYPE_NOT_IMPLEMENTED/);
+        return;
+      }
       const res = await runGenerationPipeline({
         selectedDocumentType: docType,
         sourceDocuments: [sourceDoc],
@@ -386,7 +403,7 @@ describe('LOOP 8I — Corporativo (15) + Contractual (17) + Propiedad Intelectua
       ).toThrow(/SOURCE_DOCUMENT_INCOMPATIBLE/);
     });
 
-    it('Rejects incompatible source document type for infraccion_propiedad_industrial', () => {
+    it('rejects the official industrial-property form before evaluating its source', () => {
       const incompatibleSource = createSourceDocument({
         id: 'src-incomp-pi',
         filename: 'demanda_laboral.txt',
@@ -400,7 +417,7 @@ describe('LOOP 8I — Corporativo (15) + Contractual (17) + Propiedad Intelectua
           selectedDocumentType: 'infraccion_propiedad_industrial',
           sourceDocuments: [incompatibleSource],
         }),
-      ).toThrow(/SOURCE_DOCUMENT_INCOMPATIBLE/);
+      ).toThrow(/DOCUMENT_TYPE_NOT_IMPLEMENTED/);
     });
   });
 });

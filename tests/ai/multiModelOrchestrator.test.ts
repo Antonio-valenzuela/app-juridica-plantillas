@@ -12,7 +12,7 @@ describe('Arquitectura NVIDIA ONLY (Fast vs Deep Review)', () => {
       content: 'Respuesta NVIDIA',
       latencyMs: 100,
     });
-    const res = await runFastMode({ userMessage: 'test' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test' });
     expect(res.provider).toBe('nvidia');
     vi.restoreAllMocks();
   });
@@ -27,14 +27,14 @@ describe('Arquitectura NVIDIA ONLY (Fast vs Deep Review)', () => {
       latencyMs: 50,
       errorCode: 'NVIDIA_ERROR',
     });
-    const res = await runFastMode({ userMessage: 'fallback' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'fallback' });
     expect(res.provider).toBe('local');
     vi.restoreAllMocks();
   });
 
   it('Modo Rápido: NVIDIA no disponible → local', async () => {
     vi.spyOn(NVIDIAProvider.prototype, 'isAvailable').mockResolvedValue(false);
-    const res = await runFastMode({ userMessage: 'no nvidia' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'no nvidia' });
     expect(res.provider).toBe('local');
     vi.restoreAllMocks();
   });
@@ -57,7 +57,7 @@ describe('Arquitectura NVIDIA ONLY (Fast vs Deep Review)', () => {
       }),
       latencyMs: 100,
     });
-    const deep = await runDeepReviewMode({ userMessage: 'deep', mode: 'deep' });
+    const deep = await runDeepReviewMode({ externalProviderOptIn: true, userMessage: 'deep', mode: 'deep' });
     expect(deep.providerSummary.nvidiaCompleted).toBe(true);
     expect(deep.providerSummary.judgeCompleted).toBe(true);
     vi.restoreAllMocks();
@@ -65,7 +65,7 @@ describe('Arquitectura NVIDIA ONLY (Fast vs Deep Review)', () => {
 
   it('Deep Review: NVIDIA falla → local consolidator', async () => {
     vi.spyOn(NVIDIAProvider.prototype, 'isAvailable').mockResolvedValue(false);
-    const deep = await runDeepReviewMode({ userMessage: 'deep fail', mode: 'deep' });
+    const deep = await runDeepReviewMode({ externalProviderOptIn: true, userMessage: 'deep fail', mode: 'deep' });
     expect(deep.providerSummary.fallbackUsed).toBe(true);
     expect(deep.providerSummary.nvidiaCompleted).toBe(false);
     vi.restoreAllMocks();

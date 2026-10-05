@@ -67,13 +67,10 @@ describe('NVIDIA structured output transport', () => {
   });
 
   it('preserves HTTP status on a failed structured-output request', async () => {
-    mockedFetch.mockResolvedValueOnce({
-      ok: false,
+    mockedFetch.mockResolvedValueOnce(new Response('structured output unsupported', {
       status: 400,
-      statusText: 'Bad Request',
-      json: async () => ({}),
-      text: async () => 'structured output unsupported',
-    } as UndiciResponse);
+      headers: { 'x-request-id': 'synthetic-error-request' },
+    }) as unknown as UndiciResponse);
 
     await expect(generateNVIDIACompletion({ prompt: 'structured prompt' })).rejects.toMatchObject({
       httpStatus: 400,

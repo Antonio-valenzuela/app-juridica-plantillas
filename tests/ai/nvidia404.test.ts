@@ -45,7 +45,7 @@ describe('P0 — NVIDIA 404/410 diagnóstico', () => {
     vi.spyOn(NVIDIAProvider.prototype, 'generate').mockImplementation(async (req) => ({
       provider: 'nvidia', model: getNvidiaModel(), success: true, content: 'ok', latencyMs: 10,
     }));
-    const res = await runFastMode({ userMessage: 'ping' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'ping' });
     expect(res.provider).toBe('nvidia');
     expect(res.model).toBe('meta/llama-3.2-11b-vision-instruct');
   });
@@ -63,7 +63,7 @@ describe('P0 — NVIDIA 404/410 diagnóstico', () => {
         warnings: ['[NVIDIA Provider] HTTP 410: {"detail":"The model has reached its end of life"}'],
       };
     });
-    const res = await runFastMode({ userMessage: 'test' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test' });
     expect(res.provider).toBe('local'); // fallback
     const logged = consoleSpy.mock.calls.map(c=> String(c[0])).join(' ');
     expect(logged).toContain('NVIDIA_HTTP_ERROR');
@@ -78,7 +78,7 @@ describe('P0 — NVIDIA 404/410 diagnóstico', () => {
       success: false, content: '', latencyMs: 10, errorCode: 'NVIDIA_ERROR',
       warnings: ['[NVIDIA Provider] HTTP 410: The model has reached its end of life'],
     });
-    const res = await runFastMode({ userMessage: 'test' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test' });
     expect(res.provider).toBe('local');
     const warn = (res.warnings || []).join(' ');
     expect(warn).toContain('fallbackReason=NVIDIA_HTTP_410');
@@ -93,7 +93,7 @@ describe('P0 — NVIDIA 404/410 diagnóstico', () => {
       success: false, content: '', latencyMs: 10, errorCode: 'NVIDIA_ERROR',
       warnings: ['[NVIDIA Provider] HTTP 404: Provider returned error'],
     });
-    const res = await runFastMode({ userMessage: 'test' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test' });
     expect(res.warnings?.join(' ')).toContain('fallbackReason=NVIDIA_HTTP_404');
     vi.restoreAllMocks();
   });
@@ -105,7 +105,7 @@ describe('P0 — NVIDIA 404/410 diagnóstico', () => {
       success: false, content: '', latencyMs: 10, errorCode: 'NVIDIA_ERROR',
       warnings: ['[NVIDIA Provider] HTTP 404: detail with nvapi-1fatwjcbOFROxPk6 ...'],
     });
-    const res = await runFastMode({ userMessage: 'test' });
+    const res = await runFastMode({ externalProviderOptIn: true, userMessage: 'test' });
     expect(JSON.stringify(res)).not.toMatch(/nvapi-/i);
     vi.restoreAllMocks();
   });

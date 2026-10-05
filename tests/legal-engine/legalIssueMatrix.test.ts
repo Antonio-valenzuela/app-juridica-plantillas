@@ -194,8 +194,9 @@ it('blocks an issue when the required client position is missing', () => {
   const { matrix } = buildFixtureMatrix();
   const factIssue = matrix.issues.find((issue) => issue.issueType === 'FACT_DISPUTE' && issue.factIds.includes('fixture-f-fact-1'))!;
   expect(factIssue.clientPositionStatus).toBe('UNKNOWN');
-  expect(factIssue.status).toBe('NEEDS_CLIENT_POSITION');
-  expect(factIssue.blocking).toBe(true);
+  expect(factIssue.status).toBe('GENERATABLE_REQUIRES_REVIEW');
+  expect(factIssue.statusReason).toBe('SOURCE_BACKED_DRAFT_CLIENT_POSITION_PENDING');
+  expect(factIssue.blocking).toBe(false);
 });
 
 it('does not block confirmed client position for the explicitly confirmed proposition', () => {

@@ -710,6 +710,41 @@ function isCanonicalDocumentType(id: string): boolean {
   return Boolean(entry && entry.kind !== 'LEGACY_ALIAS');
 }
 
+/**
+ * Política derivada de la declaración del catálogo. Es la única fuente
+ * canónica de compatibilidad por tipo: un tipo con plantilla propia o
+ * materializada por el motor de familias y con fuente declarada es generable,
+ * aunque todavía no esté certificado. `REQUIRES_OFFICIAL_FORM` y
+ * `ASSISTED_DRAFT` describen certificación y formato, no la existencia de
+ * backend; tratarlos como no soportados convertía a DRAFT en un tipo sin ruta.
+ */
+function catalogDeclaredPolicy(
+  selectedDocumentType: string,
+  declaration: {
+    sourceRequired: boolean;
+    acceptsAnySource?: boolean;
+    acceptedSourceTypes: readonly string[];
+    optionalSourceTypes?: readonly string[];
+    incompatibleMatterIds?: readonly string[];
+  },
+): SourceOutputCompatibilityPolicy {
+  return {
+    selectedDocumentType,
+    status: declaration.acceptsAnySource
+      ? 'ACCEPTS_ANY_SOURCE_INTENTIONALLY'
+      : declaration.sourceRequired
+        ? 'EXPLICIT_COMPATIBILITY'
+        : 'NO_SOURCE_REQUIRED',
+    acceptedSourceTypes: [...declaration.acceptedSourceTypes] as SourceOutputCompatibilityPolicy['acceptedSourceTypes'],
+    optionalSourceTypes: [...(declaration.optionalSourceTypes || [])] as SourceOutputCompatibilityPolicy['optionalSourceTypes'],
+    sourceRequired: declaration.sourceRequired,
+    incompatibleMatterRules: [...(declaration.incompatibleMatterIds || [])].map(matterId => ({
+      matter: matterId,
+      reason: `materia incompatible declarada por el catálogo para ${selectedDocumentType}`,
+    })),
+  };
+}
+
 export function getSourceOutputCompatibilityPolicy(
   selectedDocumentType: string,
   rules: SourceOutputCompatibilityRuleMap = SOURCE_OUTPUT_COMPATIBILITY_RULES,
@@ -731,6 +766,9 @@ export function getSourceOutputCompatibilityPolicy(
   }
 
   const entry = getCatalogDocument(selected);
+  if (entry?.kind === 'DOCUMENT_TYPE' && entry.sourceCompatibility) {
+    return catalogDeclaredPolicy(selected, entry.sourceCompatibility);
+  }
   if (entry?.kind === 'DOCUMENT_TYPE' && entry.status === 'IMPLEMENTED') {
     throw new MissingSourceCompatibilityRuleError(selected);
   }

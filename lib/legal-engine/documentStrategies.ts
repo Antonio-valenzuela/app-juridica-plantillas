@@ -682,6 +682,7 @@ const LABORAL_CONTESTACION_REQUIRED_SECTION_IDS = [
   'prestaciones',
   'excepciones_defensas',
   'pruebas',
+  'derecho',
   'argumentos',
   'petitorios',
   'firma',

@@ -3,12 +3,13 @@ import { createHash } from 'node:crypto';
 export const MANUAL_MATTERS = ['GENERAL', 'CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL', 'PROCESAL', 'PROBATORIO', 'INVESTIGACION', 'JURISPRUDENCIA', 'REDACCION', 'AUDITORIA', 'FUENTES'] as const;
 export type ManualMatter = typeof MANUAL_MATTERS[number];
 export type ManualCategory = ManualMatter | 'UNCLASSIFIED';
+export type ManualScope = 'DRAFTING' | 'INTERNAL_PROFILE_ONLY' | 'ASSISTANT_OUTPUT_FORMAT';
 export interface ManualPage { physicalPage: number; text: string }
 export interface ManualFragment {
   manualVersion: string; sourceHash: string; physicalPage: number; section: string;
   subsection: string; originalText: string; matter: ManualMatter; stage: string;
   category: ManualCategory; stableRuleId: string; sourceDocumentId: string;
-  alwaysActive: boolean;
+  alwaysActive: boolean; scope?: ManualScope;
 }
 export interface ManualManifest {
   manualId: string; name: string; version: string; sourceHash: string; originalFile: string;
@@ -20,7 +21,49 @@ export interface ManualIndex { manifest: ManualManifest; fragments: ManualFragme
 export interface RetrievalQuery { matter: ManualMatter; caseType?: string; action?: string; stage?: string; task?: string; category?: ManualCategory; budgetChars?: number; measureContext?: (fragments: ManualFragment[]) => number }
 
 export function formatManualTaskContext(rules: ManualFragment[]): string {
-  return rules.length ? '\n\nGUÍA OPERATIVA INTERNA LEX PLANTILLAS (NO ES AUTORIDAD JURÍDICA NI FUENTE DE HECHOS):\n' + rules.map((rule) => `[${rule.stableRuleId} | página física ${rule.physicalPage}] ${rule.originalText.trim()}`).join('\n') : '';
+  const draftingRules = rules.filter(rule => rule.scope !== 'INTERNAL_PROFILE_ONLY' && rule.scope !== 'ASSISTANT_OUTPUT_FORMAT');
+  return draftingRules.length ? '\n\nGUÍA OPERATIVA INTERNA LEX PLANTILLAS (NO ES AUTORIDAD JURÍDICA NI FUENTE DE HECHOS):\n' + draftingRules.map((rule) => `[${rule.stableRuleId} | página física ${rule.physicalPage}] ${rule.originalText.trim()}`).join('\n') : '';
+}
+
+const scopeHeadings: Array<[ManualScope, RegExp]> = [
+  ['INTERNAL_PROFILE_ONLY', /estilo\s+y\s+conocimiento\s+operativo\s+del\s+despacho|jurisdicci[oó]n\s+de\s+trabajo\s+principal\s+identificada/i],
+  ['ASSISTANT_OUTPUT_FORMAT', /formato\s+de\s+respuesta\s+del\s+asistente|(?:formato|respuesta|salida).{0,50}(?:asistente|assistant)|(?:asistente|assistant).{0,50}(?:formato|respuesta|salida)/i],
+];
+function scopeForLine(line: string, current: ManualScope): ManualScope {
+  const heading = scopeHeadings.find(([, pattern]) => pattern.test(line));
+  if (heading) return heading[0];
+  return current;
+}
+const manualScopeCache = new WeakMap<ManualIndex, Map<string, ManualScope>>();
+function scopesForIndex(index: ManualIndex): Map<string, ManualScope> {
+  const cached = manualScopeCache.get(index);
+  if (cached) return cached;
+  const scopes = new Map<string, ManualScope>();
+  const fragments = [...index.fragments].sort((left, right) => left.physicalPage - right.physicalPage || left.stableRuleId.localeCompare(right.stableRuleId));
+  let scope: ManualScope = 'DRAFTING';
+  let previousSection = '';
+  for (const fragment of fragments) {
+    if (previousSection && fragment.section !== previousSection) scope = 'DRAFTING';
+    previousSection = fragment.section;
+    scope = scopeForLine(fragment.originalText.trim(), scope);
+    scopes.set(fragment.stableRuleId, fragment.scope || scope);
+  }
+  manualScopeCache.set(index, scopes);
+  return scopes;
+}
+
+function outOfRangeTocWarnings(pages: ManualPage[]): string[] {
+  const intro = pages.slice(0, 30);
+  if (!intro.slice(0, 5).some(page => /índice|tabla\s+de\s+contenido|contenido/i.test(page.text))) return [];
+  const warnings = new Set<string>();
+  const rangePattern = /\b(\d{1,3})\s*[-–—]\s*(\d{1,3})\b/g;
+  for (const page of intro) {
+    for (const match of page.text.matchAll(rangePattern)) {
+      const end = Number(match[2]);
+      if (end > pages.length) warnings.add(`LOGICAL_PAGE_REFERENCE_OUT_OF_RANGE:${end}>${pages.length}`);
+    }
+  }
+  return [...warnings];
 }
 
 const masterPatterns = [
@@ -66,6 +109,8 @@ export function buildManualIndex(pages: ManualPage[], source: { manualId: string
   let section = 'Sin sección identificada';
   let subsection = '';
   let stage = 'GENERAL';
+  let scope: ManualScope = 'DRAFTING';
+  let scopeSection = section;
   for (const page of pages) {
     let masterList: 'NO_INVENTAR' | 'DISTINGUIR' | null = null;
     if (!Number.isInteger(page.physicalPage) || page.physicalPage < 1 || page.physicalPage > 212 || seen.has(page.physicalPage)) errors.push(`INVALID_PAGE:${page.physicalPage}`);
@@ -82,6 +127,8 @@ export function buildManualIndex(pages: ManualPage[], source: { manualId: string
       if (/^(?:\d+[.)]\s*)?[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,–—-]{7,}$/.test(line) && line.length < 125) {
         if (/^(?:\d+[.)]\s*)?[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,–—-]{7,}$/.test(line)) { section = line; subsection = ''; }
       }
+      if (section !== scopeSection) { scope = 'DRAFTING'; scopeSection = section; }
+      scope = scopeForLine(line, scope);
       if (/^\d+(?:\.\d+)+\.?\s+\S/.test(line) && line.length < 140) subsection = line;
       stage = stagePatterns.find(([, pattern]) => pattern.test(section))?.[0]
         || stagePatterns.find(([, pattern]) => pattern.test(line))?.[0]
@@ -95,7 +142,7 @@ export function buildManualIndex(pages: ManualPage[], source: { manualId: string
         section, subsection, originalText, matter, stage,
         category: line ? (direct?.[0] || inherited?.[0] || 'UNCLASSIFIED') : 'UNCLASSIFIED',
         stableRuleId: `lex-manual-${source.version}-p${String(page.physicalPage).padStart(3, '0')}-${String(ordinal + 1).padStart(3, '0')}-${hash(originalText).slice(0, 10)}`,
-        sourceDocumentId: source.manualId, alwaysActive,
+        sourceDocumentId: source.manualId, alwaysActive, scope,
       });
     }
   }
@@ -110,7 +157,7 @@ export function buildManualIndex(pages: ManualPage[], source: { manualId: string
     manifest: { manualId: source.manualId, name: 'LEX PLANTILLAS — Manual Operativo Jurídico', version: source.version,
       sourceHash: source.sourceHash, originalFile: source.originalFile || '', importedAt: source.importedAt || new Date().toISOString(),
       status: 'CANONICAL', active: errors.length === 0, detectedPages: pages.length,
-      processedPages: seen.size, emptyPages, fragmentCount: fragments.length, errors, warnings: [],
+      processedPages: seen.size, emptyPages, fragmentCount: fragments.length, errors, warnings: outOfRangeTocWarnings(pages),
       unclassifiedCount: fragments.filter((fragment) => fragment.category === 'UNCLASSIFIED').length },
     fragments, pages,
   };
@@ -122,7 +169,10 @@ export function retrieveManualRules(index: ManualIndex, query: RetrievalQuery): 
   // El índice conserva incluso el índice histórico del PDF; sus identidades anteriores
   // no se inyectan en escritos nuevos como si describieran al despacho actual.
   const legacyIdentity = /\bPB\s+JUR[IÍ]DICO\b|\bEDGARDO\s+PALACIOS\b|\basistente\s+jur[ií]dico\s+pb\b/i;
-  const candidates = index.fragments.filter((item) => item.originalText.trim() && !legacyIdentity.test(item.originalText) && (item.alwaysActive || item.matter === query.matter || item.matter === 'GENERAL') && (!query.category || item.alwaysActive || item.category === query.category));
+  const scopes = scopesForIndex(index);
+  const candidates = index.fragments
+    .map(item => ({ ...item, scope: item.scope || scopes.get(item.stableRuleId) || 'DRAFTING' as const }))
+    .filter((item) => item.scope === 'DRAFTING' && item.originalText.trim() && !legacyIdentity.test(item.originalText) && (item.alwaysActive || item.matter === query.matter || item.matter === 'GENERAL') && (!query.category || item.alwaysActive || item.category === query.category));
   // El término de la tarea domina el orden: las reglas maestras ("no
   // inventar", "distingue siempre") siempre están presentes, pero si se
   // puntúan por encima de todo expulsan del presupuesto la metodología

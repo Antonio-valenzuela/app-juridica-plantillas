@@ -297,10 +297,11 @@ export function runQualityGateCheck(
       const unresolvedMarkers = extractUnresolvedFieldMarkers(normalizedSecText);
       const pendingMarkers = unresolvedMarkers.filter((marker) => marker.kind === 'PENDING');
       const anonymizedMarkers = unresolvedMarkers.filter((marker) => marker.kind === 'ANONYMIZED');
+      const pendingMarkerCauses = [...new Set(pendingMarkers.map((marker) => marker.cause))];
       pendingFieldsCount += pendingMarkers.length + anonymizedMarkers.length;
       anonymizedFieldsCount += anonymizedMarkers.length;
 
-      const rawBracketMatches = normalizedSecText.match(/\[(?!DATO PENDIENTE|DATO ANONIMIZADO|NO VERIFICADO|DOCUMENTO GENERADO)[A-ZÁÉÍÓÚÑ_\s]{3,}\]/g);
+      const rawBracketMatches = normalizedSecText.match(/\[(?!DATO PENDIENTE|DATO ANONIMIZADO|PENDIENTE|NO VERIFICADO|DOCUMENTO GENERADO)[A-ZÁÉÍÓÚÑ_\s]{3,}\]/g);
       if (rawBracketMatches) {
         pendingFieldsCount += rawBracketMatches.length;
         warnings.push({
@@ -316,7 +317,7 @@ export function runQualityGateCheck(
         warnings.push({
           checkId: `pending_data_${sec.id}`,
           sectionId: sec.id,
-          message: `La sección "${sec.title}" contiene ${pendingMatches.length} campo(s) pendiente(s) o no resuelto(s).`
+          message: `La sección "${sec.title}" contiene ${pendingMatches.length} campo(s) pendiente(s) o no resuelto(s). Causas: ${pendingMarkerCauses.join(', ')}.`
         });
       }
 
@@ -335,7 +336,7 @@ export function runQualityGateCheck(
         warnings.push({
           checkId: `unverified_citation_${sec.id}`,
           sectionId: sec.id,
-          message: `La sección "${sec.title}" contiene ${unverifiedMatches.length} cita(s) o jurisprudencia(s) no verificada(s).`
+          message: `La sección "${sec.title}" contiene ${unverifiedMatches.length} cita(s) o jurisprudencia(s) no verificada(s). Causa: VERIFICATION_REQUIRED.`
         });
       }
 

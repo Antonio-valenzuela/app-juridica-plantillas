@@ -87,8 +87,16 @@ export function resolveContestacionRoles(
 }
 
 /** Formal closing only; this does not verify a party's identity or authorize filing. */
-export function buildContestacionSignatureBlock(sectionId: string, signatory: string): ContentBlock {
+export function buildContestacionSignatureBlock(
+  sectionId: string,
+  signatory: string,
+  options: { includePendingSignatoryMarker?: boolean } = {},
+): ContentBlock {
   const hasName = Boolean(signatory.trim()) && !/\[\s*DATO\s+PENDIENTE\b/i.test(signatory);
+  const pendingSignatory = signatory.trim().replace(
+    /^\[\s*DATO\s+PENDIENTE(?:\s+DE\s+EXPEDIENTE)?\s*:\s*([^\]]+)\]$/i,
+    '[PENDIENTE: $1]',
+  );
   return {
     id: `${sectionId}-rolefix`,
     layer: 'USER_POSITION',
@@ -99,7 +107,9 @@ export function buildContestacionSignatureBlock(sectionId: string, signatory: st
     generationStatus: 'generated',
     text: hasName
       ? `PROTESTO LO NECESARIO.\n\n_________________________________________\n${signatory.trim()}`
-      : 'PROTESTO LO NECESARIO.\n\n_________________________________________\nNombre y calidad de quien firma: ____________________',
+      : options.includePendingSignatoryMarker
+        ? `PROTESTO LO NECESARIO.\n\n_________________________________________\n${pendingSignatory}`
+        : 'PROTESTO LO NECESARIO.\n\nNombre y calidad de quien firma: ____________________',
   };
 }
 
@@ -308,14 +318,15 @@ export function buildContestacionSkeleton(
     : (caseAnalysis?.claims || []).map((claim, i) => `PRESTACIÓN ${i + 1}.- La parte actora reclama: "${claim}"\nPOSTURA: [REQUIERE DEFINIR POSTURA DEL ABOGADO]`).join('\n\n');
 
   const proemioSeed = `${roles.autoridad || 'H. TRIBUNAL COMPETENTE EN TURNO'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`;
-  const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: Con la personalidad que se tiene debidamente acreditada en autos y señalando como domicilio procesal el que obra en el expediente.`;
+  const personality = doc.caseContext?.civil?.personality;
+  const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: ${personality?.status === 'CONFIRMED' && personality.value ? personality.value : '[PENDIENTE: confirmar personalidad y soporte con el abogado]'}\nDOMICILIO: [PENDIENTE: confirmar domicilio procesal].`;
   const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE (responder punto por punto; conserva redacciones *****):\n${hechosRef || 'Hechos identificados en las constancias del expediente.'}`;
   const confirmedEvidence = (caseAnalysis?.evidence || []).filter((e) => e.confirmed === true);
   const pruebasSeed = confirmedEvidence.length > 0
     ? `PRUEBAS:\n\n${confirmedEvidence.map((e, i) => `${i + 1}. ${e.description}`).join('\n')}`
     : (caseAnalysis?.evidence || []).length > 0
-      ? `FUENTES PROBATORIAS DISPONIBLES EN EL EXPEDIENTE:\n${caseAnalysis!.evidence.map((e) => `- ${e.description}`).join('\n')}\n\nSe formaliza la relación de pruebas dentro del término procesal legal oportuno.`
-      : 'Se formaliza la relación de pruebas dentro del término procesal legal oportuno.';
+      ? `MENCIONES PROBATORIAS DE LA FUENTE SIN OFRECIMIENTO CONFIRMADO:\n${caseAnalysis!.evidence.map((e) => `- ${e.description}`).join('\n')}\n\n[REQUIERE DEFINIR PRUEBAS A OFRECER]`
+      : '[REQUIERE DEFINIR PRUEBAS A OFRECER]';
 
   const isLaboral =
     (doc.matter && /laboral/i.test(doc.matter)) ||

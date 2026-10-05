@@ -452,7 +452,9 @@ export async function extractDocument(
   if (!nativeQuality.sufficient) {
     const selectedOcrPages = selectOcrPageNumbers(nativePages, pageCount);
     ocrPages = selectedOcrPages.length;
-    const canOCR = ocrAvailable(mimeType) || ocrAvailable('application/pdf');
+    // Do not route a non-OCR format (for example DOCX) through the PDF OCR
+    // capability merely because that provider can process PDFs.
+    const canOCR = ocrAvailable(mimeType);
 
     if (!canOCR) {
       ocrStatus = 'OCR_PROVIDER_NOT_CONFIGURED';

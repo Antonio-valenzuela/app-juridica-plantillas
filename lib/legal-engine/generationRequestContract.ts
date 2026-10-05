@@ -77,7 +77,10 @@ export function validateGenerationRequestContract(doc: UniversalLegalDocument): 
   if (contract.applicant && !identity.includes(normalize(contract.applicant))) add('REQUEST_CONTRACT_FORMAL_NAME_LOST', 'El proemio perdió el nombre confirmado.');
   if (contract.capacity && !identity.includes(normalize(contract.capacity))) add('REQUEST_CONTRACT_FORMAL_CAPACITY_LOST', 'El proemio perdió la personalidad explícita.');
   if (!contract.requests.length) add('REQUEST_CONTRACT_RELIEF_MISSING', 'Falta solicitud concreta: no se presume una pretensión.');
-  const relief = normalize(contract.requests.map(request => request.text).join('\n'));
+  // A prohibition inside the current request cannot authorize the prohibited
+  // remedy. Preserve preceding affirmative relief and remove negative tails.
+  const relief = normalize(contract.requests.map(request => request.text).join('\n'))
+    .replace(/\b(?:sin|no)\b[^.;\n]*/g, '');
   const remedyPatterns = [
     /medio de defensa|interponer (?:un |el )?(?:recurso|demanda)/,
     /resolucion favorable|sentencia favorable|fundadas las pretensiones/,

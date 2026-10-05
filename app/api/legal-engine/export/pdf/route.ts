@@ -11,6 +11,7 @@ import { generateRequestId } from '@/lib/logger';
 import { resolveExportMode } from '@/lib/legal-engine/exportModes';
 import { isLocalSameOriginDraftExportRequest, UNSAVED_DRAFT_EXPORT_HEADER } from '@/lib/security/localDraftExport';
 import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { canExportDocumentFinal, getFunctionalDocumentStatus } from '@/lib/catalog/legalCatalog';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,6 +57,20 @@ export async function POST(req: NextRequest) {
       : resolveExportMode(body.exportMode);
     if (!exportMode) {
       return NextResponse.json({ ok: false, errorCode: 'INVALID_EXPORT_MODE', message: 'El modo de exportación debe ser DRAFT o FINAL.' }, { status: 400 });
+    }
+// FINAL nunca es automático. Un tipo sin certificación técnica queda
+    // bloqueado en cualquier vía. Un tipo técnicamente certificado pero sin
+    // aprobación humana también queda bloqueado cuando no hay contrato de
+    // documento que evalúe (exportación efímera); cuando el documento está
+    // guardado, el guard de exportación del documento es la autoridad y decide
+    // con pendingFields, autoridades, provenance, coverage y qualityGate.
+    if (exportMode === 'FINAL' && inputDocument.documentType) {
+      const technicallyCertified = getFunctionalDocumentStatus(inputDocument.documentType) === 'PASS';
+      if (!technicallyCertified || unsavedDraftRequested) {
+        if (!canExportDocumentFinal(inputDocument.documentType)) {
+          return NextResponse.json({ ok: false, errorCode: 'UNCERTIFIED_TYPE_FINAL_BLOCKED', message: 'La exportación FINAL está bloqueada para tipos en desarrollo (sin certificar). Puedes exportar este documento como DRAFT para revisión.' }, { status: 422 });
+        }
+      }
     }
     // Local persistence has a separate authenticated DRAFT contract. It does
     // not fabricate a WEB principal or authorize FINAL.

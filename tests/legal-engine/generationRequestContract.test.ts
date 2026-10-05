@@ -54,6 +54,13 @@ describe('request → confirmed data → formal writing contract', () => {
     bad.sections.find(s => s.type === 'argument')!.content[0].text = 'No existe controversia, pero solicito condenar a la contraparte.';
     expect(validateGenerationRequestContract(bad).some(e => e.checkId === 'REQUEST_CONTRACT_UNREQUESTED_RELIEF')).toBe(true);
   });
+  it('does not treat a remedy explicitly excluded from the request as authorized', () => {
+    const bad = structuredClone(document);
+    bad.generationMetadata.requestContract = buildGenerationRequestContract(bad,
+      'Petición: incorporar la constancia sin solicitar resolución favorable.');
+    bad.sections.find(s => s.type === 'argument')!.content[0].text = 'Solicito dictar resolución favorable.';
+    expect(validateGenerationRequestContract(bad).some(e => e.checkId === 'REQUEST_CONTRACT_UNREQUESTED_RELIEF')).toBe(true);
+  });
   it('detects loss of confirmed formal data without inventing missing capacity', () => {
     const bad = structuredClone(document);
     bad.sections.find(s => s.type === 'identity')!.content[0].text = 'Comparezco ante Usted.';
