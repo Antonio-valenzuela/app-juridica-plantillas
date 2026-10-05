@@ -219,7 +219,7 @@ export default function AppShell({
         </div>
       </aside>
 
-      <div className="appshell-content lex-content">
+      <div className="appshell-content lex-content" data-active-tab={currentTab}>
         {children}
       </div>
     </>

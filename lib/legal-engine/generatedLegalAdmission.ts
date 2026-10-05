@@ -3,7 +3,35 @@ import type { UniversalLegalDocument } from './types';
 import { extractUnresolvedFieldMarkers, normalizeUnresolvedFieldMarkers, type UnresolvedFieldMarkerCause } from './pendingFields';
 
 export type LegalAdmissionReason = 'UNCONFIRMED_EVIDENCE' | 'ABSOLUTE_EVIDENCE_VALUATION'
-  | 'UNVERIFIED_LEGAL_ASSERTION' | 'UNSUPPORTED_PROOF_RULE' | 'UNSUPPORTED_PETITION';
+  | 'UNVERIFIED_LEGAL_ASSERTION' | 'UNSUPPORTED_PROOF_RULE' | 'UNSUPPORTED_PETITION'
+  /** P0-B: el bloque contiene ayuda del asistente de interfaz, no derecho. */
+  | 'UI_ASSISTANT_CONTENT_LEAK';
+
+/**
+ * P0-B — señales de contenido del asistente de interfaz de la app.
+ *
+ * Un bloque jurídico nunca debe contener ayuda de pantalla. Si lo contiene, el
+ * material salió del chat de UI y no de una fuente jurídica: se rechaza con
+ * evidencia, se conserva un pendiente explícito y se registra la causa.
+ */
+export const UI_ASSISTANT_LEAK_PATTERNS: readonly RegExp[] = Object.freeze([
+  /resumen\s+de\s+la\s+pantalla/i,
+  /panel\s+principal/i,
+  /jur[íi]dico\s+radar/i,
+  /te\s+encuentras\s+en/i,
+  /\bdashboard\b/i,
+  /inteligencia\s+regulatoria/i,
+  /generaci[óo]n\s+de\s+machotes\s+y\s+plantillas/i,
+  /monitoreo\s+legal/i,
+  /centro\s+jur[íi]dico\s+e\s+ia\s+sandbox/i,
+  /puedes\s+realizar\s+consultas\s+sobre\s+la\s+pantalla/i,
+]);
+
+/** Devuelve las señales de UI encontradas, como evidencia del rechazo. */
+export function detectUiAssistantLeak(text: string): string[] {
+  const haystack = String(text || '');
+  return UI_ASSISTANT_LEAK_PATTERNS.filter(pattern => pattern.test(haystack)).map(pattern => pattern.source);
+}
 
 /**
  * Naturaleza jurídica de la proposición. La admission se decide sobre esta
@@ -145,6 +173,9 @@ function pendingMark(reason: LegalAdmissionReason): string {
       return '[PENDIENTE DE DESARROLLO / PETICIÓN NO AUTORIZADA POR EL ABOGADO]';
     case 'ABSOLUTE_EVIDENCE_VALUATION':
       return '[PENDIENTE DE DESARROLLO / VALORACIÓN PROBATORIA ABSOLUTA PENDIENTE DE FUNDAMENTO]';
+    case 'UI_ASSISTANT_CONTENT_LEAK':
+      // Bloqueante: el contenido no procede de una fuente jurídica.
+      return '[PENDIENTE DE DESARROLLO / CONTENIDO NO JURÍDICO: el bloque contenía ayuda del asistente de interfaz y se rechazó (UI_ASSISTANT_CONTENT_LEAK)]';
   }
 }
 
@@ -236,7 +267,14 @@ function evaluateSegment(segment: Segment, sectionType: string, context: Admissi
   const trimmed = text.trim();
   const verdicts: Verdict[] = [];
 
+  // P0-B, primera comprobación: si el texto es ayuda de interfaz no hay nada
+  // que remediar segmento a segmento. Se marca como segmento no admisible.
+  if (detectUiAssistantLeak(text).length > 0) {
+    verdicts.push({ reason: 'UI_ASSISTANT_CONTENT_LEAK', remediation: 'SENTENCE', kind: 'UNVERIFIED_LEGAL_PROPOSITION' });
+  }
+
   const verifiedNorm = coveredByVerifiedAuthority(text, context);
+  if (verifiedNorm) return verdicts;
 
   // 1. Ofrecimiento de prueba. Sólo un medio confirmado por el cliente existe.
   const offersEvidence = OFFER_VERB.test(text)

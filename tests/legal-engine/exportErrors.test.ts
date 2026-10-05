@@ -14,4 +14,9 @@ describe('Errores de exportación', () => {
       .toBe('Resolver observaciones jurídicas.');
     expect(formatExportIssues(undefined)).toBe('');
   });
+
+  it('explica en español que el archivo fuente no es un escrito generado', () => {
+    expect(formatExportIssues('SOURCE_DOCUMENT_NOT_GENERATED: internal detail'))
+      .toBe('El archivo cargado es la fuente del expediente, no el escrito solicitado. Genera primero el borrador jurídico.');
+  });
 });

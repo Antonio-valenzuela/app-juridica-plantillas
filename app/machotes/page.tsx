@@ -2293,7 +2293,7 @@ export default function MachotesPage() {
   const matterAnalysis = React.useMemo(() => reconstructCaseAnalysis(uploadedSourceDocs, ''), [uploadedSourceDocs]);
 
   return (
-    <div className="machotes-shell h-[calc(100dvh-64px)] flex flex-col font-sans select-none overflow-hidden bg-[#f4f7f9]">
+    <div data-active-tab={activeNavTab} className="machotes-shell h-[calc(100dvh-64px)] flex flex-col font-sans select-none overflow-hidden bg-[#f4f7f9]">
       <style>{`
         /* Machotes: la aplicación usa Vanilla CSS, no Tailwind. Esta capa hace explícitas
            las utilidades que esta pantalla necesita y fija el layout de referencia. */

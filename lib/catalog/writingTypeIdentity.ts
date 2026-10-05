@@ -19,7 +19,7 @@
  */
 import {
   CANONICAL_DOCUMENT_TYPES, DOCUMENT_FAMILIES, LEGAL_AREAS, LEGAL_PROCEDURES,
-  LEGACY_ALIASES, getCatalogDocument, getCatalogStats,
+  LEGACY_ALIASES, getCatalogDocument, getCatalogStats, canGenerateDocumentDraft,
 } from './legalCatalog';
 import {
   DocumentTemplates, getDocumentTemplate, familyDerivedTemplateFor, familyDerivedTemplateIds,
@@ -161,7 +161,10 @@ export function resolveWritingType(idOrAlias: string): WritingTypeIdentity {
     optionalSections: template.camposOpcionales || [],
     requiredFields: template.camposObligatorios || [],
     capabilities: {
-      draft: true,
+      // Contrato único (§20): un tipo no generable por contrato de producto
+      // NO es draftable. Así nunca puede ocurrir PASS + draftable + routing
+      // NOT_IMPLEMENTED a la vez.
+      draft: canGenerateDocumentDraft(canonicalId, true),
       docx: true,
       pdf: true,
       // PASS técnico habilita DRAFT, no FINAL: FINAL exige además aprobación
@@ -235,8 +238,12 @@ export function writingTypeCensus(): WritingTypeCensus {
     blockedExternal: tally(i => i.functionalStatus === 'BLOCKED_EXTERNAL'),
     humanReviewPending: tally(i => i.humanReview === 'PENDING'),
     humanReviewApproved: tally(i => i.humanReview === 'APPROVED'),
+    // Un huérfano es un tipo VISIBLE sin backend resoluble. Los tipos
+    // bloqueados por contrato de producto (formulario oficial / borrador
+    // asistido) NO son huérfanos: tienen backend y una razón explícita de no
+    // ser generables.
     orphanTypes: identities
-      .filter(i => !i.requiredSections.length || !i.template || !i.compatibleSources.declared && !i.compatibleSources.acceptsAnySource)
+      .filter(i => !i.requiredSections.length || !i.template || i.implementationStatus === 'NOT_IMPLEMENTED')
       .map(i => i.id),
     duplicateIds: [...new Set(duplicates)],
     blueprintsMissing: identities.filter(i => !i.template || !(i.template.estructura || []).length).map(i => i.id),

@@ -677,6 +677,21 @@ export function validateForExport(doc: UniversalLegalDocument): ExportValidation
   const allText = collectText(doc);
   const titles = sections.map((s) => (s.title || '').trim());
 
+  // El modelo que crea la pantalla al cargar un archivo conserva una sección
+  // por página de la FUENTE (`sec-page-N`, `Página N`). No es un escrito
+  // redactado. Impedir que se descargue como borrador jurídico evita que una
+  // sentencia de entrada se haga pasar por la contestación/demanda solicitada.
+  const sourceOnlyPages = sections.length > 0
+    && sections.every((section, index) => (
+      /^sec-page-\d+$/i.test(section.id)
+      && /^p[aá]gina\s+\d+$/i.test((section.title || '').trim())
+      && section.isGenerated !== true
+      && section.order === index + 1
+    ));
+  if (sourceOnlyPages) {
+    errors.push('SOURCE_DOCUMENT_NOT_GENERATED: el archivo cargado sigue siendo únicamente la fuente por páginas; genera el escrito solicitado antes de exportar un borrador jurídico.');
+  }
+
   const sourceGrounding = doc.generationMetadata?.sourceGrounding;
   if (sourceGrounding && sourceGrounding.length > 0) {
     const provenanceGate = evaluateProvenanceIntegrityGate({
@@ -986,7 +1001,10 @@ function collectReviewOverrideErrors(
 
   // DRAFT is a recovery artifact, not legal approval. Shape and actual content
   // are checked separately; every legal finding remains a review warning.
-  const hardErrors = errors.filter((error) => error.startsWith('DOCUMENTO_VACIO:'));
+  const hardErrors = errors.filter((error) => (
+    error.startsWith('DOCUMENTO_VACIO:')
+    || error.startsWith('SOURCE_DOCUMENT_NOT_GENERATED:')
+  ));
   if (hardErrors.length > 0) guardFailure(hardErrors, warnings);
   return errors.length > 0
     ? ['REVIEW_EXPORT_OVERRIDE: exportación explícita de un borrador con pendientes: ' + errors.join(' | ')]

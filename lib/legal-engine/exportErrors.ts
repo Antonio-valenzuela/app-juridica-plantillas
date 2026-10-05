@@ -14,6 +14,9 @@ export function formatExportIssues(value: unknown): string {
   }
 
   if (typeof value === 'string') {
+    if (value.includes('SOURCE_DOCUMENT_NOT_GENERATED')) {
+      return 'El archivo cargado es la fuente del expediente, no el escrito solicitado. Genera primero el borrador jurídico.';
+    }
     if (value.includes('LIFECYCLE_NOT_EXPORTABLE')) {
       return 'El documento aún está en borrador o revisión. Completa los campos pendientes y pulsa "Finalizar revisión" para habilitar la exportación oficial.';
     }

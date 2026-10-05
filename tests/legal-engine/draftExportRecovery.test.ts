@@ -24,6 +24,24 @@ async function docxText(bytes: Buffer) {
 }
 
 describe('DRAFT recuperable sin aprobación jurídica ni persistencia', () => {
+  it('no exporta las páginas de una fuente subida como si fueran un escrito generado', async () => {
+    const sourceOnly = createEmptyDocument({ id: 'source-only', documentType: 'SENTENCIA_AMPARO_DIRECTO', sections: [
+      createDocumentNode({ id: 'sec-page-1', title: 'Página 1', type: 'argument', order: 1, content: [
+        { id: 'source-page-1', layer: 'USER_POSITION', trustLevel: 'VERIFIED', text: 'Texto íntegro de la sentencia fuente; todavía no se ha generado el escrito solicitado.' },
+      ] }),
+      createDocumentNode({ id: 'sec-page-2', title: 'Página 2', type: 'argument', order: 2, content: [
+        { id: 'source-page-2', layer: 'USER_POSITION', trustLevel: 'VERIFIED', text: 'Continuación de la resolución fuente en otra página.' },
+      ] }),
+    ] });
+    sourceOnly.originalPageCount = 2;
+    sourceOnly.generationMetadata.aiUsed = false;
+
+    await expect(exportUniversalToDocx(sourceOnly, undefined, undefined, { exportMode: 'DRAFT' }))
+      .rejects.toThrow(/SOURCE_DOCUMENT_NOT_GENERATED/);
+    await expect(exportUniversalToPdf(sourceOnly, undefined, { exportMode: 'DRAFT' }))
+      .rejects.toThrow(/SOURCE_DOCUMENT_NOT_GENERATED/);
+  });
+
   it('1: DOCX conserva hechos no sustentados y la marca de borrador', async () => {
     const document = fixture();
     const before = JSON.stringify(document);

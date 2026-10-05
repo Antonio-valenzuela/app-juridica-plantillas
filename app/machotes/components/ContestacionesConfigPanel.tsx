@@ -44,7 +44,7 @@ export function ContestacionesConfigPanel({
   disabled = false,
 }: ContestacionesConfigPanelProps) {
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-xs transition hover:border-slate-300/80">
+    <section data-testid="contestaciones-config-panel" className="rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-xs transition hover:border-slate-300/80">
       <div className="mb-2 flex items-center justify-between border-b border-slate-100 pb-2">
         <div className="flex items-center gap-2.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-700">

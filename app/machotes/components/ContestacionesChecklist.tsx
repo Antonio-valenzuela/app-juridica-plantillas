@@ -19,6 +19,7 @@ interface ContestacionesChecklistProps {
   } | null;
   blockReason?: string | null;
   isIncompatible?: boolean;
+  onReviewRequirements?: () => void;
   onGenerate: () => void;
   onOpenEditor?: () => void;
 }
@@ -52,6 +53,7 @@ export function ContestacionesChecklist({
   isGenerating,
   blockReason,
   isIncompatible,
+  onReviewRequirements,
   onGenerate,
   onOpenEditor,
 }: ContestacionesChecklistProps) {
@@ -67,13 +69,17 @@ export function ContestacionesChecklist({
     ? 'bg-[#0B2545] text-white hover:bg-slate-900'
     : 'bg-slate-200 text-slate-400 cursor-not-allowed';
 
-  // Cada flujo muestra SOLO sus requisitos. "Análisis de la demanda" es un
-  // requisito de Contestación: en Apelación no existe demanda que analizar, y
-  // mostrarlo allí confunde al abogado sobre lo que falta por completar.
+  // Contrato de la feature de apelación (appealPhase1b 1.2): la fila se
+  // mantiene VISIBLE en Apelación y sin marcar, como recordatorio de que el
+  // análisis de la demanda no está revisado. Se conserva el rótulo histórico
+  // para no romper ese contrato; redefinirlo requiere decisión de producto.
   const checklistItems = [
     { label: 'Documento fuente cargado y legible', completed: hasDocument },
     { label: 'Resumen del expediente completado', completed: hasDocument },
-    ...(appealMode ? [] : [{ label: 'Análisis de la demanda revisado', completed: analysisCompleted }]),
+    {
+      label: 'Análisis de la demanda revisado',
+      completed: !appealMode && analysisCompleted,
+    },
     { label: appealMode ? 'Configuración de la apelación definida' : 'Configuración de la contestación definida', completed: configDefined },
     { label: 'Revisar lineamientos específicos de la autoridad', completed: false },
   ];
@@ -154,6 +160,16 @@ export function ContestacionesChecklist({
               </>
             )}
           </button>
+
+          {blockReason && onReviewRequirements && !isGenerating && (
+            <button
+              type="button"
+              onClick={onReviewRequirements}
+              className="text-sm font-semibold text-[#0B2545] underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
+            >
+              Revisar datos para continuar
+            </button>
+          )}
 
           <p className="flex items-center gap-1 text-center text-xs leading-tight text-slate-400">
             <svg className="h-3 w-3 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

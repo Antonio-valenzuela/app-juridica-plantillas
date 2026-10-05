@@ -109,10 +109,13 @@ export async function POST(req: NextRequest) {
       report = prepared.report;
     } catch (error) {
       if (isExportGuardError(error)) {
+        const sourceOnly = error.result.errors.some(item => item.startsWith('SOURCE_DOCUMENT_NOT_GENERATED:'));
         return NextResponse.json({
           ok: false,
           error: error.code,
-          friendlyMessage: 'El documento no pasó el contrato común de exportación.',
+          friendlyMessage: sourceOnly
+            ? 'El archivo cargado todavía es la fuente del expediente. Genera primero el escrito solicitado; no se descargó una copia de la sentencia como borrador.'
+            : 'El documento no pasó el contrato común de exportación.',
           details: error.result.errors,
           warnings: error.result.warnings,
         }, { status: 422 });

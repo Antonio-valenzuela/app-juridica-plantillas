@@ -98,3 +98,56 @@ FINAL  → PASS técnico + aprobación humana + gates del documento concreto
 - Constitución: `.specify/memory/constitution.md` (v1.0.0).
 - Comandos: `/speckit.specify|plan|tasks|implement|converge`,
   `/speckit.bug-assess|bug-fix|bug-test`, `/speckit.agent-context.update`.
+---
+
+## ACTUALIZACIÓN 2026-10-05 — generator-quality-evidence-closure (PARTIAL)
+
+### P0-A: fuga de UI del LocalProvider a escritos jurídicos
+
+`lib/ai/providers/local.ts` es a la vez asistente de chat y fallback de generación.
+`isPageQuery` marcaba `message.includes("sección")` como consulta de pantalla y
+devolvía ayuda de UI dentro de prompts jurídicos.
+
+**Reproducido**: un prompt con "sección" filtraba 6/6 patrones
+("Resumen de la pantalla actual", "Panel Principal", "Jurídico Radar",
+"Te encuentras en", "Dashboard", "Inteligencia Regulatoria").
+
+**Corregido**: `AIRequest.purpose: 'UI_ASSISTANT' | 'LEGAL_GENERATION'`.
+Con `LEGAL_GENERATION` el LocalProvider NUNCA devuelve UI: devuelve
+`PROVIDER_UNAVAILABLE` (`success:false`, `origin:'PROVIDER_UNAVAILABLE'`) con el
+marcador seed
+`[REQUIERE DESARROLLO JURÍDICO: PENDIENTE DE GENERACIÓN — proveedor de IA no disponible (PROVIDER_UNAVAILABLE)]`.
+Marcado con `purpose` en `pipeline.ts:1549`, `generationTasks.ts:1440/1510/1661`,
+`issueScopedGeneration.ts:1453`. Sin `purpose` el chat conserva su comportamiento.
+Tests: `tests/ai/localProviderLegalIsolation.test.ts` 5/5.
+
+### PASS honesto: 265 PASS + 12 FAIL (antes 277 PASS falsos)
+
+`computeFunctionalStatus(id, productStatus)` devuelve FAIL para
+`REQUIRES_OFFICIAL_FORM` y `ASSISTED_DRAFT`: un tipo no generable por routing no
+puede ser PASS de generación. `capabilities.draft` deriva de
+`canGenerateDocumentDraft()`.
+
+```
+VISIBLE 277 · CANONICAL 221 · VARIANTES 56 · ALIASES 3
+IMPLEMENTED 265 · IMPLEMENTED_BUT_UNCERTIFIED 12 · NOT_IMPLEMENTED 0
+FUNCTIONAL PASS 265 · FUNCTIONAL FAIL 12 · DRAFT CAPABLE 265
+INCONSISTENTES (draftable && !PASS) = 0
+ORPHANS 0 · DUP IDS 0 · FALLBACKS INCORRECTOS 0 · SECTIONS VACÍAS 0
+```
+
+### ADVERTENCIA — el snapshot ya NO es evidencia
+
+`lib/catalog/writingTypeEvidence.generated.ts` sigue marcando 277/277.
+**No usarlo** hasta que exista el generador único (§8) y el test
+`LIVE EVIDENCE === SNAPSHOT`.
+
+### Pendiente de esta fase
+
+§4 admission guard `UI_ASSISTANT_CONTENT_LEAK` · §5 redefinir PASS (hechos,
+prestaciones, derecho, excepciones, anti-boilerplate) · §6 DOCX body real vía
+mammoth · §7 texto PDF con pdf-parse · §8 snapshot reproducible ·
+§10 ACCEPTS_ANY + default deny · §11 Apelación end-to-end · §12 `npm ci` limpio ·
+§13 fixtures versionados · §23 build/E2E.
+
+FINAL HUMAN APPROVAL WORKFLOW = FOLLOW-UP. FINAL sigue fail-closed.

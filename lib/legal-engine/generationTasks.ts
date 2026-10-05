@@ -1437,6 +1437,7 @@ export async function executeGenerationTask(
   try {
     // ── Pase 1 ──────────────────────────────────────────────────────────────
     const aiRes = await runFastMode({
+      purpose: 'LEGAL_GENERATION' as const,
       systemPrompt,
       userMessage,
       mode: 'fast',
@@ -1506,6 +1507,7 @@ export async function executeGenerationTask(
             ].join('\n');
 
         const contRes = await runFastMode({
+      purpose: 'LEGAL_GENERATION' as const,
           systemPrompt,
           userMessage: continuationUserMessage,
           mode: 'fast',
@@ -1656,6 +1658,7 @@ export async function executeGenerationTask(
       const revisionPrompt = buildTargetedRevisionPrompt(task, block, evaluation);
 
       const revRes = await runFastMode({
+      purpose: 'LEGAL_GENERATION' as const,
         systemPrompt: revisionPrompt.systemInstruction,
         userMessage: revisionPrompt.userMessage,
         mode: 'fast',

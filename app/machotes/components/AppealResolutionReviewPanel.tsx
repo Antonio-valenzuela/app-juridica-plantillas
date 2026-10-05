@@ -16,7 +16,12 @@ export function AppealResolutionReviewPanel({ review, onChange, disabled }: { re
     const m = line.match(/^(actor|demandado):\s*(.+)$/i);
     return m && resolution ? [{ role: m[1].toLowerCase() as 'actor' | 'demandado', name: m[2].trim(), origin: resolution.parties.find(p => p.name === m[2].trim())?.origin || { sourceId: resolution.sourceId, page: resolution.startPage, excerpt: 'APORTADO_POR_ABOGADO', start: -1, end: -1 } }] : [];
   });
-  const notification = notificationDate.trim() && bulletin.trim() ? `${notificationDate} · Boletín ${bulletin}` : '';
+  // La notificación se acredita con la FECHA. El boletín/folio es un dato
+  // opcional: exigirlo dejaba el happy path bloqueado para toda resolución
+  // notified por un medio sin boletín (casi la mayoría).
+  const notification = notificationDate.trim()
+    ? [notificationDate.trim(), bulletin.trim() ? `Boletín ${bulletin.trim()}` : 'Medio y fecha confirmados por el abogado'].join(' · ')
+    : '';
   const confirmation: AppealConfirmation = { sourceFingerprint: review.sourceFingerprint, resolutionId: selection, parties, representedNames, recipient, notification, resolutionDate, confirmed: true };
   const canConfirm = validateAppealConfirmation(review, confirmation).eligible;
   const invalidate = () => { setConfirmed(false); onChange(undefined); };
@@ -40,7 +45,7 @@ export function AppealResolutionReviewPanel({ review, onChange, disabled }: { re
       </div>
       <label className="block text-sm">Autoridad destinataria propuesta — confirmar competencia<input aria-label="Autoridad destinataria" className="block w-full border rounded p-2" value={recipient} onChange={e => { invalidate(); setRecipient(e.target.value); }} /></label>
       <label className="block text-sm">Fecha de notificación — lectura legible o dato del abogado<input aria-label="Fecha de notificación" className="block w-full border rounded p-2" value={notificationDate} onChange={e => { invalidate(); setNotificationDate(e.target.value); }} /></label>
-      <label className="block text-sm">Boletín de notificación<input aria-label="Boletín de notificación" className="block w-full border rounded p-2" value={bulletin} onChange={e => { invalidate(); setBulletin(e.target.value); }} /></label>
+      <label className="block text-sm">Boletín o folio de notificación (opcional si la notificación se acreditó por otro medio)<input aria-label="Boletín de notificación" className="block w-full border rounded p-2" value={bulletin} onChange={e => { invalidate(); setBulletin(e.target.value); }} /></label>
       <p className="text-sm text-amber-800">Oportunidad/plazo: [A VERIFICAR]. Confirmar datos no verifica la regla legal ni acredita oportunidad.</p>
       <label className="block text-sm"><input type="checkbox" aria-label="Confirmar partes, resolución, destinatario y notificación" disabled={!canConfirm} checked={confirmed} onChange={e => { setConfirmed(e.target.checked); onChange(e.target.checked ? confirmation : undefined); }} /> Confirmo estos datos y la parte representada.</label>
     </fieldset>}

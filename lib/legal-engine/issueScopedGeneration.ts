@@ -1450,6 +1450,7 @@ export async function executeIssueScopedGeneration(
     };
     const request = {
       systemPrompt: activePrompt.systemPrompt,
+      purpose: 'LEGAL_GENERATION' as const,
       userMessage: activePrompt.userMessage,
       legalContext: requestPack,
       contextHash: pack.contextHash,

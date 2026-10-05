@@ -26,7 +26,7 @@ describe('estado de tipos presentado al abogado', () => {
     expect(screen.queryByText(/acreditados/)).toBeNull();
     // El texto profesional sí está.
     expect(screen.getByText(/disponibles para borrador/i)).toBeTruthy();
-    expect(screen.getByText(/revisión jurídica/i)).toBeTruthy();
+    expect(screen.getAllByText(/revisión jurídica/i).length).toBeGreaterThan(0);
   });
 
   it('la vista normal NO imprime la lista técnica de tipos', () => {
@@ -36,11 +36,15 @@ describe('estado de tipos presentado al abogado', () => {
     expect(screen.queryAllByTestId('writing-type-status')).toHaveLength(0);
   });
 
-  it('los 277 tipos con PASS no se listan como "en desarrollo"', () => {
+  it('los tipos con PASS no se listan como "en desarrollo" (contrato 265/12)', () => {
     const identities = visibleWritingTypes();
     expect(identities.length).toBe(277);
     const functionalPass = identities.filter(identity => identity.functionalStatus === 'PASS');
-    expect(functionalPass.length).toBe(identities.length);
+    const functionalFail = identities.filter(identity => identity.functionalStatus === 'FAIL');
+    // Contrato honesto: 265 PASS + 12 no generables por estado de producto.
+    expect(functionalPass.length).toBe(265);
+    expect(functionalFail.length).toBe(12);
+    expect(functionalPass.length + functionalFail.length).toBe(identities.length);
     // PASS => nunca aparece como FAIL ni exige el toggle de "en desarrollo".
     for (const identity of functionalPass) {
       expect(describeWritingAvailability(identity.functionalStatus, identity.humanReview).tone).toBe('success');

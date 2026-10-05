@@ -488,15 +488,19 @@ export function CaseDocumentsReader({
       });
     }
   } else {
-    // Requisitos EXCLUSIVOS de Contestación. La fuente judicial no aparece
-    // aquí: se reporta como aviso con opción de cambiar a Apelación.
+    // Requisitos EXCLUSIVOS de Contestación.
+    // Una resolución judicial NO permite contestar una demanda: es una fuente
+    // incompatible y por tanto un blocker real y visible. El mensaje ofrece
+    // cambiar a Apelación, que es la vía correcta para impugnar.
+    if (judgmentSourceNeedsAppeal) {
+      generationBlockers.push({
+        code: 'SOURCE_DOCUMENT_INCOMPATIBLE', flow: 'contestacion', actionable: true, step: 1,
+        label: 'Este documento parece ser una resolución judicial, no una demanda. Para elaborar una contestación carga la demanda. Si deseas impugnar esta resolución, cambia a Apelación.',
+      });
+    }
     const contestacionReason = getContestacionesGenerationBlockReason({
       hasDocument: Boolean(selectedDoc),
-      // Con una fuente judicial el veto de compatibilidad se muestra como aviso
-      // con opción de cambiar a Apelación; la incompatibilidad real la sigue
-      // aplicando el gate de servidor (sourceOutputCompatibility), que es
-      // fail-closed. La UI no duplica ese bloqueo.
-      compatible: judgmentSourceNeedsAppeal ? true : currentDocCompatibility.compatible,
+      compatible: effectiveCompatible,
       compatibilityReason: currentDocCompatibility.reason,
       generationMode,
       hasCompatibleTemplate: compatibleMachotes.length > 0,
@@ -548,6 +552,28 @@ export function CaseDocumentsReader({
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
     });
+  };
+
+  const handleReviewGenerationRequirements = () => {
+    const firstBlocker = generationBlockers[0];
+    if (firstBlocker?.code === 'SOURCE_DOCUMENT_MISSING') {
+      onUploadNewDocument?.();
+      return;
+    }
+
+    const target = isAppealFlow
+      ? document.querySelector<HTMLElement>('[aria-label="Confirmación de apelación"]')
+      : firstBlocker?.code === 'SOURCE_DOCUMENT_INCOMPATIBLE'
+        ? document.querySelector<HTMLElement>('[data-testid="source-incompatible-notice"]')
+        : firstBlocker?.code === 'TYPE_NOT_DRAFT_CAPABLE'
+          ? document.querySelector<HTMLElement>('[aria-label="En desarrollo (sin certificar)"]')
+          : document.querySelector<HTMLElement>('[data-testid="contestaciones-config-panel"]');
+
+    target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    const firstControl = target?.matches('input, select, textarea, button')
+      ? target
+      : target?.querySelector<HTMLElement>('input:not([type="checkbox"]), select, textarea, button');
+    firstControl?.focus({ preventScroll: true });
   };
 
   return (
@@ -987,10 +1013,10 @@ export function CaseDocumentsReader({
             disabled={isGenerating}
           />
 
-          {isJudgmentSource && !selectedOutputIsAppeal && (
-            <section role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-              <p className="font-bold">La fuente es una sentencia o resolución, no una demanda.</p>
-              <p className="mt-1">Para contestar, carga la demanda. Si buscas impugnar esta resolución, cambia a Apelación y confirma sus datos antes de generar.</p>
+          {judgmentSourceNeedsAppeal && (
+            <section role="alert" data-testid="source-incompatible-notice" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <p className="font-bold">Este documento parece ser una resolución judicial, no una demanda.</p>
+              <p className="mt-1">Para elaborar una contestación carga la demanda. Si deseas impugnar esta resolución, cambia a Apelación.</p>
               <button
                 type="button"
                 className="mt-2 rounded-lg border border-amber-400 bg-white px-3 py-1.5 font-semibold"
@@ -1021,7 +1047,10 @@ export function CaseDocumentsReader({
             // Una incompatibilidad que ya se reporta como aviso (p. ej. fuente
             // judicial en Contestación, con opción de cambiar a Apelación) no
             // puede seguir deshabilitando por la vía oculta.
-            isIncompatible={!effectiveCompatible && !judgmentSourceNeedsAppeal}
+            // La incompatibilidad YA es un blocker visible (SOURCE_DOCUMENT_INCOMPATIBLE /
+            // CONTESTACION_REQUIREMENT): no puede seguir duplicando el disable.
+            isIncompatible={false}
+            onReviewRequirements={handleReviewGenerationRequirements}
             onGenerate={handleTriggerGenerate}
             onOpenEditor={onOpenEditor}
           />

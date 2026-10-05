@@ -3,10 +3,25 @@ export type AIResponseOrigin =
   | "AI_GENERATED_LEGAL_CONTENT"
   | "LOCAL_PLACEHOLDER"
   | "DETERMINISTIC_FALLBACK"
+  /** P0-A: generación jurídica sin provider externo; queda como pendiente. */
+  | "PROVIDER_UNAVAILABLE"
   | "USER"
   | "SOURCE_DIRECT";
 
 export interface AIRequest {
+  /**
+   * Propósito EXPRESO de la llamada. `UI_ASSISTANT` es el chat/asistente de la
+   * interfaz; `LEGAL_GENERATION` es redacción jurídica.
+   *
+   * El LocalProvider sirve para ambos. Sin esta distinción contractual, un
+   * prompt jurídico que contiene palabras como "sección", "pantalla" o "página"
+   * caía en la respuesta de ayuda de pantalla y esa ayuda terminaba dentro de
+   * un escrito jurídico (P0).
+   *
+   * Ante la ausencia de `purpose` se conserva el comportamiento histórico
+   * (asistente de interfaz) para no alterar el chat existente.
+   */
+  purpose?: "UI_ASSISTANT" | "LEGAL_GENERATION";
   /** Per-request external transfer consent, independent of case privacy classification. */
   externalProviderOptIn?: boolean;
   /** Defaults to true; remains true for private case material even with explicit external consent. */

@@ -5213,6 +5213,20 @@ textarea:disabled {
   background: var(--lex-workspace-canvas) !important;
 }
 
+/* Contestaciones tiene un solo scroll de página, dentro del workspace.
+   El header global ya ocupa su espacio mediante padding-top; permitir además
+   que el documento crezca genera una segunda barra paralela en el navegador. */
+.appshell-content[data-active-tab="responses_resources"] {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.machotes-shell[data-active-tab="responses_resources"] .machotes-main-scroll {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
 .appshell-content .machotes-shell .contestaciones-document-preview {
   height: min(72vh, 760px) !important;
   min-height: clamp(360px, 52vh, 600px) !important;

@@ -1546,6 +1546,7 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
       const SECTION_TIMEOUT_MS = Number(process.env.SECTION_AI_TIMEOUT_MS) || 60000;
       const providerRequest = {
         systemPrompt: 'Eres el Motor Forense de Análisis y Redacción Jurídica de Jurídico Radar. Trabajas por bloques jurídicos, no por fragmentos aislados.',
+      purpose: 'LEGAL_GENERATION' as const,
         userMessage: prompt,
         mode: 'fast' as const,
         taskType: 'SECTION_SUPPORT',

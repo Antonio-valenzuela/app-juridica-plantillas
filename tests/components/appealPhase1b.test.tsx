@@ -50,6 +50,24 @@ it('1.3 uses Spanish confirmation text, never internal status codes', () => {
   expect(container.textContent).not.toContain('CONFIRMED');
   expect(screen.getByText(/Selecciona la resolución que vas a impugnar/)).toBeTruthy();
 });
+it('1.3a directs the blocked appeal action to its confirmation without generating', () => {
+  const previousDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+  const generate = vi.fn();
+  try {
+    const { container } = render(<CaseDocumentsReader {...props} onGenerateResponse={generate} />);
+    choose(container, 'apelacion_civil');
+    const generateButton = screen.getByRole('button', { name: /Generar apelación/ }) as HTMLButtonElement;
+    expect(generateButton.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Revisar datos para continuar' }));
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+    expect(generate).not.toHaveBeenCalled();
+  } finally {
+    if (previousDescriptor) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previousDescriptor);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  }
+});
 it('1.4 labels only appeals as appeals', () => {
   const { container } = render(<CaseDocumentsReader {...props} />); choose(container, 'apelacion_civil');
   expect(screen.getByText('Configuración de la apelación')).toBeTruthy();
@@ -58,15 +76,25 @@ it('1.4 labels only appeals as appeals', () => {
   expect(screen.getByText('Configuración de la contestación')).toBeTruthy();
   expect(screen.getByRole('button', { name: /Generar contestación/ })).toBeTruthy();
 });
-it('2 leaves no appeal requirement on a response, and requires fresh confirmation when returning', () => {
+it('2 leaves no appeal requirement on a response, and blocks the response on the real source mismatch', () => {
   const { container } = render(<CaseDocumentsReader {...props} />); choose(container, 'apelacion_civil'); confirm();
   choose(container, 'contestacion_demanda_civil');
+  // Sin residuos del flujo de apelación.
   expect(screen.queryByText('Resoluciones detectadas')).toBeNull();
   expect(screen.queryByLabelText('Confirmación de apelación')).toBeNull();
   const field = screen.getByPlaceholderText(/Ej. Elabora recurso/);
   fireEvent.change(field, { target: { value: 'Contestar conforme a la instrucción expresa del abogado.' } });
-  expect(screen.queryByText('Requerimiento pendiente')).toBeNull();
-  expect((screen.getByRole('button', { name: /Generar contestación/ }) as HTMLButtonElement).disabled).toBe(false);
+  // Contrato vigente: una resolución judicial NO es compatible con una
+  // contestación de demanda. El bloqueo debe ser el de FUENTE, no uno de
+  // apelación: ese es el requisito de aislamiento que este test protege.
+  const alert = screen.getByRole('alert');
+  expect(alert).toBeTruthy();
+  expect(alert.textContent).toMatch(/resoluci[óo]n judicial, no una demanda/i);
+  expect(alert.textContent).toMatch(/cambia a Apelaci[óo]n/i);
+  expect(alert.textContent).not.toMatch(/Resoluciones detectadas|confirmaci[óo]n de apelaci[óo]n/i);
+  const contestacionButton = screen.getByRole('button', { name: /Generar contestación/ }) as HTMLButtonElement;
+  expect(contestacionButton.disabled).toBe(true);
+  // Al volver a Apelación el requisito exclusive vuelve a ser el de apelación.
   choose(container, 'apelacion_civil');
   expect(screen.getByText('Requerimiento pendiente')).toBeTruthy();
   expect((screen.getByRole('button', { name: /Generar apelación/ }) as HTMLButtonElement).disabled).toBe(true);
@@ -85,7 +113,13 @@ it('2 does not send an appeal contract in a response request', () => {
   const generate = vi.fn(); const { container } = render(<CaseDocumentsReader {...props} onGenerateResponse={generate} />);
   choose(container, 'apelacion_civil'); choose(container, 'contestacion_demanda_civil');
   fireEvent.change(screen.getByPlaceholderText(/Ej. Elabora recurso/), { target: { value: 'Contestar conforme a la instrucción expresa del abogado.' } });
+  // Aislamiento: el flujo de contestación NO puede arrastrar el contrato de
+  // apelación. Con una resolución judicial la respuesta está bloqueada, así
+  // que además no se emite ninguna petición.
+  expect(screen.queryByLabelText('Confirmación de apelación')).toBeNull();
+  expect(screen.queryByText('Resoluciones detectadas')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /Generar contestación/ }));
-  expect(generate).toHaveBeenCalledOnce();
-  expect(generate.mock.calls[0][0]).not.toHaveProperty('appealConfirmation');
+  expect(generate).not.toHaveBeenCalled();
+  // Y al pasar a Apelación, la respuesta anterior tampoco generó contrato.
+  expect(generate.mock.calls.flatMap(call => Object.keys(call[0] || {}))).not.toContain('appealConfirmation');
 });

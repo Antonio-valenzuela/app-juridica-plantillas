@@ -73,14 +73,27 @@ export interface CatalogSearchResult {
 const FUNCTIONAL_STATUS_OVERRIDES: Readonly<Record<string, FunctionalStatus>> = Object.freeze({});
 const HUMAN_REVIEW_OVERRIDES: Readonly<Record<string, HumanReviewStatus>> = Object.freeze({});
 
+const NON_GENERABLE_BY_CONTRACT = new Set(['REQUIRES_OFFICIAL_FORM', 'ASSISTED_DRAFT']);
+
 /** EVIDENCIA → EVALUADOR → functionalStatus (sin overrides). */
-export function computeFunctionalStatus(id: string): FunctionalStatus {
+export function computeFunctionalStatus(id: string, productStatus?: CatalogStatus): FunctionalStatus {
   const override = FUNCTIONAL_STATUS_OVERRIDES[id];
   if (override) return override;
+  // P1-D, contrato único: un tipo NO generable por contrato de producto
+  // (REQUIRES_OFFICIAL_FORM / ASSISTED_DRAFT) no puede ser PASS de generación.
+  // Sin esta regla el catálogo anunciaba PASS y draftable mientras el routing
+  // respondía DOCUMENT_TYPE_NOT_IMPLEMENTED: tres verdades incompatibles.
+  const status = productStatus ?? builtStatusById.get(id);
+  if (status && NON_GENERABLE_BY_CONTRACT.has(status)) return 'FAIL';
   return WRITING_TYPE_EVIDENCE[id] === true ? 'PASS' : 'FAIL';
 }
 
-export function functionalStatusBlockers(id: string): readonly string[] {
+const builtStatusById = new Map<string, CatalogStatus>();
+
+export function functionalStatusBlockers(id: string, productStatus?: CatalogStatus): readonly string[] {
+  const status = productStatus ?? builtStatusById.get(id);
+  if (status === 'REQUIRES_OFFICIAL_FORM') return ['REQUIRES_OFFICIAL_FORM'];
+  if (status === 'ASSISTED_DRAFT') return ['ASSISTED_DRAFT'];
   return WRITING_TYPE_EVIDENCE_BLOCKERS[id] || [];
 }
 
@@ -627,13 +640,14 @@ function buildDocumentIdentifier(id: string): CatalogDocumentIdentifier {
   const template = DocumentTemplates[id];
   const isFamily = FAMILY_IDENTIFIER_IDS.has(id);
   const label = LEGACY_LABELS[id] || labelFromId(id);
-const base: CatalogDocumentBase = {
+  const productStatus: CatalogStatus = OFFICIAL_FORM_IDS.has(id) ? 'REQUIRES_OFFICIAL_FORM' : ASSISTED_DRAFT_IDS.has(id) ? 'ASSISTED_DRAFT' : implementedIds.has(id) ? 'IMPLEMENTED' : 'CATALOG_ONLY';
+  const base: CatalogDocumentBase = {
     id, label, description: template?.objetivoProcesal || `Tipo documental catalogado: ${label}.`, areaId: source.areaId, procedureId: source.procedureId, familyId: source.familyId,
     aliases: id === 'contestacion_demanda_mercantil' ? ['contestación mercantil'] : [], strategyId: template?.tipo || null, templateId: template?.tipo || null,
     implemented: implementedIds.has(id), sourceCompatibility: sourceCompatibilityById.get(id) || null, requiredFields: template?.camposObligatorios || [], requiredSections: template?.estructura || [],
-    functionalStatus: isFamily ? 'NOT_APPLICABLE' : computeFunctionalStatus(id),
+    functionalStatus: isFamily ? 'NOT_APPLICABLE' : computeFunctionalStatus(id, productStatus),
     humanReview: isFamily ? 'NOT_REQUIRED' : HUMAN_REVIEW_OVERRIDES[id] || 'PENDING',
-    functionalStatusReason: isFamily ? undefined : functionalStatusReasonFor(id, computeFunctionalStatus(id)),
+    functionalStatusReason: isFamily ? undefined : functionalStatusReasonFor(id, computeFunctionalStatus(id, productStatus)),
     capabilities: { selectableInContestaciones: contestacionesDocumentTypeIds.has(id) },
     outputFilename: template ? `${label} - {date}.docx` : null, jurisdiction: template?.jurisdiccion || 'según autoridad competente', legalStage: template?.procedimiento || source.procedureLabel,
     partyRole: template?.rolAutor || 'por definir', uiVisibility: 'VISIBLE', status: OFFICIAL_FORM_IDS.has(id) ? 'REQUIRES_OFFICIAL_FORM' : ASSISTED_DRAFT_IDS.has(id) ? 'ASSISTED_DRAFT' : implementedIds.has(id) ? 'IMPLEMENTED' : 'CATALOG_ONLY',
@@ -656,6 +670,8 @@ const aliasIdentifiers: readonly LegacyAlias[] = [
 ];
 const aliasIds = new Set(aliasIdentifiers.map((alias) => alias.id));
 const documentIdentifiers: readonly CatalogDocumentIdentifier[] = [...rowsById.keys()].filter((id) => !aliasIds.has(id)).map(buildDocumentIdentifier).concat(aliasIdentifiers);
+builtStatusById.clear();
+for (const entry of documentIdentifiers) builtStatusById.set(entry.id, entry.status);
 const canonicalDocuments = documentIdentifiers.filter((entry): entry is CanonicalDocumentType => entry.kind === 'DOCUMENT_TYPE');
 const familyIdentifiers = documentIdentifiers.filter((entry): entry is CatalogFamilyIdentifier => entry.kind === 'FAMILY');
 

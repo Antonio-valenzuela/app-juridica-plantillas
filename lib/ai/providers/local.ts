@@ -1,5 +1,12 @@
 import type { AIHealthResult, AIProvider, AIProviderResult, AIRequest } from "./types";
 
+/**
+ * Marcador canónico del proyecto para "no se pudo generar": es un seed marker,
+ * por lo que QualityGate / exportGuards bloquean FINAL mientras exista.
+ */
+export const PROVIDER_UNAVAILABLE_PENDING =
+  "[REQUIERE DESARROLLO JURÍDICO: PENDIENTE DE GENERACIÓN — proveedor de IA no disponible (PROVIDER_UNAVAILABLE)]";
+
 export class LocalProvider implements AIProvider {
   readonly id = "local" as const;
 
@@ -9,6 +16,31 @@ export class LocalProvider implements AIProvider {
 
   async generate(request: AIRequest): Promise<AIProviderResult> {
     const startTime = Date.now();
+
+    // P0-A: generación jurídica NUNCA se resuelve con texto enlatado ni con
+    // ayuda de interfaz. Sin provider externo no hay redacción jurídica: se
+    // devuelve un resultado estructurado PROVIDER_UNAVAILABLE que el pipeline
+    // materializa como pendiente explícito. El contenido determinístico real
+    // (datos del expediente, partes, plantilla, encabezados) se produce en el
+    // pipeline, no aquí.
+    if (request.purpose === "LEGAL_GENERATION") {
+      return {
+        provider: this.id,
+        model: "local-deterministic-rules-v1",
+        success: false,
+        content: PROVIDER_UNAVAILABLE_PENDING,
+        latencyMs: Date.now() - startTime,
+        warnings: [
+          "PROVIDER_UNAVAILABLE: no hay proveedor de IA externo disponible para generación jurídica; el bloque queda como pendiente explícito.",
+        ],
+        providerRequested: "nvidia",
+        providerActuallyUsed: "none",
+        fallbackReason: "PROVIDER_UNAVAILABLE",
+        origin: "PROVIDER_UNAVAILABLE",
+        isLegalAiContent: false,
+      };
+    }
+
     const message = request.userMessage.toLowerCase();
     const docContext = request.legalContext || {};
     const pageContext = docContext.pageContext || {};
