@@ -4,7 +4,7 @@ Actualizado: 2026-10-05. Bug activo: `.specify/bugs/contestaciones-ui-generation
 
 ## Objetivo
 
-Motor legal de escritorio (Next.js 16 App Router + Prisma/Neon + Vitest) que redacta
+Motor legal de escritorio (Next.js 16 App Router + Prisma/SQLite local (antes Neon; migrado en Fase 1, 2026-10-13) + Vitest) que redacta
 escritos jurídicos con metodología de la Guía Operativa LEX PLANTILLAS, gates de
 calidad fail-closed y ciclo DRAFT/FINAL.
 

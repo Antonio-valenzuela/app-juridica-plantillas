@@ -61,7 +61,10 @@ export function markUnverifiedAuthorityReferences(input: {
     // X"), que es lo que convierte la cita en proposición de derecho cierto.
     // Una afirmación sustantiva del abogado ("…regula los efectos aplicables")
     // se conserva para su revisión: marcarla no es borrarla.
-    const tail = input.text.slice(reference.end);
+    // La cola se toma del texto YA marcado: se procesa de atrás hacia adelante y los marcados
+    // posteriores viven después de `reference.end`. Leer `input.text` descartaba esos marcados
+    // y dejaba sin marcar todas las citas de un bloque salvo la primera.
+    const tail = markedText.slice(reference.end);
     const stop = tail.search(/[.!?;\n]/);
     const clause = stop === -1 ? tail : tail.slice(0, stop);
     const assertsRule = /\b(?:establece|dispone|ordena|exige|prev[eé]|determina|regula|impone|obliga|se\s+conoce|se\s+entiende|se\s+contiene)\s+que\b/i.test(clause);

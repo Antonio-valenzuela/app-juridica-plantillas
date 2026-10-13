@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { extractAppealResolutionReview, isCivilFamilyAppeal, validateAppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
+import { extractAppealResolutionReview, isCivilFamilyAppeal, resolveAppealGeneration } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { z } from 'zod';
 import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { UploadedSourceDocument, UniversalLegalDocument, CaseWorkflow } from '@/lib/legal-engine/types';
@@ -21,7 +21,9 @@ import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
 import { getGenerationJobDeadlineMs } from '@/lib/legal-engine/generationDeadline';
 import { resolveDraftDepthProfile } from '@/lib/legal-engine/draftDepth';
 import { generationExtensionForDraftDepth } from '@/lib/legal-engine/generationExtension';
+import { PageTargetValidationError, parsePageTarget, tryParsePageTarget, type PageTarget } from '@/lib/legal-engine/pageTarget';
 import { explicitExternalProviderConsent, scopeConsentIdempotencyKey } from '@/lib/ai/caseProviderConsent';
+import { getUncertifiedDraftAcknowledgementError } from '@/lib/legal-engine/uncertifiedDraftAcknowledgement';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -73,6 +75,7 @@ function buildFingerprintFromBody(body: any, sourcesArr: UploadedSourceDocument[
     expediente: expedienteFromBody || expedienteFromPrompt || '',
     partiesHash,
     draftDepth: body.draftDepth as 'PROFESSIONAL_20' | 'EXTENSIVE_40' | undefined,
+    pageTargetPages: body.pageTarget === undefined ? undefined : tryParsePageTarget(body.pageTarget)?.pages,
     externalProviderOptIn: explicitExternalProviderConsent(body.externalProviderOptIn),
   });
 }
@@ -125,9 +128,15 @@ export async function POST(req: NextRequest) {
   const requiresAppealConfirmation = isCivilFamilyAppeal(body.selectedDocumentType || body.taxonomy?.documentType || body.documentType);
   if (requiresAppealConfirmation) {
     const review = extractAppealResolutionReview(Array.isArray(body.sourceDocuments) ? body.sourceDocuments : []);
-    if (!validateAppealConfirmation(review, body.appealConfirmation).eligible) {
-      return NextResponse.json({ ok: false, errorCode: 'NEEDS_USER_INPUT', state: 'NEEDS_USER_INPUT', message: 'Confirma partes, resolución, destinatario y notificación antes de generar.' }, { status: 422 });
+    const confirmation = resolveAppealGeneration(review, body.appealConfirmation);
+    if (!confirmation.canGenerate) {
+      return NextResponse.json({ ok: false, errorCode: 'NEEDS_USER_INPUT', state: 'NEEDS_USER_INPUT', message: 'Confirma expediente, partes, resolución, destinatario y notificación antes de generar.' }, { status: 422 });
     }
+    // El expediente que llega al pipeline proviene del mismo objeto cuya
+    // huella y confirmación explícita fueron validadas, no de un campo paralelo.
+    const confirmedExpediente = String(body.appealConfirmation?.expediente || '').trim();
+    // Solo el expediente de la propia confirmación; un campo paralelo (posible expediente ajeno) nunca se confía.
+    body.expediente = confirmedExpediente && !confirmedExpediente.startsWith('[') ? confirmedExpediente : undefined;
   }
 
   let draftDepth: 'PROFESSIONAL_20' | 'EXTENSIVE_40' | undefined;
@@ -142,6 +151,20 @@ export async function POST(req: NextRequest) {
         ok: false,
         errorCode: 'INVALID_DRAFT_DEPTH',
         message: 'Selecciona una profundidad de redacción válida.',
+      }, { status: 400 });
+    }
+  }
+
+  // Meta de extensión (5/10/20/40/personalizada): se valida en el servidor; nunca se confía en el cliente.
+  let pageTarget: PageTarget | undefined;
+  if (body.pageTarget !== undefined) {
+    try {
+      pageTarget = parsePageTarget(body.pageTarget);
+    } catch (error) {
+      return NextResponse.json({
+        ok: false,
+        errorCode: 'INVALID_PAGE_TARGET',
+        message: error instanceof PageTargetValidationError ? error.message : 'Selecciona una extensión válida.',
       }, { status: 400 });
     }
   }
@@ -222,6 +245,15 @@ export async function POST(req: NextRequest) {
   const selectedDocumentType = typeof bodySelectedDocumentType === 'string'
     ? bodySelectedDocumentType.trim().slice(0, 80) || undefined
     : undefined;
+  const requestedTypeId = selectedDocumentType
+    || (typeof taxonomy?.documentType === 'string' ? taxonomy.documentType : undefined);
+  const acknowledgementError = getUncertifiedDraftAcknowledgementError(
+    requestedTypeId,
+    body.uncertifiedDraftAcknowledged,
+  );
+  if (acknowledgementError) {
+    return NextResponse.json({ ok: false, ...acknowledgementError }, { status: 422 });
+  }
 
   const workflowSnapshot = workflow && typeof workflow === 'object'
     ? workflow as CaseWorkflow
@@ -287,6 +319,7 @@ export async function POST(req: NextRequest) {
         userInstruction, sourceDocuments: sourcesArr, allowUnvalidatedSource,
         referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension: effectiveGenerationExtension,
         draftDepth,
+        pageTarget,
         externalProviderOptIn,
       }, {} as any);
       if (owner.desktopOwnerId) await saveGenerationArtifact({ ...owner, document: doc, progress: 100,
@@ -428,6 +461,7 @@ export async function POST(req: NextRequest) {
           jobId: job.jobId,
           generationExtension: effectiveGenerationExtension,
           draftDepth,
+          pageTarget,
           externalProviderOptIn,
         },
         // Bridge: además de callbacks estándar, enganchar progreso real por bloque

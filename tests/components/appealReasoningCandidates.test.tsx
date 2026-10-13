@@ -26,16 +26,19 @@ it('removes candidates when another resolution is selected, without restoring th
   const source = { ...civilReasoningSource, pages: [{ page: 1, text, chars: text.length }, ...civilReasoningSource.pages!] };
   const { container } = render(<CaseDocumentsReader documents={[{ id: source.id, name: 'decisions.pdf', type: 'pdf', status: 'READY', pages: source.pages } as any]} sourceDocs={[source]} onSelectDocument={vi.fn()} />);
   fireEvent.change(screen.getAllByRole('combobox').find(element => element.querySelector('option[value="apelacion_civil"]'))!, { target: { value: 'apelacion_civil' } });
-  const review = within(screen.getByLabelText('Confirmación de apelación'));
-  fireEvent.click(review.getAllByRole('radio')[1]);
+  const resolutions = extractAppealResolutionReview([source]).resolutions;
+  const review = within(screen.getByLabelText('Resolución a impugnar'));
+  // La sentencia (principal) llega preseleccionada; el abogado solo ratifica sus datos.
+  fireEvent.change(review.getByLabelText('Número de expediente detectado'), { target: { value: 'EXP-PRUEBA-1' } });
   fireEvent.click(review.getByRole('checkbox', { name: 'PERSONA ALFA (actor)' }));
   fireEvent.change(review.getByLabelText('Fecha de notificación'), { target: { value: 'Dato manual de prueba' } });
   fireEvent.change(review.getByLabelText('Boletín de notificación'), { target: { value: 'Dato manual de prueba' } });
   fireEvent.click(review.getByRole('checkbox', { name: 'Confirmar partes, resolución, destinatario y notificación' }));
   expect(screen.getByLabelText('Agravios candidatos')).toBeTruthy();
-  fireEvent.click(review.getAllByRole('radio')[0]);
+  const selector = review.getByLabelText('Resolución que se impugna');
+  fireEvent.change(selector, { target: { value: resolutions[0].id } });
   expect(screen.queryByLabelText('Agravios candidatos')).toBeNull();
-  fireEvent.click(review.getAllByRole('radio')[1]);
+  fireEvent.change(selector, { target: { value: resolutions[1].id } });
   expect(screen.queryByLabelText('Agravios candidatos')).toBeNull();
 });
 it('shows a read-only candidate panel only after confirmation, and invalidates it on party/resolution/type changes', () => {
@@ -43,8 +46,8 @@ it('shows a read-only candidate panel only after confirmation, and invalidates i
   const { container, rerender } = render(<CaseDocumentsReader {...props} />);
   fireEvent.change(screen.getAllByRole('combobox').find(element => element.querySelector('option[value="apelacion_civil"]'))!, { target: { value: 'apelacion_civil' } });
   expect(screen.queryByLabelText('Agravios candidatos')).toBeNull();
-  const review = within(screen.getByLabelText('Confirmación de apelación'));
-  fireEvent.click(review.getByRole('radio'));
+  const review = within(screen.getByLabelText('Resolución a impugnar'));
+  fireEvent.change(review.getByLabelText('Número de expediente detectado'), { target: { value: 'EXP-PRUEBA-1' } });
   fireEvent.click(review.getByRole('checkbox', { name: 'PERSONA ALFA (actor)' }));
   fireEvent.change(review.getByLabelText('Fecha de notificación'), { target: { value: 'Dato manual de prueba' } });
   fireEvent.change(review.getByLabelText('Boletín de notificación'), { target: { value: 'Dato manual de prueba' } });

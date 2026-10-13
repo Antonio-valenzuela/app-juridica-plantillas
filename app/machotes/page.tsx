@@ -30,13 +30,14 @@ import { createEmptyDocument } from '@/lib/legal-engine/types';
 import { createSourceDocument } from '@/lib/legal-engine/context';
 import { markDocumentAsDraft, markDocumentAsSource, markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import { analyzeWritingRequest, buildWritingWorkflow } from '@/lib/legal-engine/writingIntake';
-import { extractPartyField, extractAuthorityLabeled, extractInstitutionalAuthority } from '@/lib/legal-engine/partyExtraction';
+import { detectCaseFicha, type CaseFicha } from '@/lib/legal-engine/caseFichaDetection';
 import { useLegalWorkspaceContext } from '@/context/LegalWorkspaceContext';
 import { buildWorkspaceSnapshot, applyLegalEdits } from '@/lib/workspace/legalEditContract';
 import { extractAgendaEvents, readAgendaEvents, synchronizeDocumentAgenda, writeAgendaEvents } from '@/lib/workspace/agenda';
 import { synchronizeWorkspaceAgenda } from '@/lib/workspace/agendaClient';
 import { MATTERS, JURISDICTIONS, DOCUMENT_TYPES, CUSTOM_VALUE_MAX_LENGTH, sanitizeCustomValue } from '@/lib/legal-taxonomy';
 import { canGenerateDocumentDraft, getCatalogDocument, getFunctionalDocumentStatus, getInitialWritingDocumentOptions, getUniversalDocumentTypes } from '@/lib/catalog/legalCatalog';
+import { buildUncertifiedDraftAcknowledgement, requiresUncertifiedDraftAcknowledgement } from '@/lib/legal-engine/uncertifiedDraftAcknowledgement';
 import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
 import { LegalCatalogNavigator } from '@/components/legal-taxonomy/LegalCatalogNavigator';
 import {
@@ -63,6 +64,7 @@ import { createGenerationIdentityFactory } from '@/lib/legal-engine/generationId
 import { WorkspaceModulesView, type WorkspaceModule } from './components/WorkspaceModulesView';
 import type { WorkspaceCaseSummary } from '@/lib/workspace/cases';
 import { getSafeApiErrorMessage, getGenerationErrorPresentation } from '@/lib/apiErrorMessage';
+import { describePageTargetResult, type PageTargetResult } from '@/lib/legal-engine/pageTarget';
 import { compactSourceDocumentsForGeneration, buildContestacionesWorkflowPayload } from '@/lib/legal-engine/generationRequest';
 import { getCachedUploadAnalysis, rememberUploadAnalysis } from '@/lib/uploadAnalysisCache';
 import { toActiveCaseContext } from '@/lib/workspace/activeCaseContext';
@@ -75,17 +77,6 @@ export type LegalWorkspaceMode =
   | 'responses_resources'
   | 'my-templates';
 
-interface CaseFicha {
-  expediente: string;
-  actor: string;
-  demandado: string;
-  abogado: string;
-  autoridad: string;
-  fechas: string;
-  materia: string;
-  tipo: string;
-  confianza: number;
-}
 
 type CasePartyRole =
   | 'actor'
@@ -130,74 +121,6 @@ function computeDraftSignature(doc: UniversalLegalDocument): string {
   return doc.sections
     .map((section) => section.content.map((block) => block.text).join('\u001F'))
     .join('\u001E');
-}
-
-function firstMatch(text: string, patterns: RegExp[]): string {
-  for (const re of patterns) {
-    const m = text.match(re);
-    if (m && m[1] && m[1].trim().length > 1) {
-      return m[1].trim().replace(/[.;:,]*$/, '');
-    }
-  }
-  return '';
-}
-
-function detectCaseFicha(texts: string[]): CaseFicha {
-  const full = texts.join('\n\n');
-
-  const expediente =
-    firstMatch(full, [
-      /(?:expediente|juicio|toca|amparo\s+directo|amparo\s+indirecto|proceso)\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i,
-    ]) || firstMatch(full, [/\b(\d{1,6}\/\d{4})\b/i]);
-
-  // Criterios COMPARTIDOS con el motor (partyExtraction.ts): mismos validadores
-  // anti-fecha / anti-frase-preposicional / anti-cruce-de-oración para que la
-  // ficha y el motor nunca diverjan sobre las mismas partes.
-  const actor =
-    extractPartyField(full, [
-      /(?:actor|parte\s+actora|demandante)\s*[:\-]\s*([^;,\n]{2,90})/i,
-      /(?:quejoso|persona\s+quejosa|parte\s+quejosa|promovente|accionante)\s*[:\-]\s*([^;,\n]{2,90})/i,
-    ]) ||
-    firstMatch(full, [/\b(?:C\.)\s+([A-ZÁÉÍÓÚÑ][a-zÁÉÍÓÚÜÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-zÁÉÍÓÚÜÑ]+)+)/i]) ||
-    '';
-
-  const demandado =
-    extractPartyField(full, [
-      /(?:demandado|parte\s+demandada|tercero\s+interesado)\s*[:\-]\s*([^;,\n]{2,90})/i,
-    ]) || '';
-
-  const abogado =
-    extractPartyField(full, [
-      /(?:abogado\s+(?:patrono|defensor)|apoderado\s+legal|autorizado|representante\s+legal)\s*[:\-]\s*([^;,\n]{2,90})/i,
-    ]) ||
-    firstMatch(full, [/\b(?:Lic\.)\s+([A-ZÁÉÍÓÚÑ][a-zÁÉÍÓÚÜÑ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-zÁÉÍÓÚÜÑ]+)+)/i]) ||
-    '';
-
-  const autoridad =
-    extractAuthorityLabeled(full) ||
-    extractInstitutionalAuthority(full) ||
-    '';
-
-  const fechasMatch = full.match(/(\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})|\b(\d{1,2}\/\d{1,2}\/\d{4})\b/gi);
-  const fechas = fechasMatch ? Array.from(new Set(fechasMatch.map((f) => f.replace(/^,?\s*/, '')))).slice(0, 3).join(' · ') : '';
-
-  let materia = 'Amparo';
-  if (/laboral|trabajador|patr[oó]n|laudo|junta|burocr[áa]tico/i.test(full)) materia = 'Laboral';
-  else if (/amparo|constitucional/i.test(full)) materia = 'Amparo';
-  else if (/mercantil|comercio|cheque|pagar[ée]|t[ií]tulos\s+de\s+cr[ée]dito/i.test(full)) materia = 'Mercantil';
-  else if (/civil|herencia|sucesi[oó]n|obligaciones|contrato/i.test(full)) materia = 'Civil';
-
-  let tipo = 'Amparo Directo';
-  if (/recurso\s+de\s+revisi[oó]n/i.test(full)) tipo = 'Recurso de Revisión';
-  else if (/recurso\s+de\s+queja/i.test(full)) tipo = 'Recurso de Queja';
-  else if (/contestaci[oó]n/i.test(full) && /demanda/i.test(full)) tipo = 'Contestación de Demanda';
-  else if (/amparo\s+directo/i.test(full)) tipo = 'Amparo Directo';
-  else if (/amparo\s+indirecto/i.test(full)) tipo = 'Amparo Indirecto';
-
-  const foundCount = [expediente, actor, demandado, abogado, autoridad, fechas].filter(Boolean).length;
-  const confianza = Math.min(100, Math.round(35 + foundCount * 11));
-
-  return { expediente, actor, demandado, abogado, autoridad, fechas, materia, tipo, confianza };
 }
 
 export default function MachotesPage() {
@@ -1546,6 +1469,7 @@ export default function MachotesPage() {
           referenceDocumentId: generationMode === 'reference_document' ? payload.selectedTemplate?.id : undefined,
           documentTypeLabel: payload.intentLabel || payload.selectedTemplate?.category || undefined,
           selectedDocumentType,
+          uncertifiedDraftAcknowledged: payload.uncertifiedDraftAcknowledged === true,
           caseParties: effectiveCaseParties.length > 0 ? effectiveCaseParties : undefined,
           expediente: payloadExpediente?.trim() || undefined,
           taxonomy: (payload as any).taxonomy || undefined,
@@ -1641,6 +1565,15 @@ export default function MachotesPage() {
       notify('warning', 'Abre un apartado del documento primero.');
       return;
     }
+    const documentTypeId = typeof universalDoc.documentType === 'string' ? universalDoc.documentType : undefined;
+    const acknowledgementRequired = requiresUncertifiedDraftAcknowledgement(documentTypeId);
+    const sectionAcknowledgement = buildUncertifiedDraftAcknowledgement(documentTypeId, acknowledgementRequired
+      ? window.confirm('Este tipo aún no está acreditado. ¿Confirmas regenerar únicamente este apartado como borrador? FINAL seguirá bloqueado.') === true
+      : false);
+    if (acknowledgementRequired && !sectionAcknowledgement) {
+      notify('warning', 'No se regeneró el apartado: falta confirmar el borrador de un tipo no acreditado.');
+      return;
+    }
     setIsUniversalGenerating(true);
     notify('warning', mode === 'reformular' ? 'Reformulando apartado…' : mode === 'ampliar' ? 'Ampliando apartado…' : 'Reduciendo apartado…');
     try {
@@ -1651,6 +1584,7 @@ export default function MachotesPage() {
           document: universalDoc,
           sectionId: activeSection.id,
           instruction: REFINEMENT_INSTRUCTIONS[mode],
+          uncertifiedDraftAcknowledged: sectionAcknowledgement,
         }),
       });
       if (!res.ok) {
@@ -1692,6 +1626,15 @@ export default function MachotesPage() {
   /* ── Regenerar Apartado ───────────────────────────────────────────────── */
   const handleRegenerateSection = async (sectionId: string, instruction?: string) => {
     if (!universalDoc) return;
+    const documentTypeId = typeof universalDoc.documentType === 'string' ? universalDoc.documentType : undefined;
+    const acknowledgementRequired = requiresUncertifiedDraftAcknowledgement(documentTypeId);
+    const sectionAcknowledgement = buildUncertifiedDraftAcknowledgement(documentTypeId, acknowledgementRequired
+      ? window.confirm('Este tipo aún no está acreditado. ¿Confirmas regenerar únicamente este apartado como borrador? FINAL seguirá bloqueado.') === true
+      : false);
+    if (acknowledgementRequired && !sectionAcknowledgement) {
+      notify('warning', 'No se regeneró el apartado: falta confirmar el borrador de un tipo no acreditado.');
+      return;
+    }
     setIsUniversalGenerating(true);
     notify('warning', 'Actualizando apartado con IA...');
 
@@ -1699,7 +1642,7 @@ export default function MachotesPage() {
       const res = await fetch('/api/legal-engine/generate-section', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document: universalDoc, sectionId, instruction }),
+        body: JSON.stringify({ document: universalDoc, sectionId, instruction, uncertifiedDraftAcknowledged: sectionAcknowledgement }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => null);
@@ -1759,6 +1702,7 @@ export default function MachotesPage() {
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
     generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
     draftDepth?: 'PROFESSIONAL_20' | 'EXTENSIVE_40';
+    pageTarget?: { preset?: string; pages?: number };
     uncertifiedDraftAcknowledged?: boolean;
   }) => {
     const userInstructions = typeof request === 'string' ? request : request.userInstructions;
@@ -1768,6 +1712,7 @@ export default function MachotesPage() {
     const generationModeFromUi = typeof request === 'string' ? undefined : request.generationMode;
     const generationExtensionFromUi = typeof request === 'string' ? undefined : request.generationExtension;
     const draftDepthFromUi = typeof request === 'string' ? undefined : request.draftDepth;
+    const pageTargetFromUi = typeof request === 'string' ? undefined : request.pageTarget;
     const referenceDocumentIdFromUi = typeof request === 'string' ? undefined : request.referenceDocumentId;
     const referenceDocumentTextFromUi = typeof request === 'string' ? undefined : request.referenceDocumentText;
     if (!selectedDocumentTypeFromUi || !canGenerateDocumentDraft(selectedDocumentTypeFromUi, uncertifiedDraftAcknowledged)) {
@@ -1779,7 +1724,7 @@ export default function MachotesPage() {
       notify('warning', 'Ya hay una generación en curso. Por favor espera.');
       return;
     }
-    const externalProviderOptIn = window.confirm('Para generar esta contestación se enviará contenido del expediente a Gemini, Groq o NVIDIA. ¿Autorizas ese envío solo para esta generación? El expediente seguirá marcado como privado.');
+    const externalProviderOptIn = window.confirm('Para generar este borrador se enviará contenido del expediente a Gemini, Groq o NVIDIA. ¿Autorizas ese envío solo para esta generación? El expediente seguirá marcado como privado.');
     if (!externalProviderOptIn) {
       notify('warning', 'Generación cancelada: no se autorizó el uso de proveedores externos.');
       return;
@@ -1788,8 +1733,8 @@ export default function MachotesPage() {
     generationOriginTabRef.current = activeNavTab;
     // La barra de progreso es global; el panel de origen permanece visible.
     setIsUniversalGenerating(true);
-    setActiveGenJob({ jobId: '', total: 0, completed: 0, percentage: 0, currentBlock: null, status: 'processing', stage: 'Preparando contestación…' } as any);
-    notify('warning', 'Generando contestación…');
+    setActiveGenJob({ jobId: '', total: 0, completed: 0, percentage: 0, currentBlock: null, status: 'processing', stage: 'Preparando el borrador…' } as any);
+    notify('warning', 'Generando el borrador…');
     const genId2 = generationIdentityFactory.next();
     // A5: partes confirmadas desde el estado local (sin consulta DB en backend).
     const contestacionCaseParties = savedCaseParties
@@ -1839,7 +1784,8 @@ export default function MachotesPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Idempotency-Key': genId2 },
         body: JSON.stringify({
-          userInstruction: userInstructions || 'Redactar contestación de demanda formal y exhaustiva',
+          // Sin instrucciones del abogado la orden por defecto nombra el escrito ELEGIDO, nunca otro tipo.
+          userInstruction: userInstructions || `Redactar el escrito seleccionado${requestedDocumentLabel ? ` (${requestedDocumentLabel})` : ''} de forma formal y exhaustiva, con base en el documento fuente.`,
           sourceDocuments: generationSourceDocuments,
           allowUnvalidatedSource: false,
           referenceDocumentId: effectiveRefId,
@@ -1856,11 +1802,13 @@ export default function MachotesPage() {
           },
           documentTypeLabel: requestedDocumentLabel,
           selectedDocumentType: requestedDocumentType,
+          uncertifiedDraftAcknowledged,
           appealConfirmation: typeof request === 'string' ? undefined : request.appealConfirmation,
           matter: requestedMatter,
           caseParties: contestacionCaseParties.length > 0 ? contestacionCaseParties : undefined,
           generationExtension: generationExtensionFromUi || { generationMode: 'standard' },
           draftDepth: draftDepthFromUi,
+          pageTarget: pageTargetFromUi,
           externalProviderOptIn,
           idempotencyKey: genId2,
         }),
@@ -1881,7 +1829,7 @@ export default function MachotesPage() {
       }
       const jobId = data.jobId as string;
       if (!jobId) throw new Error('JobId no recibido del servidor');
-      const initJob = { jobId, total: data.total ?? 0, completed: 0, percentage: 0, currentBlock: null, status: 'processing', stage: data.stage || 'Preparando contestación…' } as any;
+      const initJob = { jobId, total: data.total ?? 0, completed: 0, percentage: 0, currentBlock: null, status: 'processing', stage: data.stage || 'Preparando el borrador…' } as any;
       setActiveGenJob(initJob);
       try { localStorage.setItem('jr_active_gen_job', JSON.stringify(initJob)); } catch {}
       startGenPolling(jobId);
@@ -2392,8 +2340,9 @@ export default function MachotesPage() {
         .machotes-shell .contestaciones-page-header h1 { margin:0; font-size:28px; line-height:1.15; letter-spacing:-.02em; }
         .machotes-shell .contestaciones-summary-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; }
         .machotes-shell .contestaciones-summary-column { display:flex; flex-direction:column; gap:8px; min-width:0; }
-        .machotes-shell .contestaciones-summary-field { display:grid; grid-template-columns:max-content minmax(0,1fr); align-items:baseline; gap:8px; min-width:0; }
-        .machotes-shell .contestaciones-summary-field-status { align-items:center; }
+        .machotes-shell .contestaciones-summary-field { display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:0; }
+        .machotes-shell .contestaciones-summary-field > * { max-width:100%; min-width:0; }
+        .machotes-shell .contestaciones-summary-field-status { align-items:flex-start; }
         .machotes-shell .contestaciones-layout-grid h2 { margin:0; font-size:16px; line-height:1.25; letter-spacing:0; }
         .machotes-shell .contestaciones-layout-grid h3 { margin:0; font-size:14px; line-height:1.35; letter-spacing:0; }
         .machotes-shell .contestaciones-summary-card { min-height:150px; }
@@ -2675,6 +2624,7 @@ export default function MachotesPage() {
               caseFicha={selectedFicha}
               onSelectDocument={(doc) => setSelectedCaseDoc(doc)}
               onUploadNewDocument={() => fileInputHiddenRef.current?.click()}
+              onUploadTemplate={() => setIsSaveCustomOpen(true)}
                onGenerateResponse={(request) => {
                  handleGenerateContestacion(request || '');
               }}
@@ -3593,6 +3543,16 @@ export default function MachotesPage() {
                   ) : (
           /* TAB 1 / ESCRITOS EN MODO EDITOR: VISOR PAGINADO (toolbar consolidada DENTRO del editor) */
           <div className="flex w-full min-h-0 min-w-0 overflow-hidden flex-col">
+            {(() => {
+              const result = (universalDoc?.generationMetadata as { pageTargetResult?: PageTargetResult } | undefined)?.pageTargetResult;
+              if (!result) return null;
+              return (
+                <p data-testid="page-target-result" role="status" className="lex-help" style={{ margin: '0 0 4px', padding: '4px 12px' }}>
+                  <strong>{describePageTargetResult(result)}</strong>
+                  {result.notice ? ` — ${result.notice}` : ''}
+                </p>
+              );
+            })()}
             <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
               <WorkspaceDocumentEditor
                 document={universalDoc}

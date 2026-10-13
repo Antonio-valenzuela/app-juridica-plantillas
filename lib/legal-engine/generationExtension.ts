@@ -116,7 +116,7 @@ export function resolveGenerationExtensionContract(
     minPages,
     maxPages,
     targetWords: mode === 'extended-legal'
-      ? boundedInteger(input?.targetWords, defaults.targetWords, 4000, 100000)
+      ? boundedInteger(input?.targetWords, defaults.targetWords, 1000, 100000) // 1000: metas de ~2 páginas (selector de extensión)
       : defaults.targetWords,
     maxCallsPerDocument: mode === 'extended-legal'
       ? boundedInteger(input?.maxCallsPerDocument, defaults.maxCallsPerDocument, 1, 100)
@@ -144,6 +144,22 @@ export function isExtendedGeneration(contract?: GenerationExtensionContract | nu
   return contract?.generationMode === 'extended-legal';
 }
 
+/**
+ * Secciones de tamaño estructural: su extensión la fija el contenido obligatorio (identificación,
+ * firma, petitorios; en contestaciones, la respuesta individual a cada hecho y prestación), no una
+ * meta de páginas. No reciben presupuesto discrecional: repartirlo entre ellas dejaba la meta sin
+ * cubrir porque nunca lo consumen.
+ */
+export function isStructuralSection(
+  section: { title?: string; type?: string },
+  options: { responseDocument?: boolean } = {},
+): boolean {
+  if (['header', 'identity', 'petition', 'closing', 'signature'].includes(section.type || '')) return true;
+  const title = (section.title || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  if (/proemio|comparecencia|firma|petitorio|rubro|encabezado|cierre|objeto del escrito/.test(title)) return true;
+  return Boolean(options.responseDocument) && /contestacion de (?:hechos|prestaciones)/.test(title);
+}
+
 function sectionWeight(section: { title?: string; type?: string }): number {
   const key = `${section.title || ''} ${section.type || ''}`.toLowerCase();
   if (/comparec|presentaci|identificaci|firma|cierre|conclusi|petitori|punto.*pet|protesta/.test(key)) return 0.45;
@@ -155,22 +171,26 @@ function sectionWeight(section: { title?: string; type?: string }): number {
 export function allocateSectionWordTargets(
   sections: Array<{ id: string; title?: string; type?: string }>,
   totalWords: number,
+  options: { responseDocument?: boolean; discretionaryOnly?: boolean } = {},
 ): Record<string, number> {
   if (sections.length === 0) return {};
   const safeTotal = Math.max(sections.length * 120, Math.round(totalWords));
-  const weights = sections.map(sectionWeight);
+  const weights = sections.map((section) =>
+    options.discretionaryOnly && isStructuralSection(section, options) ? 0 : sectionWeight(section));
+  if (weights.every((weight) => weight === 0)) return Object.fromEntries(sections.map((section) => [section.id, 120]));
   const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
   const raw = sections.map((section, index) => ({
     id: section.id,
     value: (safeTotal * weights[index]!) / weightTotal,
   }));
-  const floors = raw.map(({ id, value }) => ({ id, value: Math.max(120, Math.floor(value)) }));
+  const floors = raw.map(({ id, value }) => ({ id, value: value === 0 ? 120 : Math.max(120, Math.floor(value)) }));
   let remainder = safeTotal - floors.reduce((sum, item) => sum + item.value, 0);
   const ranked = raw
-    .map((item, index) => ({ index, fraction: item.value - Math.floor(item.value) }))
+    .map((item, index) => ({ index, value: item.value, fraction: item.value - Math.floor(item.value) }))
+    .filter((item) => item.value > 0)
     .sort((left, right) => right.fraction - left.fraction);
   let cursor = 0;
-  while (remainder > 0) {
+  while (remainder > 0 && ranked.length > 0) {
     floors[ranked[cursor % ranked.length]!.index]!.value += 1;
     remainder -= 1;
     cursor += 1;
@@ -182,8 +202,9 @@ export function allocateSectionBudgets(
   sections: Array<{ id: string; title?: string; type?: string }>,
   totalWords: number,
   maxContinuations = 6,
+  options: { responseDocument?: boolean; discretionaryOnly?: boolean } = {},
 ): Record<string, SectionBudget> {
-  const targets = allocateSectionWordTargets(sections, totalWords);
+  const targets = allocateSectionWordTargets(sections, totalWords, options);
   return Object.fromEntries(sections.map((section) => {
     const key = `${section.title || ''} ${section.type || ''}`.toLowerCase();
     const priority: SectionBudget['priority'] = /agravio|defensa|argument|derecho|prueba|fundament/.test(key)

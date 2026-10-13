@@ -8,6 +8,10 @@ import type { UniversalLegalDocument } from '@/lib/legal-engine/types';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
+import {
+  getDraftRegenerationRoutingError,
+  getUncertifiedDraftAcknowledgementError,
+} from '@/lib/legal-engine/uncertifiedDraftAcknowledgement';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -41,6 +45,21 @@ export async function POST(request: NextRequest) {
     const validIds = new Set(reviewRequest.pendingItems.map((item) => item.id));
     const invalid = answers.find((answer: any) => typeof answer?.itemId !== 'string' || !validIds.has(answer.itemId) || typeof answer?.answer !== 'string' || !answer.answer.trim());
     if (invalid) return NextResponse.json({ ok: false, error: 'INVALID_REVIEW_ANSWER', pendingItemIds: [...validIds] }, { status: 400 });
+
+    const triggersSectionRegeneration = answers.some((answer: any) =>
+      reviewRequest.pendingItems.find((item) => item.id === answer.itemId)?.type !== 'FILING_METADATA',
+    );
+    if (triggersSectionRegeneration) {
+      const routingError = getDraftRegenerationRoutingError(document.documentType);
+      if (routingError) return NextResponse.json({ ok: false, ...routingError }, { status: 422 });
+      const acknowledgementError = getUncertifiedDraftAcknowledgementError(
+        document.documentType,
+        body.uncertifiedDraftAcknowledged,
+      );
+      if (acknowledgementError) {
+        return NextResponse.json({ ok: false, ...acknowledgementError }, { status: 422 });
+      }
+    }
 
     const affectedSections = new Set<string>();
     for (const answer of answers) {

@@ -64,7 +64,7 @@ describe('V5 registry-driven family replay — evidence, not automatic accredita
         ...(isAppeal ? { requireAppealConfirmation: true, appealConfirmation: {
           sourceFingerprint: review!.sourceFingerprint, resolutionId: resolution!.id, parties: resolution!.parties,
           representedNames: ['PROMOVENTE SINTÉTICO'], recipient: 'JUZGADO CIVIL SINTÉTICO',
-          notification: 'Fecha y boletín confirmados únicamente para este fixture sintético; plazo [A VERIFICAR].', confirmed: true,
+          notification: 'Fecha y boletín confirmados únicamente para este fixture sintético; plazo [A VERIFICAR].', expediente: 'SINTÉTICO/2026', confirmed: true,
         } } : {}),
         generateSection: ({ section }) => {
           if (/derecho|fundamento|norma/i.test(section.title)) return '[NO VERIFICADO: fundamento jurídico pendiente de fuente oficial aplicable a esta actuación]';

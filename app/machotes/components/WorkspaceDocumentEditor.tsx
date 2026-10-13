@@ -557,7 +557,7 @@ export function WorkspaceDocumentEditor({
             }`}
             title={editLocked ? 'Modo lectura: selección y copia permitidas' : 'Modo edición: el documento completo es editable'}
           >
-            {editLocked ? '🔒 Bloqueado' : '🟢 Habilitado'}
+            {editLocked ? 'Solo lectura' : 'Edición activa'}
           </span>
         </div>
 
@@ -714,6 +714,11 @@ export function WorkspaceDocumentEditor({
 
         {/* ── FILA 2 · DOCUMENTO + IA/CALIDAD/EXPORTACIÓN (+ Volver) ── */}
         <div data-testid="editor-toolbar-row-secondary" className="flex min-w-0 w-full flex-nowrap items-center gap-1.5 overflow-x-auto pt-1 font-sans whitespace-nowrap">
+          {/* Acciones de plantillas y archivo: secundarias, agrupadas en un menú para
+              que no compitan con las acciones principales del borrador. */}
+          <details className="lex-menu lex-menu-start">
+            <summary className="lex-button lex-button-secondary lex-button-compact">Plantillas y archivo</summary>
+            <div className="lex-menu-list" role="menu">
           {/* Botón Subir Machote */}
           <button
             onClick={onTriggerUpload}
@@ -725,10 +730,7 @@ export function WorkspaceDocumentEditor({
             <span>Subir Machote</span>
           </button>
 
-          {document && (
-            <>
-              {/* Botón Guardar Borrador + estado de autoguardado */}
-              {onReopenDraft && (
+              {document && onReopenDraft && (
                 <button
                   onClick={handleReopen}
                   disabled={reopenState === 'loading'}
@@ -739,6 +741,33 @@ export function WorkspaceDocumentEditor({
                   <span>{reopenState === 'loading' ? 'Abriendo...' : 'Reabrir guardado'}</span>
                 </button>
               )}
+              {document && onSaveAsTemplate && (
+                <button
+                  onClick={handleSaveMachoteTemplate}
+                  disabled={isTemplateSaving}
+                  className="py-1.5 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-800 text-xs font-bold shadow-xs transition flex items-center gap-1"
+                  title="Guardar este archivo como plantilla reutilizable"
+                >
+                  <span>📋</span>
+                  <span>{isTemplateSaving ? 'Guardando...' : 'Usar como Machote'}</span>
+                </button>
+              )}
+              {document && onGenerateFromMachote && (
+                <button
+                  onClick={() => onGenerateFromMachote(document)}
+                  className="py-1.5 px-3.5 rounded-xl bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-extrabold shadow-sm transition flex items-center gap-1.5"
+                  title="Redactar un nuevo escrito basado en la estructura de este machote"
+                >
+                  <span>⚡</span>
+                  <span>Generar con Machote</span>
+                </button>
+              )}
+            </div>
+          </details>
+
+          {document && (
+            <>
+              {/* Botón Guardar Borrador + estado de autoguardado */}
               <button
                 onClick={handleSave}
                 disabled={saveState === 'saving' || !onSaveDraft}
@@ -751,31 +780,6 @@ export function WorkspaceDocumentEditor({
                 <span className="text-[10px] font-semibold text-slate-400 whitespace-nowrap" title="Autoguardado del borrador">
                   {autosaveState === 'saving' ? 'Guardando…' : '✓ Auto'}
                 </span>
-              )}
-
-              {/* Botón Usar como Machote / Guardar Plantilla */}
-              {onSaveAsTemplate && (
-                <button
-                  onClick={handleSaveMachoteTemplate}
-                  disabled={isTemplateSaving}
-                  className="py-1.5 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-800 text-xs font-bold shadow-xs transition flex items-center gap-1"
-                  title="Guardar este archivo como plantilla reutilizable"
-                >
-                  <span>📋</span>
-                  <span>{isTemplateSaving ? 'Guardando...' : 'Usar como Machote'}</span>
-                </button>
-              )}
-
-              {/* Botón Generar a partir del Machote */}
-              {onGenerateFromMachote && (
-                <button
-                  onClick={() => onGenerateFromMachote(document)}
-                  className="py-1.5 px-3.5 rounded-xl bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-extrabold shadow-sm transition flex items-center gap-1.5"
-                  title="Redactar un nuevo escrito basado en la estructura de este machote"
-                >
-                  <span>⚡</span>
-                  <span>Generar con Machote</span>
-                </button>
               )}
 
               {/* Revisión de Calidad (Quality Gate) */}
@@ -1058,10 +1062,11 @@ export function WorkspaceDocumentEditor({
                       </div>
 
                       {/* Proemio / Autoridad */}
-                      <div className="flex items-center justify-between text-xs text-slate-800 pt-2">
-                        <span className="font-bold uppercase tracking-wider">C. JUEZ / H. TRIBUNAL</span>
+                      {/* El destinatario real va en el proemio del escrito; aquí solo la fecha de elaboración.
+                          La jurisdicción ("federal", "local") no es un lugar de firma. */}
+                      <div className="flex items-center justify-end text-xs text-slate-800 pt-2">
                         <span className="text-slate-700">
-                          {document.jurisdiction || '—'}, a {new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}
+                          Fecha de elaboración: {new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}
                         </span>
                       </div>
                     </div>

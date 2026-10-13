@@ -103,11 +103,11 @@ export async function GET(request: NextRequest) {
       where.AND = [
         {
           OR: [
-            { title: { contains: q, mode: 'insensitive' } },
-            { category: { contains: q, mode: 'insensitive' } },
-            { description: { contains: q, mode: 'insensitive' } },
-            { content: { contains: q, mode: 'insensitive' } },
-            { legalBasis: { contains: q, mode: 'insensitive' } },
+            { title: { contains: q } },
+            { category: { contains: q } },
+            { description: { contains: q } },
+            { content: { contains: q } },
+            { legalBasis: { contains: q } },
           ],
         },
       ];

@@ -102,6 +102,16 @@ function lineSpacing(lineHeight: unknown): number {
   return Number.isFinite(value) && value >= 1 && value <= 4 ? Math.round(value * 240) : 276;
 }
 
+/** Sangría de primera línea (style.firstLineIndent en pt o em), la misma que aplica el PDF. */
+function firstLineIndentTwips(style: RenderParagraph['style'], role: RenderParagraph['role']): { firstLine: number } | undefined {
+  const match = typeof style?.firstLineIndent === 'string' ? /([\d.]+)\s*(em|pt)?/i.exec(style.firstLineIndent) : null;
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  const points = match[2]?.toLowerCase() === 'pt' ? value : value * (fontSizeInHalfPoints(style.fontSize, role) / 2);
+  return { firstLine: Math.round(points * 20) };
+}
+
 function sanitizeXmlText(text: string): string {
   let output = '';
   for (let index = 0; index < text.length; index += 1) {
@@ -226,7 +236,9 @@ function renderParagraph(paragraph: RenderParagraph, placement: 'BODY' | 'HEADER
     keepNext: paragraph.keepNext,
     keepLines: paragraph.keepTogether,
     pageBreakBefore: paragraph.pageBreakBefore,
-    indent: paragraph.role === 'LIST' ? { left: 360, hanging: 260 } : undefined,
+    indent: paragraph.role === 'LIST'
+      ? { left: 360, hanging: 260 }
+      : firstLineIndentTwips(style, paragraph.role),
   });
 }
 
@@ -307,6 +319,17 @@ function traceParagraphs(model: ExportRenderModel): readonly RenderParagraph[] {
     ...model.sections.flatMap((section) => section.paragraphs),
     ...model.footer,
   ];
+}
+
+function ensureTraceWordAccounting(trace: GenerationTrace): void {
+  const compatibleTrace = trace as GenerationTrace & { wordAccounting?: unknown };
+  if (compatibleTrace.wordAccounting === undefined) {
+    compatibleTrace.wordAccounting = [];
+    return;
+  }
+  if (!Array.isArray(compatibleTrace.wordAccounting)) {
+    throw new TypeError('GENERATION_TRACE_WORD_ACCOUNTING_INVALID');
+  }
 }
 
 function recordTrace(
@@ -392,6 +415,9 @@ export const exportUniversalToDocx = async (
     lawyerProfile,
   });
   const auditTrace = trace || prepared.document.generationMetadata.auditTrace;
-  if (auditTrace) recordTrace(auditTrace, model, artifact.bytes, artifact.manifest);
+  if (auditTrace) {
+    ensureTraceWordAccounting(auditTrace);
+    recordTrace(auditTrace, model, artifact.bytes, artifact.manifest);
+  }
   return Buffer.from(artifact.bytes);
 };

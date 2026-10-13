@@ -4,6 +4,7 @@ import { DEFAULT_LAWYER_PROFILE } from '@/lib/workspace/lawyerProfileTypes';
 import { resolveDocxPageProfile, resolvePdfPageProfile } from '@/lib/legal-engine/exportPageProfiles';
 import { renderDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { PdfExportError, renderPdf } from '@/lib/legal-engine/exportPdfUniversal';
+import { renderableBodyParagraphs } from '@/lib/legal-engine/finalDocumentMaterialization';
 import type {
   ExportRenderModel,
   RenderParagraph,
@@ -123,7 +124,11 @@ function modelBodyText(model: ExportRenderModel): string {
 }
 
 describe('FASE 7 Task 5 — DOCX/PDF semantic parity', () => {
-  it('preserves intentional newline characters as Word line-break elements', async () => {
+  // Contrato vigente (formato forense): cada renglón intencional de un bloque de
+  // cuerpo es un párrafo propio, justificado y con sangría de primera línea, con
+  // su rótulo en negritas. Sustituye al contrato anterior (un solo párrafo con
+  // <w:br/> alineado a la izquierda), que exportaba el escrito sin sangría.
+  it('divide un bloque con saltos intencionales en párrafos independientes, sin saltos manuales', async () => {
     const baseModel = semanticModel();
     const model: ExportRenderModel = {
       ...baseModel,
@@ -135,11 +140,22 @@ describe('FASE 7 Task 5 — DOCX/PDF semantic parity', () => {
     const artifact = await renderDocx(model, docxOptions());
     const docxPackage = await readDocxPackage(artifact.bytes);
     const documentXml = await docxPackage.readText('word/document.xml');
+    const paragraphsXml = Array.from(documentXml.matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)).map(([xml]) => xml);
+    const primero = paragraphsXml.find((xml) => xml.includes('Línea uno.'));
+    const segundo = paragraphsXml.find((xml) => xml.includes('Línea dos.'));
 
-    expect(documentXml.match(/<w:br(?:\s[^>]*)?\s*\/>/g) || []).toHaveLength(1);
+    expect(documentXml.match(/<w:br(?:\s[^>]*)?\s*\/>/g) || []).toHaveLength(0);
+    expect(primero).toBeDefined();
+    expect(segundo).toBeDefined();
+    expect(primero).not.toBe(segundo);
+    for (const xml of [primero!, segundo!]) {
+      expect(xml).toContain('<w:jc w:val="both"/>');
+      expect(xml).toMatch(/w:firstLine="\d+"/);
+      expect(xml).toMatch(/<w:b\/>[\s\S]*?(?:PRIMERO\.|SEGUNDO\.)/);
+    }
   });
 
-  it('keeps manually broken paragraphs left aligned in DOCX and PDF', async () => {
+  it('DOCX y PDF reciben los mismos párrafos independientes (paridad, sin justificar saltos manuales)', async () => {
     const baseModel = semanticModel();
     const multiline = paragraph(
       'block-manual-lines',
@@ -152,20 +168,21 @@ describe('FASE 7 Task 5 — DOCX/PDF semantic parity', () => {
         paragraphs: [multiline],
       }],
     };
+    const bodyTexts = renderableBodyParagraphs(model).filter((item) => item.role === 'BODY').map((item) => item.text);
+    expect(bodyTexts).toEqual([
+      'PRIMERO. La parte actora afirma que la relación inició en la fecha descrita, extremo que requiere una postura expresa del abogado antes de incorporarse como hecho admitido.',
+      'SEGUNDO. La respuesta a este punto queda pendiente.',
+    ]);
 
     const [docxArtifact, pdfArtifact] = await Promise.all([
       renderDocx(model, docxOptions()),
       renderPdf(model, pdfOptions()),
     ]);
-    const docxPackage = await readDocxPackage(docxArtifact.bytes);
-    const documentXml = await docxPackage.readText('word/document.xml');
-    const multilineParagraph = Array.from(documentXml.matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g))
-      .find(([xml]) => xml?.includes('PRIMERO.'))?.[0];
+    const documentXml = await (await readDocxPackage(docxArtifact.bytes)).readText('word/document.xml');
     const pdfContent = Buffer.from(pdfArtifact.bytes).toString('latin1');
-
-    expect(multilineParagraph).toBeDefined();
-    expect(multilineParagraph).toContain('<w:jc w:val="left"/>');
-    expect(pdfContent).not.toMatch(/\sTw\b/);
+    expect(documentXml).not.toMatch(/<w:br(?:\s[^>]*)?\s*\/>/);
+    expect(pdfContent).toContain('PRIMERO.');
+    expect(pdfContent).toContain('SEGUNDO.');
   });
 
   it('omits semantic section headings when their section has no rendered content', async () => {

@@ -11,13 +11,15 @@ import type { CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
  * Nunca debe producir sections=[] ni cuerpo completamente vacío.
  */
 
+// Solo tipos GENERABLES por contrato (draft=true, status IMPLEMENTED). Los tipos
+// de ASSISTED_DRAFT / REQUIRES_OFFICIAL_FORM no pueden figurar aquí; el motor
+// `audiencia` no tiene ninguno generable y se verifica por separado (bloqueo).
 const ENGINE_SAMPLE: Record<string, string> = {
   demanda: 'demanda_oral_civil',
   recurso: 'queja_civil',
   escrito_tramite: 'oposicion_sucesoria',
-  prueba_cierre: 'conclusiones_civil',
+  prueba_cierre: 'alegatos_civil',
   convenio: 'convenio_herederos',
-  audiencia: 'oposicion_medida_cautelar',
   petitorio: 'apelacion_civil',
 };
 
@@ -82,6 +84,15 @@ describe('generación determinista por FAMILY ENGINE', () => {
       }
     });
   }
+
+  it('motor audiencia: sus tipos no son generables y el routing los bloquea', async () => {
+    const members = visibleWritingTypes().filter(identity => (identity.blueprint as any)?.engine === 'audiencia');
+    expect(members.length).toBeGreaterThan(0);
+    for (const member of members) {
+      expect(member.capabilities.draft, `${member.id} no debe ser draftable`).toBe(false);
+      await expect(generate(member.id, 'Intento de generación bloqueada.')).rejects.toThrow(/DOCUMENT_TYPE_NOT_IMPLEMENTED/);
+    }
+  });
 
   it('todos los family blueprints declarados tienen al menos un tipo asignado', () => {
     const identities = visibleWritingTypes();

@@ -171,19 +171,46 @@ export function buildDraftingProjection(rich: RichCaseAnalysis, instruction: str
   return {version:'1',factResponses,claimResponses,challenges};
 }
 
+/** Texto citado de la fuente en un solo párrafo (los renglones del PDF no se trasladan al escrito). */
+function quoted(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Número visible de un hecho o prestación. Los identificadores internos
+ * ("grounded-claim-…") nunca llegan al escrito: se usa la numeración de la
+ * propia demanda o, en su defecto, el ordinal derivado del identificador.
+ */
+function visibleOrdinal(id: string, text: string): string {
+  const own = quoted(text).match(/^(?:HECHO\s+)?((?:\d{1,3})|[A-Z]|[IVXLC]{1,6})\s*[.)\-]/i)?.[1];
+  if (own) return own.toUpperCase();
+  const trailing = id.match(/(\d{1,3})$/)?.[1];
+  return trailing || '';
+}
+
+/** Quita el rótulo propio ("1.", "A)") cuando ya se muestra como ordinal. */
+function withoutOwnLabel(text: string): string {
+  return quoted(text).replace(/^(?:HECHO\s+)?(?:\d{1,3}|[A-Z]|[IVXLC]{1,6})\s*[.)\-]\s*/i, '');
+}
+
 export function renderDraftingReview(contract: LegalDraftingContract): string {
-  if ('sourceFactId' in contract) return [
-    `HECHO ${contract.sourceFactId}`, `Alegación de origen: ${contract.sourceText}`,
-    contract.clientPosition ? `Postura expresa del abogado (${contract.responseScope === 'PROOF_ONLY' ? 'únicamente acreditación, no negación del hecho' : 'alcance fáctico'}): ${contract.clientPosition.text}.` : 'PENDIENTE: postura individual del cliente. No se admite ni se niega este hecho.',
-    `Razón: ${contract.responseReason}`, `Soporte vinculado: ${contract.supportingEvidenceIds.join(', ') || 'ninguno individualizado'}.`,
-    'Se conserva como alegación, no como hecho acreditado.',
-  ].join('\n');
-  if ('claimId' in contract) return [
-    `PRESTACIÓN ${contract.claimId}: ${contract.claimText}`,
-    'PENDIENTE: postura individual, fundamento y estrategia del abogado. No se inventa oposición.',
-    `Hechos vinculados: ${contract.factualBasis.join(', ') || 'no individualizados'}.`,
-    `Pruebas vinculadas: ${contract.evidenceIds.join(', ') || 'no individualizadas'}.`,
-  ].join('\n');
+  if ('sourceFactId' in contract) {
+    const ordinal = visibleOrdinal(contract.sourceFactId, contract.sourceText);
+    return [
+      `HECHO ${ordinal}.— La parte actora manifiesta: «${withoutOwnLabel(contract.sourceText)}»`,
+      contract.clientPosition
+        ? `CONTESTACIÓN (${contract.responseScope === 'PROOF_ONLY' ? 'se controvierte su acreditación, no se niega el hecho' : 'postura del abogado'}): ${contract.clientPosition.text}.`
+        : 'CONTESTACIÓN: [REQUIERE INSTRUCCIÓN DEL ABOGADO: afirmar, negar o manifestar que no es hecho propio; no se admite ni se niega sin instrucción expresa.]',
+      'Se conserva como afirmación de la actora, no como hecho acreditado.',
+    ].join('\n');
+  }
+  if ('claimId' in contract) {
+    const ordinal = visibleOrdinal(contract.claimId, contract.claimText);
+    return [
+      `PRESTACIÓN ${ordinal ? `${ordinal}).` : ''}— La parte actora reclama: «${withoutOwnLabel(contract.claimText)}»`,
+      'CONTESTACIÓN: [REQUIERE INSTRUCCIÓN DEL ABOGADO: precisar si se controvierte la procedencia de esta prestación, con qué excepciones y pruebas; no se formula oposición sin instrucción expresa.]',
+    ].join('\n');
+  }
   return [
     `${contract.kind === 'CONCEPT' ? 'CONCEPTO DE VIOLACIÓN' : contract.kind === 'PENAL_PROCEDURAL' ? 'CUESTIÓN PROCESAL PENAL' : 'AGRAVIO'} — BORRADOR PARA REVISIÓN`,
     `${contract.kind === 'CONCEPT' ? 'ACTO RECLAMADO' : 'RESOLUCIÓN COMBATIDA'}: ${contract.challengedText}`,

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { getProviderDisclosure } from '@/lib/ai/providerDisclosure';
 import { resolvePdfRendererForReadiness } from '@/lib/pdf/ocrProviders';
 import { resolveLexPlantillasStoragePaths } from '@/lib/workspace/storagePaths';
+import { resolveLocalDatabasePath } from '@/lib/db/localDatabase';
 
 export type RuntimeComponentStatus = 'READY' | 'BLOCKED' | 'CONFIGURED_NOT_VERIFIED' | 'NOT_CONFIGURED';
 
@@ -37,10 +38,10 @@ export interface RuntimeReadinessInput {
 
 export function deriveRuntimeReadiness(input: RuntimeReadinessInput): RuntimeReadiness {
   const database: RuntimeComponent = !input.databaseConfigured
-    ? { status: 'NOT_CONFIGURED', detail: 'DATABASE_URL no está configurada.' }
+    ? { status: 'NOT_CONFIGURED', detail: 'La ruta de la base de datos local no es válida.' }
     : !input.databaseVerified
-      ? { status: 'CONFIGURED_NOT_VERIFIED', detail: 'DATABASE_URL está configurada, pero la conectividad no fue verificada.' }
-      : { status: 'READY', detail: 'Conectividad de base de datos verificada.' };
+      ? { status: 'CONFIGURED_NOT_VERIFIED', detail: 'La base de datos local (SQLite) aún no se ha creado o no es escribible.' }
+      : { status: 'READY', detail: 'Base de datos local (SQLite) disponible y escribible.' };
   const storage: RuntimeComponent = input.storageReady
     ? { status: 'READY', detail: 'Almacenamiento de uploads disponible.' }
     : { status: 'BLOCKED', detail: 'El almacenamiento de uploads no está disponible o no es escribible.' };
@@ -77,6 +78,16 @@ export async function collectRuntimeReadiness(): Promise<RuntimeReadiness> {
     storageReady = false;
   }
 
+  let databaseConfigured = true;
+  let databaseVerified = false;
+  try {
+    const databasePath = resolveLocalDatabasePath();
+    await access(databasePath, constants.R_OK | constants.W_OK);
+    databaseVerified = true;
+  } catch (error) {
+    if ((error as Error).message === 'LOCAL_DB_PATH_INSIDE_NODE_MODULES') databaseConfigured = false;
+  }
+
   const ocrProvider = (process.env.OCR_PROVIDER || 'auto').trim().toLowerCase();
   const ocrEnabled = !['off', 'none'].includes(ocrProvider) && process.env.OCR_ENABLED !== 'false';
   const workerPath = process.env.TESSERACT_WORKER_PATH?.trim()
@@ -90,10 +101,10 @@ export async function collectRuntimeReadiness(): Promise<RuntimeReadiness> {
   const disclosure = getProviderDisclosure();
 
   return deriveRuntimeReadiness({
-    databaseConfigured: Boolean(process.env.DATABASE_URL?.trim()),
-    // This collector intentionally does not connect to DATABASE_URL. Operational probes
-    // may verify it explicitly without making a readiness endpoint mutate production data.
-    databaseVerified: false,
+    databaseConfigured,
+    // El colector no abre la base ni la modifica: comprueba que el archivo local exista y
+    // que su carpeta sea escribible. La base se crea y migra en el primer uso.
+    databaseVerified,
     storageReady,
     providerReady: disclosure.providers.some((provider) => provider.active),
     ocr: { enabled: ocrEnabled, workerReady, languageDataReady, pdfRendererReady: Boolean(pdfRenderer) },

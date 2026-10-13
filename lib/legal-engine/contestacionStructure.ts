@@ -165,6 +165,39 @@ function replaceRichSeed(
   };
 }
 
+/** Rótulo propio del hecho/prestación en la demanda ("3.", "B)") o el ordinal de su posición. */
+function sourceOrdinal(text: string, index: number, letters = false): string {
+  const own = text.replace(/\s+/g, ' ').trim().match(/^(?:HECHO\s+)?(\d{1,3}|[A-Z]|[IVXLC]{1,6})\s*[.)\-]/i)?.[1];
+  if (own) return own.toUpperCase();
+  return letters && index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+
+/** Texto de la fuente en un solo párrafo y sin su rótulo, que ya se muestra como ordinal. */
+function withoutSourceLabel(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().replace(/^(?:HECHO\s+)?(?:\d{1,3}|[A-Z]|[IVXLC]{1,6})\s*[.)\-]\s*/i, '');
+}
+
+/**
+ * Contestación hecho por hecho: cada hecho de la demanda se transcribe con su
+ * propio espacio de postura. La contestación debe referirse a todos y cada uno
+ * de los hechos; solo el abogado puede afirmar, negar o declarar ajeno un hecho.
+ * Devuelve '' si la fuente no tiene hechos identificados.
+ */
+export function renderFactResponseProjection(rich: Pick<RichCaseAnalysis, 'facts'> | undefined): string {
+  return (rich?.facts || []).map((fact, index) => [
+    `HECHO ${sourceOrdinal(fact.proposition, index)}.— La parte actora manifiesta: «${withoutSourceLabel(fact.proposition)}»`,
+    'CONTESTACIÓN: [REQUIERE INSTRUCCIÓN DEL ABOGADO: afirmar, negar o manifestar que no es hecho propio.]',
+  ].join('\n')).join('\n\n');
+}
+
+/** Contestación prestación por prestación, con el mismo criterio que los hechos. */
+export function renderClaimResponseProjection(rich: Pick<RichCaseAnalysis, 'claims'> | undefined): string {
+  return (rich?.claims || []).map((claim, index) => [
+    `PRESTACIÓN ${sourceOrdinal(claim.requestedRelief, index, true)}).— La parte actora reclama: «${withoutSourceLabel(claim.requestedRelief)}»`,
+    'CONTESTACIÓN: [REQUIERE INSTRUCCIÓN DEL ABOGADO: precisar si se controvierte su procedencia y con qué excepciones.]',
+  ].join('\n')).join('\n\n');
+}
+
 /**
  * Rich-first contestación skeleton.  Only source-level propositions and
  * explicit IDs are copied into neutral seeds; legacy arrays are intentionally
@@ -181,14 +214,13 @@ function buildRichContestacionSkeleton(
   const isCivilContestacion = templateId === 'contestacion_demanda_civil';
   const isLaborContestacion = templateId === 'contestacion_demanda_laboral';
   const hasParties = !/\[\s*DATO\s+PENDIENTE/i.test(roles.contesta) && !/\[\s*DATO\s+PENDIENTE/i.test(roles.contraparte);
+  // La contestación debe referirse a todos y cada uno de los hechos y prestaciones:
+  // cada uno se transcribe y queda con su propio espacio de postura, que solo el
+  // abogado puede llenar (no se admite ni se niega nada sin instrucción).
   const hechosSection = mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', isCivilContestacion ? 5 : 4,
-    rich.facts.length > 0
-      ? 'HECHOS IDENTIFICADOS EN LA FUENTE:\n' + rich.facts.map((fact) => `• ${fact.proposition}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
-      : '[DATO PENDIENTE DE EXPEDIENTE: Hechos identificados]');
+    renderFactResponseProjection(rich) || '[DATO PENDIENTE DE EXPEDIENTE: Hechos identificados]');
   const prestacionesSection = mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', isCivilContestacion ? 4 : 5,
-    rich.claims.length > 0
-      ? 'PRESTACIONES IDENTIFICADAS EN LA FUENTE:\n' + rich.claims.map((claim) => `• ${claim.requestedRelief}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
-      : '[DATO PENDIENTE DE EXPEDIENTE: Prestaciones identificadas]');
+    renderClaimResponseProjection(rich) || '[DATO PENDIENTE DE EXPEDIENTE: Prestaciones identificadas]');
   const excepcionesSection = mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
     'Contenido pendiente de instrucción expresa del abogado.');
   const pruebasSection = mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7,
@@ -293,6 +325,11 @@ export const CONTESTACION_SECTION_INSTRUCTIONS: Record<string, string> = {
     'Cierre y firma: protesto de ley y lugar/fecha (si la fecha no consta usa [DATO PENDIENTE DE EXPEDIENTE: Fecha de presentación]), línea de firma con el nombre exacto de QUIEN CONTESTA (el demandado) y su carácter procesal. Nunca firmes con el nombre del actor ni de la autoridad.',
 };
 
+/** Quita la numeración original («1. ») y los puntos finales de un hecho de la demanda. */
+function cleanFactText(value: string | undefined): string {
+  return String(value || '').replace(/^\s*\d+\s*[.)-]\s*/, '').replace(/[.\s]+$/, '');
+}
+
 export function buildContestacionSkeleton(
   doc: UniversalLegalDocument,
   caseAnalysis?: CaseAnalysis,
@@ -308,7 +345,9 @@ export function buildContestacionSkeleton(
   // separados de la postura: una afirmación de la demanda nunca se presenta
   // como hecho propio del demandado.
   const hechosRef = (caseAnalysis?.facts || []).map((fact) => [
-    `AL HECHO ${fact.number}.- ${fact.number}. ${fact.sourceFact || fact.text}. La parte actora afirma: "${fact.sourceFact || fact.text}"`,
+    // El hecho conserva su numeración original ("1. …") y su punto final: sin limpiarlos salía
+    // «AL HECHO 1.- 1. … 4.. La parte actora afirma…». Se citan una sola vez y sin duplicar el número.
+    `AL HECHO ${fact.number}.- La parte actora afirma: "${cleanFactText(fact.sourceFact || fact.text)}."`,
     `POSTURA PROCESAL: ${fact.lawyerPosition === 'ADMIT' || fact.position === 'ADMIT' ? 'SE ADMITE' : fact.lawyerPosition === 'DENY' || fact.position === 'DENY' ? 'SE NIEGA' : fact.lawyerPosition === 'PARTIAL' || fact.position === 'PARTIAL' ? 'SE ADMITE PARCIALMENTE' : fact.lawyerPosition === 'NOT_KNOWN' || fact.position === 'IGNORE_PERSONAL_KNOWLEDGE' ? 'NO SE TIENE POR CONFIRMADO' : '[REQUIERE DEFINIR POSTURA DEL ABOGADO]'}`,
     `RESPUESTA: ${fact.lawyerObservation || fact.manualResponse || (fact.lawyerPosition && fact.lawyerPosition !== 'UNDEFINED' ? fact.lawyerPosition : fact.response) || '[REQUIERE DEFINIR POSTURA DEL ABOGADO]'}`,
     `FUENTE: ${fact.sourceReference?.documentId || fact.documentId || 'fuente-no-identificada'}${fact.sourceReference?.page || fact.page ? ` · página ${fact.sourceReference?.page || fact.page}` : ''}.`,
@@ -320,7 +359,7 @@ export function buildContestacionSkeleton(
   const proemioSeed = `${roles.autoridad || 'H. TRIBUNAL COMPETENTE EN TURNO'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`;
   const personality = doc.caseContext?.civil?.personality;
   const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: ${personality?.status === 'CONFIRMED' && personality.value ? personality.value : '[PENDIENTE: confirmar personalidad y soporte con el abogado]'}\nDOMICILIO: [PENDIENTE: confirmar domicilio procesal].`;
-  const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE (responder punto por punto; conserva redacciones *****):\n${hechosRef || 'Hechos identificados en las constancias del expediente.'}`;
+  const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE:\n${hechosRef || 'Hechos identificados en las constancias del expediente.'}`;
   const confirmedEvidence = (caseAnalysis?.evidence || []).filter((e) => e.confirmed === true);
   const pruebasSeed = confirmedEvidence.length > 0
     ? `PRUEBAS:\n\n${confirmedEvidence.map((e, i) => `${i + 1}. ${e.description}`).join('\n')}`

@@ -8,8 +8,13 @@ import {
   extractInstitutionalAuthority,
   extractResolvingCourt,
   trimToSentence,
-  isValidPartyName,
+  isValidProceduralPartyName,
+  initiatesAction,
+  extractActionTarget,
+  extractAddressedCourt,
+  extractProemioCompareciente,
 } from './partyExtraction';
+import { buildPartyEvidence, extractContestacionParties, type PartyEvidence } from './partyEvidence';
 import { deduplicateLegalIssues } from './coverageMatrix';
 import { extractRichCaseAnalysis, type RichExtractionOptions } from './case-extraction/orchestrator';
 import { projectRichCaseAnalysis } from './case-extraction/legacyProjection';
@@ -112,10 +117,14 @@ export interface CaseAnalysis {
     actor?: string;
     demandado?: string;
     autoridadResponsable?: string;
+    /** Órgano jurisdiccional al que se dirige el escrito fuente (encabezado "C. JUEZ…"). */
+    organoDestinatario?: string;
     terceroInteresado?: string;
     abogados?: string[];
   };
   authorities: string[];
+  /** Procedencia y confianza interna de actor/demandado (señales, foja y fragmento). */
+  partyEvidence?: Partial<Record<'actor' | 'demandado', PartyEvidence>>;
   caseNumbers: {
     principal?: string;
     amparoDirecto?: string;
@@ -855,6 +864,7 @@ export function reconstructCaseAnalysis(
       /(?:actor|actora|parte\s+actora|demandante|promovente|accionante|trabajador(?:a)?)\s*[:\-]\s*([^;,\n]{2,90})/i,
     ]) || quejoso;
 
+  let userInstructionDemandado: string | undefined;
   let demandado = extractPartyField(fullCorpus, [
     /(?:demandado|demandada|parte\s+demandada|fuente\s+de\s+trabajo\s+demandada|patr[oó]n\s+demandado|tercero\s+interesado)\s*[:\-]\s*([^;,\n]{2,90})/i,
     /(?:contraparte)\s*[:\-]\s*([^;,\n]{2,90})/i,
@@ -866,18 +876,11 @@ export function reconstructCaseAnalysis(
       || userInstruction.match(/(?:a\s+favor\s+de|defendiendo\s+a|representando\s+a|demandad[oa]\s*[:\-]?)\s+([A-ZÁÉÍÓÚÑ\s]{4,60})/i)?.[1];
     if (instructionDemandado && instructionDemandado.trim().length > 3) {
       demandado = instructionDemandado.trim();
+      userInstructionDemandado = demandado;
     }
   }
   if (!demandado) {
-    const actionAgainstMatch = fullCorpus.match(
-      /(?:vengo\s+a\s+demandar(?:\s+formalmente)?(?:\s+en\s+la\s+v[íi]a[^,\n]+?)?\s+(?:en\s+contra\s+de(?:l)?|a)|demando\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|se\s+demanda\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|demandar\s+(?:la\s+nulidad[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a))\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.,\s]{3,80}?)(?:\s+y\/o|\s*,\s*|\s+con\s+domicilio|\s+qui[eé]n|\s*\n)/i
-    )?.[1];
-    if (actionAgainstMatch) {
-      const candidate = trimToSentence(actionAgainstMatch.trim().replace(/^de(?:l)?\s+/i, ''));
-      if (isValidPartyName(candidate)) {
-        demandado = candidate;
-      }
-    }
+    demandado = extractActionTarget(fullCorpus);
   }
   if (!demandado) {
     const contextDemandado = fullCorpus.match(
@@ -885,27 +888,35 @@ export function reconstructCaseAnalysis(
     )?.[1];
     if (contextDemandado) {
       const candidate = trimToSentence(contextDemandado.trim().replace(/^de(?:l)?\s+/i, ''));
-      if (isValidPartyName(candidate)) {
+      if (isValidProceduralPartyName(candidate)) {
         demandado = candidate;
       }
     }
   }
 
-  if (!actor) {
-    const proemioMatch = fullCorpus.match(/(?:^|\n)\s*(?:C\.\s+|CIUDADAN[OA]\s+)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{3,70}?)(?:,\s*(?:mexican[oa]|mayor\s+de\s+edad|solter[oa]|casad[oa]|por\s+mi\s+propio\s+derecho|en\s+mi\s+car[aá]cter|se[ñn]alando|con\s+el\s+debido\s+respeto))/i)?.[1]
-      || fullCorpus.match(/(?:PRESENTE\.?|P\s*R\s*E\s*S\s*E\s*N\s*T\s*E\.?)\s+(?:C\.\s+|CIUDADAN[OA]\s+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{3,70}?)(?:,\s*(?:mexican[oa]|mayor\s+de\s+edad|solter[oa]|casad[oa]|por\s+mi\s+propio\s+derecho|en\s+mi\s+car[aá]cter|se[ñn]alando|con\s+el\s+debido\s+respeto))/i)?.[1];
-    if (proemioMatch && proemioMatch.trim().length > 3 && !/^(?:PROTESTO|EXPEDIENTE|ASUNTO|H\.|TRIBUNAL|JUZGADO|JUNTA)/i.test(proemioMatch.trim())) {
-      const candidate = trimToSentence(proemioMatch.trim());
-      if (isValidPartyName(candidate)) {
-        actor = candidate;
-      }
-    }
+  // Sin etiqueta expresa, el compareciente del proemio o el firmante solo son la
+  // parte actora cuando el propio documento inicia la acción. En una contestación,
+  // un recurso o una resolución son otra parte (o el juzgado) y el dato queda pendiente.
+  const sourceInitiatesAction = initiatesAction(fullCorpus);
+  let partiesFromContestacion = false;
+  if (!sourceInitiatesAction && (!actor || !demandado)) {
+    // Contestación: solo con señales literales del proemio ("apoderado de X, parte
+    // demandada", "demanda promovida por Y"). Sin ellas el dato queda pendiente.
+    const fromContestacion = extractContestacionParties(fullCorpus);
+    if (!actor && fromContestacion.actor) { actor = fromContestacion.actor; partiesFromContestacion = true; }
+    if (!demandado && fromContestacion.demandado) { demandado = fromContestacion.demandado; partiesFromContestacion = true; }
   }
-  if (!actor) {
-    const signatureMatch = fullCorpus.match(/(?:ATENTAMENTE|PROTESTO\s+LO\s+NECESARIO)[^_\n]*\n+[\s_—\-]{4,}\n+\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{3,70})/i)?.[1];
+  void partiesFromContestacion;
+  if (!actor && sourceInitiatesAction) {
+    // Mismo extractor que la ficha: compareciente del proemio (o su representada
+    // si comparece como apoderado), nunca el destinatario del escrito.
+    actor = extractProemioCompareciente(fullCorpus);
+  }
+  if (!actor && sourceInitiatesAction) {
+    const signatureMatch =fullCorpus.match(/(?:ATENTAMENTE|PROTESTO\s+LO\s+NECESARIO)[^_\n]*\n+[\s_—\-]{4,}\n+\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{3,70})/i)?.[1];
     if (signatureMatch) {
       const candidate = trimToSentence(signatureMatch.trim());
-      if (isValidPartyName(candidate)) {
+      if (isValidProceduralPartyName(candidate)) {
         actor = candidate;
       }
     }
@@ -914,6 +925,12 @@ export function reconstructCaseAnalysis(
   // AUTORIDAD: primero por label con separador OBLIGATORIO (tolerando nombres
   // institucionales envueltos en varias líneas); como último recurso, por ancla
   // institucional en mayúsculas (H. PLENO DEL TRIBUNAL…).
+  // Destinatario del escrito fuente: en una demanda es el órgano que conoce del juicio
+  // y, por tanto, el destinatario de su contestación.
+  const organoDestinatario = extractAddressedCourt(fullCorpus);
+  // Convención del repositorio (contrato en partiesPropagation.test.ts): el órgano al que se
+  // dirige el escrito también alimenta `autoridadResponsable`/`authorities`. El destinatario
+  // exacto se conserva aparte en `organoDestinatario`.
   const autoridadResponsable =
     extractAuthorityLabeled(fullCorpus) || extractInstitutionalAuthority(fullCorpus) || undefined;
   const organoResolucionRecurrida = extractResolvingCourt(fullCorpus);
@@ -1130,12 +1147,20 @@ export function reconstructCaseAnalysis(
     };
   });
 
+  const partyEvidence: NonNullable<CaseAnalysis['partyEvidence']> = {};
+  const actorEvidence = buildPartyEvidence('actor', actor, fullCorpus, sources);
+  const demandadoEvidence = buildPartyEvidence('demandado', demandado, fullCorpus, sources, !!demandado && demandado === userInstructionDemandado);
+  if (actorEvidence) partyEvidence.actor = actorEvidence;
+  if (demandadoEvidence) partyEvidence.demandado = demandadoEvidence;
+
   const legacyAnalysis: CaseAnalysis = {
+    partyEvidence,
     parties: {
       quejoso,
       actor,
       demandado,
       autoridadResponsable,
+      ...(organoDestinatario ? { organoDestinatario } : {}),
       terceroInteresado,
     },
     authorities: autoridadResponsable ? [autoridadResponsable] : [],

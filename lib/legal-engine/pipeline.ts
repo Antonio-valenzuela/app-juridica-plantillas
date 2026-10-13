@@ -1,4 +1,4 @@
-import { extractAppealResolutionReview, isCivilFamilyAppeal, validateAppealConfirmation, selectAppealSources, type AppealConfirmation } from './case-extraction/appealResolutionReview';
+import { appealAppearingParties, consolidatePartiesByRole, extractAppealResolutionReview, isCivilFamilyAppeal, renderAppealBackgroundSection, resolveAppealGeneration, selectAppealSources, type AppealConfirmation } from './case-extraction/appealResolutionReview';
 import { 
   UniversalLegalDocument, 
   PipelineStage, 
@@ -41,10 +41,11 @@ import { buildBlockPlan, LegalBlock, BlockPlan } from './blockPlanner';
 import { updateJobProgress } from './generationJobs';
 import { sanitizeLegalDocument, stripInternalPromptMetadata } from './legalDocumentSanitizer';
 import { normalizeMarkdownFormatting, normalizeTitleText } from './markdownNormalizer';
-import { CONTESTACION_SECTION_INSTRUCTIONS, REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS, resolveContestacionRoles, buildContestacionSignatureBlock, getRevisionAmparoDirectoSectionText, formatIndividualAgravio } from './contestacionStructure';
+import { CONTESTACION_SECTION_INSTRUCTIONS, REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS, resolveContestacionRoles, buildContestacionSignatureBlock, getRevisionAmparoDirectoSectionText, formatIndividualAgravio, renderFactResponseProjection, renderClaimResponseProjection } from './contestacionStructure';
 import { DocumentRoutingError, getDocumentTemplate, buildReferenceOnlyDirective, isContestacionType, isDemandContestacionType, isContestacionRevisionAmparoDirectoType } from './documentTemplates';
 import { resolveDocumentRouting, type DocumentRoutingResolution } from './documentRouting';
 import { buildDocumentPlan } from './documentPlan';
+import { isOptInSection } from './optInSections';
 import { runDocumentPreflight } from './documentPreflight';
 import { evaluateSourceOutputCompatibility, inferSourceOutputType, type SourceOutputCompatibilityResult } from './sourceOutputCompatibility';
 import type { InferredSourceDocumentType } from './sourceDocumentTypes';
@@ -377,6 +378,9 @@ import { validateDocumentConsistency } from './documentConsistency';
 import { validateDocumentEvidence } from './documentEvidence';
 import { validateDocumentAuthorities } from './documentAuthority';
 import { markUnverifiedAuthorityReferences } from './authorityReferenceAudit';
+import { enforceOutputHygiene } from './generatedOutputValidator';
+import { MAX_REDUNDANCY_RATIO, evaluatePageTarget, pageTargetToGenerationExtension, parsePageTarget, type PageTarget, type PageTargetResult } from './pageTarget';
+import { redundancyRatio, splitParagraphs } from './textRedundancy';
 import { findDocumentRedundancy } from './documentRedundancy';
 import { reconcileDocumentCoverage } from './documentCoverage';
 import { decideDocumentAssemblyReadiness, evaluateDocumentAssemblyChecks, type DocumentReadinessInput } from './documentReadiness';
@@ -386,6 +390,7 @@ import {
   allocateSectionWordTargets,
   allocateSectionBudgets,
   generationExtensionForDraftDepth,
+  isStructuralSection,
   resolveGenerationExtensionContract,
   type GenerationExtensionContract,
   type GenerationExtensionInput,
@@ -822,6 +827,10 @@ export interface PipelineInput {
   generationExtension?: GenerationExtensionInput;
   /** Profundidad profesional explícita; omitir conserva el contrato legacy. */
   draftDepth?: import('./draftDepth').DraftDepth;
+  /** Proveedor de ampliación inyectable (pruebas/simulación). Por defecto, la cadena real de proveedores. */
+  expansionProvider?: import('./generationExpansion').ExtendedExpansionOptions['invokeProvider'];
+  /** Meta de extensión (5/10/20/40/personalizada). Tiene prioridad sobre `draftDepth` y `generationExtension`. */
+  pageTarget?: PageTarget | { preset?: string; pages?: number };
   legalResearchProvider?: LegalResearchProvider;
 }
 
@@ -1811,13 +1820,15 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
   const tramiteCtx = doc.caseContext?.tramiteGeneral;
   // FASE 6 — ROL CORRECTO: en contestación quien comparece y firma es el
   // DEMANDADO; en demanda inicial es el ACTOR.
-  const firmanteName = isContestacionDoc
+  const appealMeta = (doc.generationMetadata as any)?.appealResolutionConfirmation;
+  const appealParties = appealAppearingParties(appealMeta);
+  const firmanteName = appealParties?.appellant ?? (isContestacionDoc
     ? inmobCtx?.arrendatarioOComprador?.value || agrarioCtx?.demandadoAgrario?.value || laborCtx?.patron?.value || doc.parties.demandado || caseAnalysis?.parties?.demandado || formatCaseContextField(doc.caseContext, 'demandado', '[DATO PENDIENTE: Nombre del demandado]')
-    : tramiteCtx?.promovente?.value || agrarioCtx?.actorAgrario?.value || inmobCtx?.arrendadorOVendedor?.value || penalCtx?.denuncianteOQuerellante?.value || penalCtx?.victimaUOfendido?.value || laborCtx?.trabajador?.value || doc.parties.actor || doc.parties.quejoso || adminCtx?.actor?.value || fiscalCtx?.contribuyente?.value || caseAnalysis?.parties?.actor || caseAnalysis?.parties?.quejoso || formatCaseContextField(doc.caseContext, 'promovente', isAgrario ? '[DATO PENDIENTE: Nombre del actor / ejidatario / comunero]' : isInmobiliario ? '[DATO PENDIENTE: Nombre del arrendador / vendedor]' : isPenal ? '[DATO PENDIENTE: Nombre del denunciante / víctima / promovente]' : isLaboral ? '[DATO PENDIENTE: Nombre del trabajador]' : isFiscal ? '[DATO PENDIENTE: Nombre del contribuyente]' : isAdministrativo ? '[DATO PENDIENTE: Nombre del actor / promovente]' : isTramiteGeneral ? '[DATO PENDIENTE: Nombre del promovente]' : '[DATO PENDIENTE: Nombre del promovente]');
+    : tramiteCtx?.promovente?.value || agrarioCtx?.actorAgrario?.value || inmobCtx?.arrendadorOVendedor?.value || penalCtx?.denuncianteOQuerellante?.value || penalCtx?.victimaUOfendido?.value || laborCtx?.trabajador?.value || doc.parties.actor || doc.parties.quejoso || adminCtx?.actor?.value || fiscalCtx?.contribuyente?.value || caseAnalysis?.parties?.actor || caseAnalysis?.parties?.quejoso || formatCaseContextField(doc.caseContext, 'promovente', isAgrario ? '[DATO PENDIENTE: Nombre del actor / ejidatario / comunero]' : isInmobiliario ? '[DATO PENDIENTE: Nombre del arrendador / vendedor]' : isPenal ? '[DATO PENDIENTE: Nombre del denunciante / víctima / promovente]' : isLaboral ? '[DATO PENDIENTE: Nombre del trabajador]' : isFiscal ? '[DATO PENDIENTE: Nombre del contribuyente]' : isAdministrativo ? '[DATO PENDIENTE: Nombre del actor / promovente]' : isTramiteGeneral ? '[DATO PENDIENTE: Nombre del promovente]' : '[DATO PENDIENTE: Nombre del promovente]'));
   const quejosoName = firmanteName;
-  const demandadoName = isContestacionDoc
+  const demandadoName = appealParties?.counterpart ?? (isContestacionDoc
     ? agrarioCtx?.actorAgrario?.value || inmobCtx?.arrendadorOVendedor?.value || laborCtx?.trabajador?.value || doc.parties.actor || adminCtx?.actor?.value || fiscalCtx?.contribuyente?.value || caseAnalysis?.parties?.actor || formatCaseContextField(doc.caseContext, 'actor', isAgrario ? '[DATO PENDIENTE: Nombre del actor agrario]' : isFiscal ? '[DATO PENDIENTE: Nombre del contribuyente]' : '[DATO PENDIENTE: Nombre del trabajador / actor]')
-    : agrarioCtx?.demandadoAgrario?.value || inmobCtx?.arrendatarioOComprador?.value || penalCtx?.imputado?.value || laborCtx?.patron?.value || adminCtx?.autoridadDemandada?.value || fiscalCtx?.autoridadFiscalDemandada?.value || doc.parties.demandado || caseAnalysis?.parties?.demandado || formatCaseContextField(doc.caseContext, 'demandado', isAgrario ? '[DATO PENDIENTE: Demandado / Órgano ejidal]' : isInmobiliario ? '[DATO PENDIENTE: Arrendatario / Comprador / Demandado]' : isPenal ? '[DATO PENDIENTE: Persona imputada o investigada]' : isLaboral ? '[DATO PENDIENTE: Nombre del patrón o empresa demandada]' : isFiscal ? '[DATO PENDIENTE: Autoridad fiscal demandada]' : isAdministrativo ? '[DATO PENDIENTE: Autoridad demandada]' : '[DATO PENDIENTE: Nombre del demandado]');
+    : agrarioCtx?.demandadoAgrario?.value || inmobCtx?.arrendatarioOComprador?.value || penalCtx?.imputado?.value || laborCtx?.patron?.value || adminCtx?.autoridadDemandada?.value || fiscalCtx?.autoridadFiscalDemandada?.value || doc.parties.demandado || caseAnalysis?.parties?.demandado || formatCaseContextField(doc.caseContext, 'demandado', isAgrario ? '[DATO PENDIENTE: Demandado / Órgano ejidal]' : isInmobiliario ? '[DATO PENDIENTE: Arrendatario / Comprador / Demandado]' : isPenal ? '[DATO PENDIENTE: Persona imputada o investigada]' : isLaboral ? '[DATO PENDIENTE: Nombre del patrón o empresa demandada]' : isFiscal ? '[DATO PENDIENTE: Autoridad fiscal demandada]' : isAdministrativo ? '[DATO PENDIENTE: Autoridad demandada]' : '[DATO PENDIENTE: Nombre del demandado]'));
   // Autoridad
   const defaultAutoridad = isAgrario
     ? (agrarioCtx?.tribunalUnitarioAgrario?.value || '[DATO PENDIENTE: Tribunal Unitario Agrario competente]')
@@ -1898,7 +1909,17 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       // El encabezado usa exclusivamente la autoridad competente de salida.
       // `autoridadName` es la autoridad del acto de origen y no puede servir
       // como sustituto silencioso del destinatario procesal.
-      const destinationAuthority = doc.proceduralIdentity?.autoridadDestinataria
+      // En una contestación el destinatario es el órgano al que se dirigió la demanda:
+      // prevalece sobre el destinatario genérico de la plantilla ("Juez de lo civil competente").
+      const templateDestination = doc.proceduralIdentity?.autoridadDestinataria;
+      const demandCourt = isContestacionDoc ? caseAnalysis?.parties?.organoDestinatario : undefined;
+      const genericTemplateDestination = !templateDestination || /\bcompetente\b|\ben\s+turno\b/i.test(templateDestination);
+      // Tratamiento de cortesía del foro mexicano para el órgano tomado de la demanda.
+      const courtesy = (court: string) => /^(?:C\.|H\.)/i.test(court) ? court
+        : /^JUE[ZC]/i.test(court) ? `C. ${court}`
+          : /^(?:TRIBUNAL|JUZGADO|SALA|JUNTA)/i.test(court) ? `H. ${court}` : court;
+      const destinationAuthority = (demandCourt && genericTemplateDestination ? courtesy(demandCourt) : undefined)
+        || templateDestination
         || doc.parties?.autoridadDestinataria
         || doc.parties?.autoridadResponsable || caseAnalysis?.parties?.autoridadResponsable || (caseAnalysis?.authorities && caseAnalysis.authorities[0]) || defaultAutoridad;
       const filingThrough = doc.proceduralIdentity?.organoPresentacion;
@@ -1943,6 +1964,10 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       return `${firmanteName}, en su carácter de parte en el presente procedimiento, ante la autoridad competente dentro del expediente ${expedienteNum}.`;
     }
     case 'background':
+      if (appealMeta) {
+        const appealSection = renderAppealBackgroundSection(block.title, appealMeta);
+        if (appealSection !== undefined) return appealSection;
+      }
       if (isNewWriting) {
         const facts = caseAnalysis?.facts || [];
         return facts.length
@@ -1951,25 +1976,32 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       }
       if (isLaboral) {
         if (doc.documentType === 'cumplimiento_laudo_sentencia_laboral' || doc.documentType === 'ejecucion_sentencia_laboral') {
+          // Sin hechos inventados bajo protesta: el motor no sabe si el laudo existe, si es firme ni
+          // qué condena impuso. Solo la fuente o el abogado pueden afirmarlo.
           return `ANTECEDENTES DEL LAUDO O SENTENCIA DEFINITIVA:\n\n` +
-            `BAJO PROTESTA DE DECIR VERDAD, se manifiesta que dentro del expediente laboral número ${expedienteNum} se dictó laudo o sentencia definitiva firme que condena a la demandada al cumplimiento de diversas obligaciones.\n\n` +
-            `1. Se dictó resolución definitiva favorable a los intereses tutelados.\n\n` +
-            `2. Dicha resolución causó ejecutoria sin que a la fecha se haya acreditado su total cumplimiento voluntario.`;
+            `Expediente laboral número ${expedienteNum}.\n\n` +
+            `[DATO PENDIENTE: fecha del laudo o sentencia definitiva, condenas impuestas y constancia de que causó ejecutoria — definir por el abogado con base en las constancias]\n\n` +
+            `[DATO PENDIENTE: situación actual del cumplimiento — definir por el abogado; no se afirma incumplimiento sin soporte]`;
         }
         if (doc.documentType === 'desahogo_prevencion_laboral') {
           return `ANTECEDENTES DE LA PREVENCIÓN:\n\n` +
-            `BAJO PROTESTA DE DECIR VERDAD, se hace constar que por auto notificado en autos, este Tribunal Laboral formuló requerimiento de aclaración respecto del escrito inicial de demanda.`;
+            `[DATO PENDIENTE: fecha y contenido del auto de prevención o requerimiento que se desahoga — definir por el abogado con base en el acuerdo notificado]`;
         }
         const ingresoStr = laborCtx?.fechaIngreso?.value ? `iniciando el ${laborCtx.fechaIngreso.value}` : '';
         const puestoStr = laborCtx?.puesto?.value ? `desempeñando el puesto de ${laborCtx.puesto.value}` : '';
         const despidoStr = laborCtx?.fechaDespido?.value ? `con fecha ${laborCtx.fechaDespido.value}` : '[DATO PENDIENTE: fecha del despido o hecho generador]';
         return `ANTECEDENTES Y HECHOS DE LA RELACIÓN LABORAL:\n\n` +
           `BAJO PROTESTA DE DECIR VERDAD, se narran los hechos de la relación de trabajo materia de la controversia entre el trabajador ${firmanteName} y la patronal demandada ${demandadoName}:\n\n` +
-          (caseAnalysis?.proceduralTimeline && caseAnalysis.proceduralTimeline.length > 0
+          (numberedFacts
+            ? numberedFacts
+            : caseAnalysis?.proceduralTimeline && caseAnalysis.proceduralTimeline.length > 0
             ? caseAnalysis.proceduralTimeline.slice(0, 5).map((e, idx) => `${idx + 1}. Con fecha ${e.date}: ${e.event}.`).join('\n\n')
-            : `1. Existió relación de trabajo entre ${firmanteName} en su carácter de trabajador ${puestoStr} ${ingresoStr} y la patronal demandada ${demandadoName}.\n\n` +
-              `2. Con fecha ${despidoStr}, la parte patronal rescindió injustificadamente la relación laboral.\n\n` +
-              `3. Desde entonces se han generado prestaciones y salarios devengados pendientes de pago a favor del actor.`);
+            // Sin hechos ni cronología NO se fabrican hechos: solo se afirma lo que el contexto laboral trae.
+            : `1. ${laborCtx?.fechaIngreso?.value || laborCtx?.puesto?.value
+              ? `Existió relación de trabajo entre ${firmanteName} en su carácter de trabajador ${puestoStr} ${ingresoStr} y la patronal demandada ${demandadoName}.`
+              : '[DATO PENDIENTE: relación de trabajo, fecha de ingreso y puesto]'}\n\n` +
+              `2. ${laborCtx?.fechaDespido?.value ? `Con fecha ${laborCtx.fechaDespido.value} concluyó la relación de trabajo.` : despidoStr}\n\n` +
+              `3. [DATO PENDIENTE: prestaciones y salarios en controversia, con respaldo en el expediente].`);
       }
       if (isFamiliar) {
         return `HECHOS Y ANTECEDENTES DE LA CONTROVERSIA FAMILIAR:\n\n` +
@@ -2094,9 +2126,9 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
         const peticion = tramiteCtx?.peticionOObjeto?.value || '[DATO PENDIENTE: Motivo o petición del trámite]';
         return `ANTECEDENTES PROCESALES:\n\n` +
           `BAJO PROTESTA DE DECIR VERDAD, se manifiestan los antecedentes procesales que motivan la presente promoción dentro del expediente número ${expedienteNum}:\n\n` +
-          (numberedFacts
-            ? numberedFacts
-            : caseAnalysis?.proceduralTimeline && caseAnalysis.proceduralTimeline.length > 0
+          // Un trámite no narra los hechos del litigio (política PROCEDURAL_CONTEXT): solo eventos
+          // procesales de la cronología. Los hechos numerados de la demanda no se vuelcan aquí.
+          (caseAnalysis?.proceduralTimeline && caseAnalysis.proceduralTimeline.length > 0
             ? caseAnalysis.proceduralTimeline.slice(0, 5).map((e, idx) => `${idx + 1}. Con fecha ${e.date}: ${e.event}.`).join('\n\n')
             : `1. El presente juicio se encuentra radicado ante este H. Juzgado tramitándose bajo el expediente número ${expedienteNum}.\n\n` +
               `2. Se promueve el presente ocurso en atención al estado de autos y con el objeto de: ${peticion}.\n\n` +
@@ -2141,13 +2173,16 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
             `3. [DATO PENDIENTE: Fecha y términos de la notificación legal].`);
     case 'legal_grounds':
       if (isNewWriting) return 'FUNDAMENTO JURÍDICO:\n\nSe invocan los preceptos legales y constitucionales aplicables al caso concreto conforme al orden jurídico vigente.';
+      // Solo fuentes jurídicas: la teoría del caso es contexto interno para la
+      // redacción y no se imprime como si fuera un fundamento de derecho.
       const legalSources = Array.from(new Set([
         ...(doc.legalBasis || []),
         ...(caseAnalysis?.citations || []).map((citation) => [citation.rubro, citation.texto].filter(Boolean).join(' — ')).filter(Boolean),
-        ...(caseAnalysis?.caseTheory?.constitutionalTheory ? [caseAnalysis.caseTheory.constitutionalTheory] : []),
-        ...(caseAnalysis?.caseTheory?.legalTheory ? [caseAnalysis.caseTheory.legalTheory] : []),
         ...((caseAnalysis?.argumentAxes || []).flatMap((a) => a.rules || [])),
       ])).filter(Boolean);
+      if (legalSources.length === 0 && isContestacionDoc) {
+        return 'FUNDAMENTO JURÍDICO:\n\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: precisar los preceptos sustantivos y procesales en que se funda la contestación, verificados en fuente oficial.]';
+      }
       if (legalSources.length === 0) return 'FUNDAMENTO JURÍDICO:\n\nSe invocan los preceptos legales y constitucionales aplicables al caso concreto conforme al orden jurídico vigente.';
       return `FUNDAMENTO JURÍDICO:\n\n${legalSources.map((item, index) => `${index + 1}. ${item}`).join('\n')}`;
       /*
@@ -2168,7 +2203,9 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
         return `${titleUpper}\n\nPLANTEAMIENTO JURÍDICO:\nSe formulan los conceptos y razonamientos de derecho aplicables a la controversia con estricto apego a las normas jurídicas conducentes.`;
       }
       if (isContestacionDoc) {
-        return `${titleUpper}\n\nLa función de este apartado es desarrollar exclusivamente la posición de la parte demandada respecto de la demanda y de las constancias disponibles. La redacción se mantiene dentro de la identidad procesal de esta contestación y las fuentes conducentes.`;
+        // Sin argumentos de la fuente ni instrucción, el apartado queda como pendiente
+        // explícito para el abogado; nunca como texto que describe el propio apartado.
+        return `${titleUpper}\n\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: exponer los argumentos de defensa de la parte demandada frente a la demanda y las constancias del expediente.]`;
       }
       if (isLaboral) {
         if (doc.documentType === 'objecion_pruebas_laboral') {
@@ -2923,7 +2960,7 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
           return `REQUERIMIENTO NOTIFICADO:\n\nEn atención al mandamiento dictado por este Órgano Jurisdiccional y notificado legalmente, se comparece dentro del término de ley a dar cumplimiento al requerimiento formulado.`;
         }
         if (/manifestacion.*cumplimiento/.test(titleKey)) {
-          return `MANIFESTACIÓN DE CUMPLIMIENTO:\n\nSe manifiesta bajo protesta de decir verdad que se ha dado puntual cumplimiento a lo ordenado por este H. Juzgado, exhibiendo las constancias conducentes para acreditarlo.`;
+          return `MANIFESTACIÓN DE CUMPLIMIENTO:\n\n[DATO PENDIENTE: acto cumplido, fecha y constancias que lo acreditan — definir por el abogado; no se afirma cumplimiento ni se protesta decir verdad sobre hechos sin soporte]`;
         }
         if (/documentos.*exhibidos|documentacion.*anexa|constancias.*acreditacion/.test(titleKey)) {
           return `DOCUMENTOS Y CONSTANCIAS EXHIBIDAS:\n\nSe exhiben y acompañan al presente ocurso los documentos y traslados conducentes que acreditan el debido cumplimiento de los extremos requeridos.`;
@@ -3046,9 +3083,10 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
           return `PERSONAS Y PROFESIONISTAS AUTORIZADOS:\n\nSe autoriza a los profesionistas designados en autos para intervenir en el desahogo del presente trámite procesal.`;
         }
       }
-      return `DESARROLLO DE BLOQUE: ${titleUpper}\n` +
-        (safeBlockText ? `${safeBlockText.slice(0, 1200)}\n\n` : '') +
-        `En relación con los autos del expediente ${expedienteNum}...`;
+      // Sin andamiaje interno: este relleno ya no imprime encabezados del motor ni una cola de relleno.
+      // El apartado queda marcado como pendiente (bloquea FINAL) con el texto original, si existe.
+      return (safeBlockText ? `${safeBlockText.slice(0, 1200)}\n\n` : '') +
+        `[DATO PENDIENTE: apartado «${titleUpper}» sin redacción — desarróllelo únicamente con información respaldada en el expediente ${expedienteNum} antes de presentar el escrito]`;
     }}
 }
 
@@ -3664,7 +3702,10 @@ export async function runGenerationPipeline(
   const suppliedSources = input.sourceDocuments || input.existingDocument?.sourceDocuments || [];
   const appealReview = isCivilFamilyAppeal(input.selectedDocumentType) && (input.requireAppealConfirmation || input.appealConfirmation)
     ? extractAppealResolutionReview(suppliedSources) : undefined;
-  const confirmedAppeal = appealReview ? validateAppealConfirmation(appealReview, input.appealConfirmation) : undefined;
+  // Confirmación explícita del abogado o provisional derivada de la resolución principal;
+  // sin ninguna de las dos (o con otra revisión de la fuente) la generación sigue bloqueada.
+  const appealGeneration = appealReview ? resolveAppealGeneration(appealReview, input.appealConfirmation) : undefined;
+  const confirmedAppeal = appealGeneration ? { eligible: appealGeneration.canGenerate, selected: appealGeneration.selected } : undefined;
   if (confirmedAppeal && !confirmedAppeal.eligible) {
     throw Object.assign(new Error('NEEDS_USER_INPUT: confirma partes, resolución, destinatario y notificación.'), { code: 'NEEDS_USER_INPUT' });
   }
@@ -3705,9 +3746,14 @@ export async function runGenerationPipeline(
       : createEmptyDocument(),
   ) as UniversalLegalDocument;
   const draftDepthProfile = input.draftDepth === undefined ? undefined : resolveDraftDepthProfile(input.draftDepth);
+  // La meta de páginas validada manda; `draftDepth` y `generationExtension` se conservan por compatibilidad.
+  const pageTarget = input.pageTarget === undefined ? undefined : parsePageTarget(input.pageTarget);
   const generationExtension = resolveGenerationExtensionContract(
-    draftDepthProfile ? generationExtensionForDraftDepth(draftDepthProfile) : input.generationExtension,
+    pageTarget
+      ? pageTargetToGenerationExtension(pageTarget)
+      : draftDepthProfile ? generationExtensionForDraftDepth(draftDepthProfile) : input.generationExtension,
   );
+  if (pageTarget) (doc.generationMetadata as any).pageTarget = pageTarget;
   let finalExpansionBudgetState = {
     hasAvailableContinuationBudget: false,
     hasAvailableCallBudget: false,
@@ -3982,7 +4028,17 @@ export async function runGenerationPipeline(
         autoridadResponsable: confirmedAppeal.selected.court,
       };
       // No adoption of allegations or merits; only confirmed identity and selected source range.
-      (doc.generationMetadata as any).appealResolutionConfirmation = { ...confirmation, resolution: confirmedAppeal.selected, opportunity: '[A VERIFICAR]' };
+      (doc.generationMetadata as any).appealResolutionConfirmation = {
+        ...confirmation, resolution: confirmedAppeal.selected, opportunity: '[A VERIFICAR]',
+        confirmationMode: appealGeneration?.mode, pendingFields: appealGeneration?.pendingFields ?? [],
+        antecedents: (appealReview?.resolutions ?? []).filter(r => r.id !== confirmedAppeal.selected!.id),
+      };
+    } else if (appealGeneration?.canGenerate && input.appealConfirmation) {
+      // Sin encabezados detectables: se genera el borrador y la resolución impugnada queda pendiente.
+      (doc.generationMetadata as any).appealResolutionConfirmation = {
+        ...input.appealConfirmation, resolution: undefined, opportunity: '[A VERIFICAR]',
+        confirmationMode: appealGeneration.mode, pendingFields: appealGeneration.pendingFields, antecedents: [],
+      };
     }
     traceContext?.snapshotCaseAnalysis(caseAnalysis);
 
@@ -3996,7 +4052,7 @@ export async function runGenerationPipeline(
     };
 
     // A5: las partes confirmadas (manual > detected) pisan a las inferidas del texto crudo.
-    const effectiveSavedParties = confirmedAppeal?.selected && input.appealConfirmation ? input.appealConfirmation.parties : input.savedParties;
+    const effectiveSavedParties = confirmedAppeal?.selected && input.appealConfirmation ? consolidatePartiesByRole(input.appealConfirmation.parties) : input.savedParties;
     if (confirmedAppeal?.selected) doc.parties = { ...caseAnalysis.parties };
     applySavedCaseParties(doc, effectiveSavedParties);
     (doc as any).caseParties = effectiveSavedParties;
@@ -4275,8 +4331,7 @@ export async function runGenerationPipeline(
       useReferenceStructure: input.workflow?.selection.mode === 'personal_template' || input.workflow?.selection.mode === 'reference_document',
     });
     doc.sections = plan.sections.filter((section) => !(
-      isContestacionType(doc.documentType, doc.documentTypeLabel) &&
-      /alegato/i.test(section.title) &&
+      isOptInSection(doc.documentType, doc.documentTypeLabel, section.title) &&
       !shouldIncludeAlegatos(input)
     ));
     if (generationExtension.generationMode === 'extended-legal') {
@@ -4461,7 +4516,10 @@ export async function runGenerationPipeline(
     const taskAccountingFindings: DocumentAssemblyFinding[] = [];
     let documentState: DocumentState = createDocumentState(caseAnalysis, doc.legalIssueMatrix);
     const markBlockAuthorityReferences = (block: ContentBlock) => {
-      if (block.generatedBy !== 'AI' && block.provenance !== 'AI_GENERATED') return;
+      // El texto determinista también cita artículos sin verificación oficial: se marca igual.
+      // Solo se exime el texto literal de la fuente y el escrito/edición del propio abogado.
+      if (block.generatedBy === 'USER' || block.generatedBy === 'SOURCE_DIRECT' || block.isManuallyEdited) return;
+      if (block.generatedBy !== 'AI' && block.generatedBy !== 'DETERMINISTIC' && block.generatedBy !== 'FALLBACK' && block.provenance !== 'AI_GENERATED') return;
       const result = markUnverifiedAuthorityReferences({
         text: block.text || '',
         blockId: block.id,
@@ -4480,10 +4538,24 @@ export async function runGenerationPipeline(
     // Allocate section budgets BEFORE generation so each generateSection call
     // sees the correct word target and continuation count.
     if (generationExtension.generationMode === 'extended-legal') {
+      // Con una meta de páginas explícita, el presupuesto discrecional excluye las secciones de tamaño
+      // estructural y descuenta lo que estas ya ocupan (identificación, y en contestaciones la respuesta
+      // individual a cada hecho y prestación): la meta gobierna solo el contenido que puede variar.
+      const responseDocument = isContestacionType(doc.documentType, doc.documentTypeLabel);
+      const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+      const structuralWords = pageTarget
+        ? doc.sections
+          .filter((s) => isStructuralSection(s, { responseDocument }))
+          .reduce((sum, s) => sum + (s.content || []).reduce((n, b) => n + countWords(b.text || ''), 0), 0)
+        : 0;
+      const discretionaryWords = pageTarget
+        ? Math.max(Math.round(generationExtension.targetWords * 0.3), generationExtension.targetWords - structuralWords)
+        : generationExtension.targetWords;
       generationExtension.sectionBudgets = allocateSectionBudgets(
         doc.sections.map((s) => ({ id: s.id, title: s.title, type: s.type })),
-        generationExtension.targetWords,
+        discretionaryWords,
         generationExtension.maxContinuationsPerSection,
+        pageTarget ? { responseDocument, discretionaryOnly: true } : {},
       );
       (doc.generationMetadata as any).generationExtension = generationExtension;
     }
@@ -4789,7 +4861,7 @@ export async function runGenerationPipeline(
 
     if (generationExtension.generationMode === 'extended-legal') {
       jobUpdate((input as any).jobId, { phase: 'extend', stage: 'Extensión jurídica' });
-      const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext });
+      const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
       finalExpansionBudgetState = {
         hasAvailableContinuationBudget: expansion.continuationBudgetAvailable === true,
         hasAvailableCallBudget: expansion.callBudgetAvailable === true,
@@ -4977,9 +5049,19 @@ export async function runGenerationPipeline(
 
         const warningCode = `REQUIRED_SECTION_GENERATION_PENDING:${section.id}`;
         const pendingMarker = '[DATO PENDIENTE / GENERACIÓN PENDIENTE DE REVISIÓN]';
+        // En una contestación, hechos y prestaciones sin redacción aceptada no se
+        // reducen a un aviso: se transcribe cada uno con su espacio de postura para
+        // que el abogado conteste todos y cada uno (sin afirmar ni negar nada).
+        const responseProjection = /contestaci/i.test(doc.documentType || '')
+          ? section.id === 'sec-con-hechos' ? renderFactResponseProjection(caseAnalysis.richCaseAnalysis)
+            : section.id === 'sec-con-prestaciones' ? renderClaimResponseProjection(caseAnalysis.richCaseAnalysis)
+              : ''
+          : '';
         if (!(section.content || []).some((block) => block.text.includes(pendingMarker))) {
           section.content = [...(section.content || []), createContentBlock(
-            `${pendingMarker}\nNo fue posible generar contenido verificable para la sección «${contract.title || section.title}». Complete únicamente con información respaldada en el expediente y sométala a revisión.`,
+            responseProjection
+              ? `${pendingMarker}\n${responseProjection}`
+              : `${pendingMarker}\nApartado «${contract.title || section.title}» pendiente de redacción: desarróllelo únicamente con información respaldada en el expediente antes de presentar el escrito.`,
             'GENERATED_ARGUMENT',
             {
               provenance: 'TEMPLATE_STRUCTURE',
@@ -5022,6 +5104,12 @@ export async function runGenerationPipeline(
         coverageItemIds: [],
         sectionIds: [],
       }];
+    }
+
+    // Higiene final: sin andamiaje ni párrafos repetidos entre secciones (ver generatedOutputValidator).
+    {
+      const hygiene = enforceOutputHygiene(doc);
+      if (hygiene.actions.length > 0) traceContext?.addWarning(`OUTPUT_HYGIENE:${hygiene.actions.length}`);
     }
 
     if (generationExtension.generationMode === 'extended-legal') {
@@ -5068,6 +5156,21 @@ export async function runGenerationPipeline(
           hasUnresolvedAttorneyQuestions,
         });
         (doc.generationMetadata as any).generationExtension = generationExtension;
+        if (pageTarget) {
+          // «Objetivo: N · Resultado: M»: M se mide sobre el documento renderizado, no se estima.
+          const paragraphs = doc.sections.flatMap((section) => (section.content || []).flatMap((block) =>
+            splitParagraphs(block.text || '').map((text, index) => ({ id: `${section.id}/${block.id}#${index}`, text }))));
+          const redundancy = redundancyRatio(paragraphs, 0.85);
+          const result = evaluatePageTarget(pageTarget, finalPageMetrics.actualPages, redundancy.ratio);
+          (doc.generationMetadata as any).pageTargetResult = result;
+          if (result.notice) doc.validation.warnings.push({ checkId: 'PAGE_TARGET_UNMET', message: result.notice } as ValidationIssue);
+          if (redundancy.ratio > MAX_REDUNDANCY_RATIO) {
+            doc.validation.warnings.push({
+              checkId: 'REDUNDANCY_THRESHOLD_EXCEEDED',
+              message: `Se detectó texto repetido (${(redundancy.ratio * 100).toFixed(1)} % de los párrafos comparables); revisa los bloques duplicados antes de presentar el escrito.`,
+            } as ValidationIssue);
+          }
+        }
       } catch (measurementError) {
         const message = measurementError instanceof Error ? measurementError.message : String(measurementError);
         generationExtension.extensionTargetUnmet = true;
@@ -5115,6 +5218,18 @@ export async function runGenerationPipeline(
           sectionId: section.id,
         })),
     ));
+    // La validación se reconstruye arriba: los avisos de la meta de extensión se reaplican desde el
+    // resultado medido para que no se pierdan.
+    const recordedPageTarget = (doc.generationMetadata as any).pageTargetResult as PageTargetResult | undefined;
+    if (recordedPageTarget?.notice) {
+      doc.validation.warnings.push({ checkId: 'PAGE_TARGET_UNMET', message: recordedPageTarget.notice } as ValidationIssue);
+    }
+    if ((recordedPageTarget?.redundancyRatio ?? 0) > MAX_REDUNDANCY_RATIO) {
+      doc.validation.warnings.push({
+        checkId: 'REDUNDANCY_THRESHOLD_EXCEEDED',
+        message: `Se detectó texto repetido (${((recordedPageTarget?.redundancyRatio ?? 0) * 100).toFixed(1)} % de los párrafos comparables); revisa los bloques duplicados antes de presentar el escrito.`,
+      } as ValidationIssue);
+    }
     const requestContractErrors = validateGenerationRequestContract(doc);
     if (requestContractErrors.length) {
       doc.validation.isValid = false;

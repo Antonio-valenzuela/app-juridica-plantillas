@@ -1,4 +1,6 @@
 import type { UploadedSourceDocument } from './types';
+import { classifyMatter } from './matterClassification';
+import { continuesParagraph, isClosingLine, startsListItem } from './textReflow';
 import {
   normalizeSourceDocumentType,
   UNKNOWN_SOURCE_DOCUMENT_TYPE,
@@ -215,16 +217,38 @@ function segmentBoundary(lines: SourceLine[]): number {
   return metadata >= 0 ? metadata : lines.length;
 }
 
+/**
+ * Fórmula de comparecencia de una PARTE en el proemio ("por mi propio derecho…
+ * comparezco y expongo", "en mi carácter de apoderado…"). Una resolución judicial
+ * nunca comparece: si el proemio la contiene, el documento es un escrito de parte
+ * aunque cite sentencias, considerandos o magistrados.
+ */
+const PARTY_APPEARANCE_RE = /\b(?:comparezco|comparecemos|por\s+(?:mi|nuestro|su)\s+propio\s+derecho|por\s+propio\s+derecho|en\s+mi\s+car[aá]cter\s+de|ante\s+(?:usted(?:es)?|vuestra\s+se[ñn]or[ií]a)\s+(?:con\s+el\s+debido\s+respeto\s+)?(?:comparezco|expongo))\b/i;
+
+/** True si el proemio del documento es la comparecencia de una parte (no una resolución). */
+export function isPartyWriting(text: string): boolean {
+  return PARTY_APPEARANCE_RE.test((text || '').slice(0, 3_000));
+}
+
 function documentFamily(caseText: string): SourceDocumentFamily {
-  if (/^\s*(?:demanda|escrito\s+inicial)\b/im.test(caseText)) return 'DEMANDA';
+  // El título de una demanda va al INICIO del documento. Con la bandera multilínea
+  // aplicada a todo el texto, cualquier foja de un expediente largo que empezara con
+  // «Demanda…» (p. ej. «Demanda inicial agregada a los autos») convertía todo el PDF
+  // —incluida una resolución— en demanda.
+  const openingLines = caseText.split(/\r?\n/).filter((line) => line.trim()).slice(0, 10).join('\n');
+  if (/^\s*(?:demanda|escrito\s+inicial)\b/im.test(openingLines)) return 'DEMANDA';
   const firstLine = caseText.split(/\r?\n/).find((line) => line.trim()) || '';
   // An explicit resolution title is stronger than phrases such as
   // "autoridad responsable" that also appear in an amparo complaint.
   if (/^\s*(?:sentencia|ejecutoria)\b.*\bamparo\b/i.test(firstLine)) return 'SENTENCIA';
+  const partyWriting = isPartyWriting(caseText);
   // Una resolución puede narrar una demanda, una contestación y una réplica.
-  // Las señales propias de sentencia deben ganar a ese vocabulario incidental.
-  if (/\b(?:sentencia|laudo|resuelve|considerando|resultando)\b/i.test(caseText)
+  // Las señales propias de sentencia deben ganar a ese vocabulario incidental,
+  // salvo que el proemio sea la comparecencia de una parte que solo CITA la resolución.
+  if (!partyWriting
+    && /\b(?:sentencia|laudo|resuelve|considerando|resultando)\b/i.test(caseText)
     && /\b(?:visto|resuelve|magistrado|tribunal\s+colegiado)\b/i.test(caseText)) return 'SENTENCIA';
+  if (partyWriting && /\b(?:solicit(?:o|ar)\s+el\s+amparo|amparo\s+y\s+protecci[oó]n\s+de\s+la\s+justicia\s+federal)\b/i.test(caseText)) return 'AMPARO';
   if (/\b(?:vengo\s+a\s+)?(?:demandar|entablar\s+formal\s+demanda|interponer\s+juicio)\b/i.test(caseText)) return 'DEMANDA';
   if (/\bcontestaci[oó]n\s+(?:de\s+la\s+)?demanda\b/i.test(caseText)) return 'CONTESTACION';
   if (/\b(?:interpongo|interponer)\s+recurso\b|\bagravio(?:s)?\b/i.test(caseText)) return 'RECURSO';
@@ -232,25 +256,22 @@ function documentFamily(caseText: string): SourceDocumentFamily {
   return 'UNKNOWN';
 }
 
+/**
+ * Materia por combinación de señales (foro, declaración, legislación, contenido);
+ * ver matterClassification.ts. Sin señales suficientes queda NO_IDENTIFICADA.
+ */
 function matterFor(caseText: string): string {
-  const opening = caseText.slice(0, 6_000);
-  if (/\b(?:juez\s+de\s+lo\s+familiar|alimentos?|pensi[oó]n\s+alimenticia|padre|hijo|patria\s+potestad|custodia)\b/i.test(opening)) return 'FAMILIAR';
-  // Un encabezado procesal explícito controla vocabulario incidental del cuerpo.
-  if (/\b(?:demanda|escrito\s+inicial)\b[^\n]{0,80}\b(?:civil|responsabilidad\s+civil)\b/i.test(opening)
-    || /\b(?:juez|juzgado)\s+de\s+lo\s+civil\b/i.test(opening)
-    || /\b(?:materia|v[ií]a)\s+civil\b/i.test(opening)) return 'CIVIL';
-  if (/\b(?:demanda\s+mercantil|materia\s+mercantil|juicio\s+(?:ejecutivo|ordinario|oral)\s+mercantil)\b/i.test(opening)) return 'MERCANTIL';
-  if (/\b(?:demanda\s+de\s+amparo(?:\s+directo)?|juicio\s+de\s+amparo\s+directo)\b/i.test(opening)) return 'AMPARO';
-  if (/\b(?:tribunal\s+de\s+arbitraje|trabajador(?:a|es)?|despido|salario|reinstalaci[oó]n|relaci[oó]n\s+laboral|prestaciones\s+laborales?)\b/i.test(opening)) return 'LABORAL';
-  if (/\b(?:oral\s+mercantil|materia\s+oral\s+mercantil|c[oó]digo\s+de\s+comercio|acci[oó]n\s+rescisoria|contrato\s+de\s+adhesi[oó]n)\b/i.test(opening)) return 'MERCANTIL';
-  if (/\b(?:materia\s+civil|juez\s+en\s+materia\s+civil|juez\s+de\s+lo\s+civil|v[ií]a\s+civil|acci[oó]n\s+hipotecaria|c[oó]digo\s+civil)\b/i.test(opening)) return 'CIVIL';
-  if (/\b(?:administrativ|tribunal\s+de\s+justicia\s+administrativa)\b/i.test(opening)) return 'ADMINISTRATIVA';
-  if (/\bamparo|constitucional\b/i.test(opening)) return 'AMPARO';
-  return 'NO_IDENTIFICADA';
+  return classifyMatter(caseText).matter;
 }
 
 function containerType(family: SourceDocumentFamily, matter: string, caseText: string): SourceDocumentTypeValue {
   if (family === 'DEMANDA') {
+    // La vía de amparo se decide por el encabezado, antes que la materia
+    // sustantiva: una demanda de amparo directo contra un laudo es materia
+    // laboral, pero sigue siendo una DEMANDA DE AMPARO, no una demanda laboral.
+    const opening = caseText.slice(0, 3_000);
+    if (/\b(?:demanda\s+de\s+amparo\s+directo|juicio\s+de\s+amparo\s+directo)\b/i.test(opening)) return 'DEMANDA_AMPARO_DIRECTO';
+    if (/\bdemanda\s+de\s+amparo\b/i.test(opening)) return 'DEMANDA_AMPARO';
     if (matter === 'LABORAL') return 'DEMANDA_LABORAL';
     if (matter === 'MERCANTIL') return 'DEMANDA_MERCANTIL';
     if (matter === 'CIVIL' || matter === 'FAMILIAR') return 'DEMANDA_CIVIL';
@@ -260,7 +281,11 @@ function containerType(family: SourceDocumentFamily, matter: string, caseText: s
   }
   if (family === 'CONTESTACION') return 'CONTESTACION_DEMANDA';
   if (family === 'RECURSO') return 'RECURSO';
-  if (family === 'AMPARO') return 'DEMANDA_AMPARO';
+  if (family === 'AMPARO') {
+    return /\bamparo\s+directo\b|\btribunal(?:es)?\s+colegiado|\bpor\s+conducto\s+de\s+la\s+autoridad\s+responsable\b/i.test(caseText)
+      ? 'DEMANDA_AMPARO_DIRECTO'
+      : 'DEMANDA_AMPARO';
+  }
   if (family === 'SENTENCIA') return /\bamparo\b/i.test(caseText) ? 'SENTENCIA_AMPARO_DIRECTO' : 'SENTENCIA_O_RESOLUCION';
   return UNKNOWN_SOURCE_DOCUMENT_TYPE;
 }
@@ -274,23 +299,42 @@ function sectionSpans(
   const facts: SourceGroundedSpan[] = [];
   const claims: SourceGroundedSpan[] = [];
   const evidence: SourceGroundedSpan[] = [];
+  const text = sourceText(source);
+  const compactOf = (line: SourceLine) => line.text.replace(/[\s:;,.\-]+$/, '').trim().replace(/\s+/g, '');
+  // Los puntos petitorios piden actos al juzgado; solo hacen las veces de
+  // prestaciones cuando el escrito no tiene una sección propia de prestaciones.
+  const hasReliefSection = lines.slice(startIndex, endIndex).some((line) => /^(?:PRESTACIONES?|PRETENSIONES?|CONCEPTOS?)$/i.test(compactOf(line)));
   let section: 'FACT' | 'CLAIM' | 'EVIDENCE' | undefined;
+  let previous: { line: SourceLine; list: SourceGroundedSpan[]; inItem: boolean } | undefined;
   for (let index = startIndex; index < endIndex; index += 1) {
     const line = lines[index];
-    const normalized = line.text.replace(/[\s:;,.\-]+$/, '').trim();
-    const compact = normalized.replace(/\s+/g, '');
+    const compact = compactOf(line);
     const isFactHeading = /^(?:HECHOS?|ANTECEDENTES?)$/i.test(compact);
-    const isClaimHeading = /^(?:PRESTACIONES?|PRETENSIONES?|CONCEPTOS?|PETITORIOS?|PUNTOSPETITORIOS?)$/i.test(compact);
+    const isPetitionHeading = /^(?:PETITORIOS?|PUNTOSPETITORIOS?)$/i.test(compact);
+    const isClaimHeading = /^(?:PRESTACIONES?|PRETENSIONES?|CONCEPTOS?)$/i.test(compact) || (isPetitionHeading && !hasReliefSection);
     const isEvidenceHeading = /^(?:PRUEBAS?|MEDIOSDEPRUEBA)$/i.test(compact);
     if (isFactHeading) section = 'FACT';
     else if (isClaimHeading) section = 'CLAIM';
     else if (isEvidenceHeading) section = 'EVIDENCE';
-    else if (STRUCTURAL_HEADING_RE.test(line.text)) section = undefined;
-    if (!section || isFactHeading || isClaimHeading || isEvidenceHeading) continue;
+    else if (isPetitionHeading || STRUCTURAL_HEADING_RE.test(line.text) || isClosingLine(line.text)) section = undefined;
+    if (!section || isFactHeading || isClaimHeading || isEvidenceHeading) {
+      previous = undefined;
+      continue;
+    }
+    const list = section === 'FACT' ? facts : section === 'CLAIM' ? claims : evidence;
+    // Renglón envuelto del mismo hecho/prestación: se amplía el tramo anterior
+    // con el texto ORIGINAL exacto (la compuerta factual compara por offsets).
+    const separatedByBlankLine = previous ? /\n[ \t]*\r?\n/.test(text.slice(previous.line.end, line.start)) : true;
+    if (previous && previous.list === list && !separatedByBlankLine
+      && continuesParagraph(previous.line.text, line.text, { inItem: previous.inItem })) {
+      const last = list[list.length - 1];
+      list[list.length - 1] = { ...last, endOffset: line.end, text: text.slice(last.startOffset, line.end) };
+      previous = { line: { ...line }, list, inItem: previous.inItem };
+      continue;
+    }
     const item = span(source, line, section === 'FACT' ? 'CASE_FACT' : section === 'CLAIM' ? 'CASE_CLAIM' : 'CASE_EVIDENCE', `Span ubicado bajo la sección principal ${section}.`, { canUseAsCaseFact: section === 'FACT' });
-    if (section === 'FACT') facts.push(item);
-    else if (section === 'CLAIM') claims.push(item);
-    else evidence.push(item);
+    list.push(item);
+    previous = { line, list, inItem: startsListItem(line.text) };
   }
   return { facts, claims, evidence };
 }

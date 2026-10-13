@@ -315,17 +315,21 @@ function paragraphTokens(paragraph: RenderParagraph): StyledToken[] {
 
 function lineFragments(
   tokens: readonly StyledToken[],
-  maxWidth: number,
+  bodyMaxWidth: number,
+  firstLineMaxWidth = bodyMaxWidth,
 ): { lines: PlacedFragment[][]; paragraphBreaks: number } {
   const lines: PlacedFragment[][] = [];
   let current: PlacedFragment[] = [];
   let currentWidth = 0;
   let paragraphBreaks = 0;
+  // Con sangría de primera línea, el primer renglón dispone de menos ancho.
+  let maxWidth = firstLineMaxWidth;
 
   const pushCurrent = () => {
     if (current.length > 0) lines.push(current);
     current = [];
     currentWidth = 0;
+    if (lines.length > 0) maxWidth = bodyMaxWidth;
   };
 
   for (const token of tokens) {
@@ -395,10 +399,11 @@ function paragraphLines(
   const size = paragraphSize(paragraph);
   const lineHeight = size * parseLineHeight(paragraph.style.lineHeight);
   const indent = indentPoints(paragraph.style, size);
+  const firstIndent = indentPoints({ indent: paragraph.style.firstLineIndent }, size);
   const width = Math.max(1, contentWidth - indent);
   const wrapped = paragraph.role === 'SPACER'
     ? { lines: [], paragraphBreaks: 0 }
-    : lineFragments(paragraphTokens(paragraph), width);
+    : lineFragments(paragraphTokens(paragraph), width, Math.max(1, width - firstIndent));
   const fragments = wrapped.lines;
   const requestedAlign = paragraph.style.textAlign
     || (paragraph.role === 'TITLE' ? 'center'
@@ -408,9 +413,10 @@ function paragraphLines(
     ? 'left'
     : requestedAlign;
   const lines = fragments.map((line, index) => {
+    const lineIndent = index === 0 ? firstIndent : 0;
     const widthUsed = lineWidth(line);
-    const extra = width - widthUsed;
-    let x = indent;
+    const extra = width - lineIndent - widthUsed;
+    let x = indent + lineIndent;
     let justifyGapThousandths: number | undefined;
     if (align === 'center') x = indent + Math.max(0, extra / 2);
     if (align === 'right') x = indent + Math.max(0, extra);

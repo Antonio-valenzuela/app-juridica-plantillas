@@ -15,7 +15,16 @@ import {
 import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { isAmparoDocumentType } from './caseContext';
-import { buildSourceGrounding } from './sourceGrounding';
+import { buildSourceGrounding, isPartyWriting } from './sourceGrounding';
+import { classifyMatter } from './matterClassification';
+import {
+  RESOLUTION_KINDS,
+  describeAct,
+  isMultiActDocument,
+  proceduralActsOf,
+  type ProceduralAct,
+  type ProceduralActKind,
+} from './proceduralActs';
 
 export { SOURCE_TYPE_UNKNOWN } from './sourceDocumentTypes';
 
@@ -116,11 +125,34 @@ export interface SourceOutputCompatibilityMetadata {
   compatibilityStatus: SourceCompatibilityStatus;
 }
 
+/** Aviso no bloqueante que el abogado debe ver (p. ej. materia por confirmar). */
+export interface SourceCompatibilityAdvisory {
+  code: 'MATTER_PROCEDURAL_CODE_CONFIRMATION' | 'ACT_APPEALABILITY_CONFIRMATION';
+  message: string;
+}
+
+/** Acto procesal que controla la actuación elegida dentro de un PDF con varios actos. */
+export interface ControllingActInfo {
+  sourceId: string;
+  kind: ProceduralActKind;
+  label: string;
+  startPage: number;
+  endPage: number;
+  sourceType: SourceDocumentTypeValue;
+  matter: string;
+  evidence: string;
+  decidesIncident?: boolean;
+  /** Todos los actos detectados en el PDF, para trazabilidad y referencias de página. */
+  actsInDocument: Array<{ kind: ProceduralActKind; startPage: number; endPage: number }>;
+}
+
 export interface SourceOutputCompatibilityResult extends SourceOutputCompatibilityMetadata {
   status: 'COMPATIBLE' | 'NEEDS_INPUT' | 'NOT_APPLICABLE';
   code?: typeof EXTRACTION_INCOMPLETE | typeof SOURCE_TYPE_UNKNOWN;
   missingRequirements: string[];
   sources?: SourceCompatibilitySourceResult[];
+  advisories?: SourceCompatibilityAdvisory[];
+  controllingActs?: ControllingActInfo[];
 }
 
 export type SourceCompatibilitySourceStatus =
@@ -302,6 +334,16 @@ export function inferSourceOutputType(
     if (civil) return 'DEMANDA_CIVIL';
     return 'DEMANDA';
   }
+  // Un escrito en el que una PARTE comparece (incidente, promoción, alegatos…)
+  // puede citar sentencias, laudos o acuerdos, pero no es una resolución. Si no
+  // encaja en otro tipo queda desconocido y el abogado lo confirma.
+  if (isPartyWriting(layout)) {
+    if (/\b(?:replica|réplica)\b/.test(corpus)) return 'REPLICA';
+    if (/\bduplica\b/.test(corpus)) return 'DUPLICA';
+    if (/contestacion\s+de\s+(?:la\s+)?demanda|contestacion\s+a\s+la\s+demanda/.test(corpus)) return 'CONTESTACION_DEMANDA';
+    if (/\b(?:interpongo|interponer)\s+(?:el\s+)?recurso\b|\bagravios?\b/.test(corpus)) return 'RECURSO';
+    return UNKNOWN_SOURCE_DOCUMENT_TYPE;
+  }
   // Una simple referencia a un número de amparo dentro de una réplica no
   // convierte el escrito en una sentencia. La ruta de sentencia exige, además
   // del encabezado, señales documentales propias de una resolución.
@@ -358,7 +400,12 @@ export function inferSourceOutputType(
 }
 
 function inferSourceMatter(sourceType: InferredSourceDocumentType, corpus: string, fallback?: string, layout = corpus): string {
-  if (sourceType === UNKNOWN_SOURCE_DOCUMENT_TYPE) return matterLabel(fallback);
+  if (sourceType === UNKNOWN_SOURCE_DOCUMENT_TYPE) {
+    // Tipo documental desconocido no implica materia desconocida: el foro y la
+    // legislación pueden bastar. Sin señales suficientes, se respeta el respaldo.
+    const bySignals = classifyMatter(layout).matter;
+    return bySignals !== 'NO_IDENTIFICADA' ? bySignals : matterLabel(fallback);
+  }
   if (sourceDocumentMatter(sourceType as SourceDocumentType) === 'MERCANTIL') return 'MERCANTIL';
   if (/LABORAL/.test(sourceType) || laborMatterForCorpus(corpus, layout)) return 'LABORAL';
   if (/ADMINISTRATIVA/.test(sourceType) || /administrativ/.test(corpus)) return 'ADMINISTRATIVA';
@@ -897,7 +944,7 @@ function evaluateCivilSource(
   };
 }
 
-export function evaluateSourceOutputCompatibility(
+function evaluateSourceOutputCompatibilityCore(
   input: SourceOutputCompatibilityInput,
   rules: SourceOutputCompatibilityRuleMap = SOURCE_OUTPUT_COMPATIBILITY_RULES,
 ): SourceOutputCompatibilityResult {
@@ -1078,6 +1125,216 @@ export function evaluateSourceOutputCompatibility(
     ...(missingRequirements.length > 0 ? { code: EXTRACTION_INCOMPLETE } : {}),
     missingRequirements,
     sources: [],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compatibilidad por ACTO procesal (actuación elegida × naturaleza del acto × materia)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function pseudoSourceForAct(source: UploadedSourceDocument, act: ProceduralAct, forcedType?: string): UploadedSourceDocument {
+  const text = act.pages.map((page) => page.text).join('\n');
+  const { sourceDocumentType: _t, documentType: _d, materia: _m, ...rest } = (source.classification || {}) as Record<string, unknown>;
+  return { ...source, pages: act.pages, extractedText: text, content: text, classification: forcedType ? { ...rest, sourceDocumentType: forcedType } : rest };
+}
+
+function actSourceTypeFor(kind: ProceduralActKind): InferredSourceDocumentType {
+  if (kind === 'SENTENCIA_DEFINITIVA') return 'SENTENCIA_O_RESOLUCION';
+  if (kind === 'AUTO_INTERLOCUTORIO' || kind === 'ACUERDO_TRAMITE') return 'ACUERDO';
+  if (kind === 'SENTENCIA_AMPARO') return 'SENTENCIA_AMPARO';
+  if (kind === 'LAUDO') return 'LAUDO';
+  return UNKNOWN_SOURCE_DOCUMENT_TYPE;
+}
+
+function actSourceType(act: ProceduralAct, source: UploadedSourceDocument, documentMatter: string): InferredSourceDocumentType {
+  switch (act.kind) {
+    case 'SENTENCIA_AMPARO':
+      return /amparo\s+directo/.test(normalize(act.pages.map((page) => page.text).join('\n'))) ? 'SENTENCIA_AMPARO_DIRECTO' : 'SENTENCIA_AMPARO';
+    case 'CONSTANCIA_O_ANEXO':
+    case 'DESCONOCIDO':
+      return UNKNOWN_SOURCE_DOCUMENT_TYPE;
+    case 'SENTENCIA_DEFINITIVA':
+    case 'AUTO_INTERLOCUTORIO':
+    case 'ACUERDO_TRAMITE':
+    case 'LAUDO':
+      return actSourceTypeFor(act.kind);
+    case 'DEMANDA': {
+      const inferred = inferSourceOutputType([pseudoSourceForAct(source, act)]);
+      if (inferred !== 'DEMANDA') return inferred;
+      // Demanda sin materia en el encabezado: la materia del propio acto la tipifica.
+      const matter = act.matter !== 'NO_IDENTIFICADA' ? act.matter : documentMatter;
+      if (matter === 'LABORAL') return 'DEMANDA_LABORAL';
+      if (matter === 'MERCANTIL') return 'DEMANDA_MERCANTIL';
+      if (matter === 'CIVIL' || matter === 'FAMILIAR') return 'DEMANDA_CIVIL';
+      return inferred;
+    }
+    default:
+      return inferSourceOutputType([pseudoSourceForAct(source, act)]);
+  }
+}
+
+/** Prioridad al elegir el acto a impugnar cuando varios son aceptables (menor = mejor). */
+const RESOLUTION_RANK: Partial<Record<ProceduralActKind, number>> = {
+  SENTENCIA_DEFINITIVA: 0, SENTENCIA_AMPARO: 1, LAUDO: 2, AUTO_INTERLOCUTORIO: 3, ACUERDO_TRAMITE: 4,
+};
+
+interface NarrowedSources {
+  sources: UploadedSourceDocument[];
+  controllingActs: ControllingActInfo[];
+}
+
+/**
+ * Sustituye cada PDF de varios actos por el acto que controla la actuación
+ * elegida. Documentos de un solo acto no se tocan.
+ *  - Salidas que parten de una resolución (apelación, amparo, queja…): el acto
+ *    aceptable de mayor jerarquía y, a igual jerarquía, el más reciente.
+ *  - Salidas que parten de un escrito (contestación…): el primero aceptable.
+ *  - Si ningún acto es aceptable se conserva el más representativo (la última
+ *    resolución, o el primer acto) para que el rechazo nombre el acto real.
+ */
+function narrowToControllingActs(
+  sources: UploadedSourceDocument[],
+  policy: SourceOutputCompatibilityPolicy,
+): NarrowedSources {
+  const accepted = new Set<string>(allowedSourceTypes(policy));
+  if (accepted.size === 0) return { sources, controllingActs: [] };
+  const wantsResolution = RESOLUTION_KINDS.some((kind) => accepted.has(actSourceTypeFor(kind)));
+  const controllingActs: ControllingActInfo[] = [];
+  const narrowed = sources.map((source) => {
+    if (sourceRoleFor(source) === 'REFERENCE') return source;
+    const acts = proceduralActsOf(source);
+    if (!isMultiActDocument(acts)) {
+      // Un solo acto: la fuente no se sustituye, pero se registra el acto (y sus páginas)
+      // para el aviso de procedencia y las referencias de página.
+      const only = acts.filter((act) => act.kind !== 'CONSTANCIA_O_ANEXO' && act.kind !== 'DESCONOCIDO');
+      if (only.length === 1 && RESOLUTION_KINDS.includes(only[0].kind)) {
+        controllingActs.push({
+          sourceId: source.id,
+          kind: only[0].kind,
+          label: describeAct(only[0].kind),
+          startPage: acts[0].startPage,
+          endPage: acts[acts.length - 1].endPage,
+          sourceType: actSourceTypeFor(only[0].kind),
+          matter: only[0].matter,
+          evidence: only[0].evidence,
+          ...(only[0].decidesIncident ? { decidesIncident: true } : {}),
+          actsInDocument: acts.map((act) => ({ kind: act.kind, startPage: act.startPage, endPage: act.endPage })),
+        });
+        // Una resolución con encabezado de foro y fórmula dispositiva es evidencia estructural
+        // suficiente: si la inferencia global la dejó sin tipo (no menciona «auto», «acuerdo»
+        // o «sentencia»), se fija el tipo del acto. Nunca sustituye un tipo ya identificado.
+        if (only[0].confidence >= 0.75 && inferSourceOutputType([source]) === UNKNOWN_SOURCE_DOCUMENT_TYPE) {
+          const { sourceDocumentType: _t, documentType: _d, ...rest } = (source.classification || {}) as Record<string, unknown>;
+          return { ...source, classification: { ...rest, sourceDocumentType: actSourceTypeFor(only[0].kind) } };
+        }
+      }
+      return source;
+    }
+    // La materia del propio acto manda; la del PDF completo solo cubre actos sin señales.
+    const documentMatter = inferSourceMatterForDocuments([source], undefined);
+    for (const act of acts) if (act.matter === 'NO_IDENTIFICADA') act.matter = documentMatter;
+    const typed = acts
+      .map((act) => ({ act, type: actSourceType(act, source, documentMatter) }))
+      .filter((entry) => entry.type !== UNKNOWN_SOURCE_DOCUMENT_TYPE);
+    if (typed.length === 0) return source;
+    const matterBlocked = (matter: string) => policy.incompatibleMatterRules.some((rule) => normalize(rule.matter) === normalize(matter));
+    const candidates = typed.filter((entry) => accepted.has(entry.type) && !matterBlocked(entry.act.matter));
+    let chosen: (typeof typed)[number];
+    if (candidates.length > 0) {
+      chosen = wantsResolution
+        ? [...candidates].sort((a, b) => (RESOLUTION_RANK[a.act.kind] ?? 9) - (RESOLUTION_RANK[b.act.kind] ?? 9) || b.act.startPage - a.act.startPage)[0]
+        : [...candidates].sort((a, b) => a.act.startPage - b.act.startPage)[0];
+    } else {
+      // Ningún acto es aceptable: la segmentación es heurística y no debe EMPEORAR el
+      // veredicto. Se conserva la fuente completa y decide la ruta de inferencia heredada.
+      return source;
+    }
+    controllingActs.push({
+      sourceId: source.id,
+      kind: chosen.act.kind,
+      label: describeAct(chosen.act.kind),
+      startPage: chosen.act.startPage,
+      endPage: chosen.act.endPage,
+      sourceType: chosen.type,
+      matter: chosen.act.matter,
+      evidence: chosen.act.evidence,
+      ...(chosen.act.decidesIncident ? { decidesIncident: true } : {}),
+      actsInDocument: acts.map((act) => ({ kind: act.kind, startPage: act.startPage, endPage: act.endPage })),
+    });
+    // El tipo ya determinado para el acto se fija como clasificación explícita: el núcleo no debe re-inferirlo.
+    return pseudoSourceForAct(source, chosen.act, chosen.type);
+  });
+  return { sources: narrowed, controllingActs };
+}
+
+/**
+ * Regla de materia. Tipo de acto y materia sustantiva son dimensiones separadas.
+ * - Materias que el catálogo declara incompatibles (mercantil, laboral…) bloquean:
+ *   lo aplica el núcleo con `incompatibleMatterRules`.
+ * - Civil y familiar son áreas distintas del catálogo, pero en varias entidades
+ *   los juicios familiares se tramitan con el código procesal civil local. La
+ *   afinidad NO es una equivalencia: nunca se acepta en silencio ni se bloquea.
+ *   Pasa con un aviso visible para que el abogado confirme el código procesal
+ *   aplicable. REVISAR CON ABOGADO por jurisdicción antes de certificar.
+ */
+const MATTER_PROCEDURAL_AFFINITY: ReadonlyArray<{ outputArea: string; sourceMatter: string; message: (label: string) => string }> = [
+  {
+    outputArea: 'civil', sourceMatter: 'FAMILIAR',
+    message: (label) => `El documento es de materia familiar y elegiste ${label}. Confirma que el código procesal aplicable sea el civil; si no, usa la variante familiar.`,
+  },
+  {
+    outputArea: 'familiar', sourceMatter: 'CIVIL',
+    message: (label) => `El documento parece de materia civil y elegiste ${label}. Confirma la materia del juicio; si es civil, usa la variante civil.`,
+  },
+];
+
+const APPEAL_OUTPUT_RE = /^(?:apelacion|recurso_|incidente_)/;
+
+function computeAdvisories(
+  selectedDocumentType: string,
+  policy: SourceOutputCompatibilityPolicy,
+  result: SourceOutputCompatibilityResult,
+  controllingActs: ControllingActInfo[],
+): SourceCompatibilityAdvisory[] {
+  const advisories: SourceCompatibilityAdvisory[] = [];
+  const label = getCatalogDocument(selectedDocumentType)?.label || selectedDocumentType;
+  const outputArea = (policy.matterId || '').toLowerCase();
+  const sourceMatter = String(result.sourceMatter || '').toUpperCase();
+  const affinity = MATTER_PROCEDURAL_AFFINITY.find((rule) => rule.outputArea === outputArea && rule.sourceMatter === sourceMatter);
+  if (affinity) advisories.push({ code: 'MATTER_PROCEDURAL_CODE_CONFIRMATION', message: affinity.message(label) });
+  const act = controllingActs[0];
+  if (act && APPEAL_OUTPUT_RE.test(selectedDocumentType) && (act.kind === 'ACUERDO_TRAMITE' || act.kind === 'AUTO_INTERLOCUTORIO')) {
+    advisories.push({
+      code: 'ACT_APPEALABILITY_CONFIRMATION',
+      message: act.kind === 'ACUERDO_TRAMITE'
+        ? `El acto detectado (pp. ${act.startPage}-${act.endPage}) es un acuerdo de trámite; confirma que sea impugnable por este medio.`
+        : `El acto detectado (pp. ${act.startPage}-${act.endPage}) es un auto que resuelve un incidente; confirma la procedencia del medio de impugnación elegido.`,
+    });
+  }
+  return advisories;
+}
+
+export function evaluateSourceOutputCompatibility(
+  input: SourceOutputCompatibilityInput,
+  rules: SourceOutputCompatibilityRuleMap = SOURCE_OUTPUT_COMPATIBILITY_RULES,
+): SourceOutputCompatibilityResult {
+  const selectedDocumentType = normalizeId(input.selectedDocumentType);
+  let narrowed: NarrowedSources = { sources: input.sourceDocuments, controllingActs: [] };
+  let policy: SourceOutputCompatibilityPolicy | undefined;
+  if (selectedDocumentType && input.sourceDocuments.length > 0) {
+    try {
+      policy = getSourceOutputCompatibilityPolicy(selectedDocumentType, rules);
+      if (policy.status === 'EXPLICIT_COMPATIBILITY') narrowed = narrowToControllingActs(input.sourceDocuments, policy);
+    } catch {
+      // El núcleo vuelve a lanzar el error de tipo desconocido/no implementado con su código.
+    }
+  }
+  const result = evaluateSourceOutputCompatibilityCore({ ...input, sourceDocuments: narrowed.sources }, rules);
+  const advisories = policy ? computeAdvisories(selectedDocumentType, policy, result, narrowed.controllingActs) : [];
+  return {
+    ...result,
+    ...(narrowed.controllingActs.length > 0 ? { controllingActs: narrowed.controllingActs } : {}),
+    ...(advisories.length > 0 ? { advisories } : {}),
   };
 }
 

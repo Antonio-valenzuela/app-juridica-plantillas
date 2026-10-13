@@ -6,6 +6,10 @@ import { readDocumentExportReadiness } from '@/lib/legal-engine/documentLifecycl
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
+import {
+  getDraftRegenerationRoutingError,
+  getUncertifiedDraftAcknowledgementError,
+} from '@/lib/legal-engine/uncertifiedDraftAcknowledgement';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,7 +23,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { document, sectionId, instruction } = body;
+    const { document, sectionId, instruction, uncertifiedDraftAcknowledged } = body;
 
     if (!document || !sectionId) {
       return NextResponse.json({ ok: false, error: 'Faltan datos: document y sectionId son requeridos.' }, { status: 400 });
@@ -32,6 +36,19 @@ export async function POST(req: NextRequest) {
         error: 'DOCUMENT_NOT_EDITABLE',
         friendlyMessage: 'El documento ya está listo para exportarse o fue finalizado; cualquier regeneración requiere volver a revisión.',
       }, { status: 409 });
+    }
+
+    const documentTypeId = typeof document.documentType === 'string' ? document.documentType : undefined;
+    const routingError = getDraftRegenerationRoutingError(documentTypeId);
+    if (routingError) {
+      return NextResponse.json({ ok: false, ...routingError }, { status: 422 });
+    }
+    const acknowledgementError = getUncertifiedDraftAcknowledgementError(
+      documentTypeId,
+      uncertifiedDraftAcknowledged,
+    );
+    if (acknowledgementError) {
+      return NextResponse.json({ ok: false, ...acknowledgementError }, { status: 422 });
     }
 
     const res = await generateSection(document as UniversalLegalDocument, sectionId, instruction);

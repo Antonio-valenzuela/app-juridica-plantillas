@@ -1,4 +1,4 @@
-import { DocumentTemplates, registerFamilyDerivedTemplates, createFamilyDerivedTemplate, type DocumentTemplate } from '@/lib/legal-engine/documentTemplates';
+import { DocumentTemplates, familyDerivedTemplateFor, registerFamilyDerivedTemplates, createFamilyDerivedTemplate, type DocumentTemplate } from '@/lib/legal-engine/documentTemplates';
 import { FAMILY_BLUEPRINTS, composeFamilyStructure, familyBlueprintFor } from '@/lib/legal-engine/documentFamilyBlueprints';
 import { WRITING_TYPE_EVIDENCE, WRITING_TYPE_EVIDENCE_BLOCKERS } from './writingTypeEvidence.generated';
 
@@ -637,7 +637,10 @@ const implementedIds = new Set([...templateKeys]);
 function buildDocumentIdentifier(id: string): CatalogDocumentIdentifier {
   const source = rowsById.get(id);
   if (!source) throw new Error(`Catalog document identifier without hierarchy: ${id}`);
-  const template = DocumentTemplates[id];
+  // Mantener el registro del catálogo alineado con el resolver que usa el
+  // routing: los tipos derivados viven en FAMILY_DERIVED_TEMPLATES, no en el
+  // objeto de plantillas directas.
+  const template = DocumentTemplates[id] || familyDerivedTemplateFor(id);
   const isFamily = FAMILY_IDENTIFIER_IDS.has(id);
   const label = LEGACY_LABELS[id] || labelFromId(id);
   const productStatus: CatalogStatus = OFFICIAL_FORM_IDS.has(id) ? 'REQUIRES_OFFICIAL_FORM' : ASSISTED_DRAFT_IDS.has(id) ? 'ASSISTED_DRAFT' : implementedIds.has(id) ? 'IMPLEMENTED' : 'CATALOG_ONLY';
@@ -738,7 +741,7 @@ export function canGenerateDocumentDraft(idOrAlias: string, includeUncertifiedDr
     && canonical.functionalStatus === 'FAIL'
     && canonical.status === 'IMPLEMENTED'
     && canonical.implemented
-    && Boolean(DocumentTemplates[canonical.id])
+    && Boolean(DocumentTemplates[canonical.id] || familyDerivedTemplateFor(canonical.id))
     && canonical.sourceCompatibility !== null;
 }
 

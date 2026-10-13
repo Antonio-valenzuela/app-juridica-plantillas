@@ -141,7 +141,11 @@ describe('LOOP 8B FASE 2B — strategy, template y catálogo mercantil', () => {
       strategyId: TARGET_ID,
       templateId: TARGET_ID,
     });
-    expect(getCatalogDocument('demanda_oral_mercantil')).toMatchObject({ status: 'CATALOG_ONLY' });
+    expect(getCatalogDocument('demanda_oral_mercantil')).toMatchObject({
+      status: 'IMPLEMENTED',
+      strategyId: 'demanda_oral_mercantil',
+      templateId: 'demanda_oral_mercantil',
+    });
   });
 
   it('conserva un contrato estructural exacto de 13 secciones y campos mercantiles', () => {

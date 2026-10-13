@@ -43,9 +43,33 @@ export default function AppShell({
   const { activeCase } = useLegalWorkspaceContext();
 
   const [menuOpen, setMenuOpen] = useState(false);
+  // Escritorio: el menú lateral se puede ocultar para dar más espacio al área de trabajo (preferencia persistente).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [providerIndicator, setProviderIndicator] = useState<ProviderIndicator>(() => deriveProviderIndicator(null));
 
   const currentTab = searchParams.get('tab') || 'universal';
+
+  useEffect(() => {
+    try { setSidebarCollapsed(window.localStorage.getItem('lex.sidebar.collapsed') === '1'); } catch { /* sin almacenamiento */ }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.sidebar = sidebarCollapsed ? 'collapsed' : 'expanded';
+    try { window.localStorage.setItem('lex.sidebar.collapsed', sidebarCollapsed ? '1' : '0'); } catch { /* sin almacenamiento */ }
+  }, [sidebarCollapsed]);
+
+  // En pantallas angostas el menú es un panel superpuesto; en escritorio se colapsa para ampliar el espacio de trabajo.
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const query = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 980px)') : undefined;
+    if (!query) return;
+    const sync = () => setIsNarrow(query.matches);
+    sync();
+    query.addEventListener?.('change', sync);
+    return () => query.removeEventListener?.('change', sync);
+  }, []);
+  const navigationVisible = isNarrow ? menuOpen : !sidebarCollapsed;
+  const toggleMenu = () => (isNarrow ? setMenuOpen((value) => !value) : setSidebarCollapsed((value) => !value));
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? 'hidden' : '';
@@ -131,6 +155,17 @@ export default function AppShell({
   return (
     <>
       <header className="global-header lex-header">
+        <button
+          type="button"
+          className="lex-menu-toggle"
+          aria-label={navigationVisible ? 'Ocultar menú de navegación' : 'Mostrar menú de navegación'}
+          aria-controls="lex-sidebar"
+          aria-expanded={navigationVisible}
+          title={navigationVisible ? 'Ocultar menú para ampliar el área de trabajo' : 'Mostrar menú'}
+          onClick={toggleMenu}
+        >
+          <LexIcon name="menu" size={19} />
+        </button>
         <div className="lex-header-right">
           <div className={`lex-build-status ${providerIndicator.tone === 'danger' ? 'is-error' : providerIndicator.tone === 'warning' ? 'is-warning' : ''}`}>
             <span className="lex-status-dot" />
@@ -161,14 +196,6 @@ export default function AppShell({
             <span className="lex-user-chevron"><LexIcon name="chevron-down" size={15} /></span>
           </div>
 
-          <button
-            type="button"
-            className="lex-mobile-menu"
-            aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'}
-            onClick={() => setMenuOpen((value) => !value)}
-          >
-            <LexIcon name={menuOpen ? 'plus' : 'menu'} size={19} className={menuOpen ? 'rotate-45' : ''} />
-          </button>
         </div>
       </header>
 
@@ -181,7 +208,7 @@ export default function AppShell({
         />
       )}
 
-      <aside className={`lex-sidebar ${menuOpen ? 'is-mobile-open' : ''}`}>
+      <aside id="lex-sidebar" className={`lex-sidebar ${menuOpen ? 'is-mobile-open' : ''}`}>
         <div className="lex-brand">
           <div className="lex-brand-mark">
             <LexIcon name="plus" size={20} />

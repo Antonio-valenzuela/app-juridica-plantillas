@@ -16,6 +16,7 @@ import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { markDocumentAsFinal } from '@/lib/legal-engine/documentLifecycle';
 import { validateForExport } from '@/lib/legal-engine/exportGuards';
 import { runQualityGateCheck } from '@/lib/legal-engine/qualityGate';
+import { evaluateSourceOutputCompatibility } from '@/lib/legal-engine/sourceOutputCompatibility';
 
 const TARGET_ID = 'contestacion_revision_extraordinaria_amparo_directo';
 const TARGET_LABEL = 'Contestación / Revisión extraordinaria ante sentencia de amparo directo';
@@ -354,7 +355,14 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
     expect(routing.outputFilename).toMatch(/contestaci[oó]n|revisi[oó]n/i);
   });
 
-  it('bloquea la selección de revisión cuando el PDF sanitizado real es una demanda de amparo', async () => {
+  // Fase 2 (2026-10-13): este test fijaba que el PDF público real se clasificaba como
+  // DEMANDA_AMPARO_DIRECTO. Era un defecto, no un contrato: el PDF es una SENTENCIA de un
+  // Tribunal Colegiado («V I S T O, para resolver el juicio de amparo directo 800/2024»,
+  // «R E S U L T A N D O»), y la frase «promovió demanda de amparo contra…» envuelta a
+  // inicio de línea activaba la regla multilínea /^\s*demanda/im sobre TODO el documento.
+  // Se corrigió la causa (el título de una demanda se busca solo al inicio). Ahora la
+  // sentencia real es compatible y una demanda de amparo auténtica sigue bloqueada.
+  it('reconoce la sentencia pública real como sentencia de amparo directo (no como demanda)', async () => {
     const extraction = await extractDocument({
       buffer: fs.readFileSync(REAL_PUBLIC_PDF),
       fileName: '0129000036717288006AST(1).PDF',
@@ -368,12 +376,36 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
       sourceValidated: extraction.sourceValidated,
       fileSizeBytes: extraction.fileSizeBytes,
     });
+    const compatibility = evaluateSourceOutputCompatibility({ selectedDocumentType: TARGET_ID, sourceDocuments: [source] });
+    expect(compatibility.sourceDocumentType).toBe('SENTENCIA_AMPARO_DIRECTO');
+    expect(compatibility.status).not.toBe('NOT_APPLICABLE');
+  }, 60000);
 
+  it('bloquea la selección de revisión cuando la fuente es una demanda de amparo directo auténtica', async () => {
+    const demanda = createSourceDocument({
+      id: 'demanda-amparo-directo-sintetica',
+      filename: 'demanda-amparo.pdf',
+      sourceValidated: true,
+      pages: [{
+        page: 1,
+        chars: 400,
+        text: [
+          'DEMANDA DE AMPARO DIRECTO',
+          'C. MAGISTRADOS DEL TRIBUNAL COLEGIADO EN MATERIA CIVIL EN TURNO',
+          'P R E S E N T E.',
+          'PERSONA QUEJOSA SINTÉTICA, por mi propio derecho, vengo a promover demanda de amparo directo contra la sentencia definitiva dictada por la Sala Civil.',
+          'HECHOS',
+          '1. La autoridad responsable dictó sentencia el 3 de marzo de 2025.',
+          'CONCEPTOS DE VIOLACIÓN',
+          'PRIMERO. La sentencia viola mis derechos.',
+        ].join('\n'),
+      }],
+    });
     await expect(runGenerationPipeline({
       selectedDocumentType: TARGET_ID,
       documentTypeLabel: TARGET_LABEL,
       userInstruction: 'Preparar el escrito post-sentencia con base únicamente en la fuente.',
-      sourceDocuments: [source],
+      sourceDocuments: [demanda],
       generateSection: async ({ section }: { section: { title: string } }) => `Contenido controlado de ${section.title}.`,
     } as any)).rejects.toThrow(/SOURCE_DOCUMENT_INCOMPATIBLE[\s\S]*DEMANDA_AMPARO_DIRECTO[\s\S]*SENTENCIA_AMPARO_DIRECTO/);
   }, 60000);

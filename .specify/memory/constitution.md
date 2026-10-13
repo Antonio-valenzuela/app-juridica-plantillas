@@ -1,7 +1,7 @@
 # LEX PLANTILLAS Constitution
 
 Rama: `codex/version-2`. Stack: Next.js 16 (App Router, webpack), React, TypeScript,
-Prisma + Neon (Postgres), Vitest, Playwright. Workspace legal de escritorio (Windows).
+Prisma + SQLite local (desde 1.0.1; antes Neon/Postgres), Vitest, Playwright. Workspace legal de escritorio (Windows).
 
 Principios núcleo, ordenados por prioridad. Si dos principios chocan, gana el primero.
 
@@ -147,4 +147,9 @@ Toda amending requiere: (1) documentar el porqué, (2) listar los archivos
 afectados, (3) actualizar la versión y la fecha, (4) re-validar los gates del
 principio afectado.
 
-**Versión**: 1.0.0 | **Ratificada**: 2026-10-05 | **Última modificación**: 2026-10-05
+**Versión**: 1.0.1 | **Ratificada**: 2026-10-05 | **Última modificación**: 2026-10-13
+
+**Enmienda 1.0.1 (2026-10-13, Fase 1):** la persistencia pasó de Neon/Postgres a SQLite local por instrucción
+expresa del titular (autoriza tocar `persistence`/Prisma para esta migración). Archivos afectados: `prisma/schema.prisma`,
+`prisma/migrations/`, `lib/prisma.ts`, `lib/db/`, rutas `app/api/legal-drafts*`, `parties`, `workspace/cases`,
+`templates/files`. Gates del principio I–III no modificados; se re-ejecutó la suite offline (ver `audit/PROGRESS.md`).

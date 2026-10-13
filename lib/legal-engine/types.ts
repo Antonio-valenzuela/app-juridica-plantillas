@@ -233,6 +233,8 @@ export interface BlockStyle {
   textDecoration?: string;
   textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
   indent?: string;
+  /** Sangría solo del primer renglón ("2.5em" o "18pt"); DOCX y PDF la aplican igual. */
+  firstLineIndent?: string;
 }
 
 export interface ContentBlock {

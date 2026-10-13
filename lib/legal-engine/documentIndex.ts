@@ -9,6 +9,7 @@
  * extiende sin duplicar lógica de extracción.
  */
 import type { DocumentPage, UploadedSourceDocument } from './types';
+import { reflowLines } from './textReflow';
 
 // ── Elementos estructurales finos del documento ─────────────────────────────
 export type DocumentElementType =
@@ -150,8 +151,13 @@ function splitElementsFromPage(page: DocumentPage, pageIndex: number, globalOrde
             chunks.push(para.trim());
           } else if (hasLegalHeading && lines.some((line) => /\b(?:CONCEPTO\s+DE\s+VIOLACI[ÓO]N|AGRAVIO)\b/i.test(line))) {
             chunks.push(para.trim());
-          } else {
+          } else if (allShort) {
             for (const l of lines) chunks.push(l);
+          } else {
+            // Prosa envuelta con encabezados intercalados: se reconstruyen los
+            // párrafos (cada hecho o prestación completo) en lugar de un
+            // elemento por renglón visual.
+            chunks.push(...reflowLines(lines));
           }
           continue;
         }

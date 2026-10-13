@@ -38,11 +38,12 @@ describe('phase 1 appeal resolution extraction', () => {
   it('accepts only an explicit complete confirmation bound to the entire source revision', () => {
     const r = extractAppealResolutionReview([appealResolutionSource]);
     const selected = r.resolutions[1];
-    const c = { sourceFingerprint: r.sourceFingerprint, resolutionId: selected.id, parties: selected.parties, representedNames: selected.parties.filter(p => p.role === 'actor').map(p => p.name), recipient: selected.court, notification: '25 de agosto de 2026 · Boletín 139', confirmed: true };
+    const c = { sourceFingerprint: r.sourceFingerprint, resolutionId: selected.id, parties: selected.parties, representedNames: selected.parties.filter(p => p.role === 'actor').map(p => p.name), recipient: selected.court, notification: '25 de agosto de 2026 · Boletín 139', expediente: 'ANON-01', confirmed: true };
     expect(validateAppealConfirmation(r, c).eligible).toBe(true);
-    for (const invalid of [{ ...c, confirmed: false }, { ...c, resolutionId: 'missing' }, { ...c, recipient: '' }, { ...c, notification: '[A CONFIRMAR POR EL ABOGADO]' }, { ...c, representedNames: ['outsider'] }, { ...c, parties: [] }]) {
+    for (const invalid of [{ ...c, confirmed: false }, { ...c, resolutionId: 'missing' }, { ...c, recipient: '' }, { ...c, notification: '[A CONFIRMAR POR EL ABOGADO]' }, { ...c, representedNames: ['outsider'] }, { ...c, parties: [] }, { ...c, expediente: '' }, { ...c, expediente: '[A CONFIRMAR POR EL ABOGADO]' }]) {
       expect(validateAppealConfirmation(r, invalid).status).toBe('NEEDS_USER_INPUT');
     }
+    expect(validateAppealConfirmation(r, { ...c, expediente: undefined } as any).eligible).toBe(false);
     const revised = structuredClone(appealResolutionSource);
     revised.pages![2].text += '\nCambio de notificación.';
     expect(validateAppealConfirmation(extractAppealResolutionReview([revised]), c).eligible).toBe(false);

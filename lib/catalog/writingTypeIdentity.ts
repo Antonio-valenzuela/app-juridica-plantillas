@@ -27,6 +27,7 @@ import {
 } from '@/lib/legal-engine/documentTemplates';
 import { familyBlueprintFor, type FamilyBlueprint } from '@/lib/legal-engine/documentFamilyBlueprints';
 import { getDocumentStrategy } from '@/lib/legal-engine/documentStrategies';
+import { isOptInSection } from '@/lib/legal-engine/optInSections';
 
 export type WritingTypeKind = 'canonical' | 'variant' | 'alias' | 'family';
 
@@ -157,7 +158,7 @@ export function resolveWritingType(idOrAlias: string): WritingTypeIdentity {
     blueprint: familyBlueprintFor(canonical.familyId) || null,
     generationStrategy: { id: strategy?.id || null, templateId: template.tipo },
     template,
-    requiredSections: template.estructura || [],
+    requiredSections: (template.estructura || []).filter(title => !isOptInSection(canonicalId, canonical.label, title)),
     optionalSections: template.camposOpcionales || [],
     requiredFields: template.camposObligatorios || [],
     capabilities: {

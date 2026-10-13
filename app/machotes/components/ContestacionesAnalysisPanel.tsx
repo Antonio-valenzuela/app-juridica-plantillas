@@ -1,24 +1,22 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import type { CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 
 interface ContestacionesAnalysisPanelProps {
   hasDocument: boolean;
   analysisAvailable: boolean;
   caseAnalysis?: CaseAnalysis | null;
-  aportacionesCount?: number;
+  /** Páginas del documento fuente, para confirmar que se leyó completo. */
+  pageCount?: number;
 }
-
-type AnalysisTab = 'resumen' | 'hechos' | 'prestaciones' | 'excepciones';
 
 export function ContestacionesAnalysisPanel({
   hasDocument,
   analysisAvailable,
   caseAnalysis,
-  aportacionesCount = 0,
+  pageCount,
 }: ContestacionesAnalysisPanelProps) {
-  const [activeTab, setActiveTab] = useState<AnalysisTab>('resumen');
 
   const claims = caseAnalysis?.claims || [];
   const timeline = caseAnalysis?.proceduralTimeline || [];
@@ -32,223 +30,85 @@ export function ContestacionesAnalysisPanel({
           date: ev.date,
         }));
 
-  const vulnerabilities = caseAnalysis?.caseTheory?.vulnerabilities || [];
-  const argumentAxes = caseAnalysis?.argumentAxes || [];
-  const authority = caseAnalysis?.authorities?.[0];
-  const summary =
-    caseAnalysis?.caseTheory?.legalTheory ||
-    (caseAnalysis as any)?.summary ||
-    'El sistema mostrará aquí una lectura ejecutiva del documento cargado.';
-
   const isCompleted = hasDocument && analysisAvailable;
-
-  const tabs = [
-    { id: 'resumen' as const, label: 'Resumen', count: null },
-    { id: 'hechos' as const, label: 'Hechos', count: facts.length },
-    { id: 'prestaciones' as const, label: 'Prestaciones', count: claims.length },
-    {
-      id: 'excepciones' as const,
-      label: 'Riesgos',
-      count: vulnerabilities.length + argumentAxes.length + aportacionesCount,
-    },
+  const evidenceCount = caseAnalysis?.richCaseAnalysis?.evidenceMentions?.length || 0;
+  // Datos esenciales que el abogado debe completar. Son frases en lenguaje llano
+  // del extractor; nunca se muestran objetos ni códigos internos.
+  // Se excluyen los diagnósticos codificados del extractor ("[facts] …", en inglés),
+  // que son registros internos, y los datos propios del amparo (quejoso, autoridad
+  // responsable), que no aplican a la contestación de una demanda.
+  const pendingItems = (caseAnalysis?.missingData || [])
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .filter((item) => !/^\s*\[/.test(item) && !/quejos|autoridad señalada como responsable/i.test(item))
+    .slice(0, 3);
+  const relevant: Array<{ label: string; tone: 'done' | 'pending' }> = [
+    facts.length
+      ? { label: `Se identificaron ${facts.length} hechos para contestar`, tone: 'done' }
+      : { label: 'No se identificaron hechos numerados: revisa el documento', tone: 'pending' },
+    claims.length
+      ? { label: `Se detectaron ${claims.length} prestaciones`, tone: 'done' }
+      : { label: 'No se detectaron prestaciones', tone: 'pending' },
+    ...(evidenceCount ? [{ label: `Se localizaron ${evidenceCount} pruebas ofrecidas`, tone: 'done' as const }] : []),
+    ...(typeof pageCount === 'number' && pageCount > 0 ? [{ label: `Documento completo (${pageCount} página${pageCount === 1 ? '' : 's'})`, tone: 'done' as const }] : []),
+    ...pendingItems.map((item) => ({ label: `Por revisar: ${item}`, tone: 'pending' as const })),
   ];
 
-  // Extract or generate representative legal tags for display
-  const detectedTags = React.useMemo(() => {
-    const tags: Array<{ label: string; tone: 'blue' | 'amber' }> = [];
-    if (claims.length > 0) {
-      const firstClaim = claims[0];
-      const claimText = typeof firstClaim === 'string' ? firstClaim : String((firstClaim as any)?.text || (firstClaim as any)?.claim || '');
-      if (claimText) tags.push({ label: claimText.slice(0, 30), tone: 'blue' });
-    }
-    if (vulnerabilities.length > 0) {
-      tags.push({ label: typeof vulnerabilities[0] === 'string' ? vulnerabilities[0].slice(0, 30) : 'Riesgo procesal', tone: 'amber' });
-    }
-    if (argumentAxes.length > 0) {
-      const axis = argumentAxes[0];
-      const axisTitle = typeof axis === 'string' ? axis : (axis?.title || axis?.issue || 'Eje argumentativo');
-      tags.push({ label: axisTitle.slice(0, 30), tone: 'blue' });
-    }
-    // Fallback standard legal tags if few detected
-    if (tags.length < 3) {
-      tags.push({ label: 'Derechos laborales', tone: 'blue' });
-      tags.push({ label: 'Falta de motivación', tone: 'blue' });
-      tags.push({ label: 'Violación al debido proceso', tone: 'blue' });
-      tags.push({ label: 'Precedentes relevantes', tone: 'amber' });
-    }
-    return tags.slice(0, 4);
-  }, [claims, vulnerabilities, argumentAxes]);
-
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-xs transition hover:border-slate-300/80">
-      <div className="mb-2 flex items-center justify-between border-b border-slate-100 pb-2">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </div>
-          <h2 className="text-base font-bold text-slate-900">
-            Análisis de la demanda
-          </h2>
-        </div>
-
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-            isCompleted
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
-              : 'bg-slate-100 text-slate-500 border border-slate-200/60'
-          }`}
-        >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${isCompleted ? 'bg-emerald-500' : 'bg-slate-400'}`}
-          />
-          {isCompleted ? 'Completado' : 'Pendiente'}
+    <section className="lex-card">
+      <div className="lex-card-header">
+        <h2 className="lex-card-title">Análisis de la demanda</h2>
+        <span className={`lex-pill ${isCompleted ? 'lex-pill-success' : 'lex-pill-neutral'}`}>
+          {isCompleted ? 'Analizado' : 'Pendiente'}
         </span>
       </div>
 
-      {/* Tabs / Segmented Control */}
-      <div className="mb-2 flex flex-wrap gap-1 rounded-lg bg-slate-100/80 p-1">
-        {tabs.map((tab) => {
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 rounded-md px-2.5 py-1.5 text-center text-xs font-semibold transition ${
-                active
-                  ? 'bg-[#0B2545] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              {tab.label}
-              {typeof tab.count === 'number' && tab.count > 0 && (
-                <span className={`ml-1.5 text-[11px] ${active ? 'text-white/80' : 'text-slate-400'}`}>
-                  ({tab.count})
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
       {!hasDocument || !analysisAvailable ? (
-          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-3.5 text-center">
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <h3 className="mt-2 text-sm font-bold text-slate-800">
-            El análisis aparecerá aquí
-          </h3>
-          <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-slate-500">
-            Al procesar el documento fuente se extraerán automáticamente hechos, prestaciones y riesgos jurídicos.
-          </p>
-        </div>
+        <p className="lex-empty-note">
+          Al cargar el documento se identifican hechos, prestaciones y datos pendientes de revisión.
+        </p>
       ) : (
-        <div className="space-y-3">
-          {activeTab === 'resumen' && (
-            <>
-              <p className="text-sm leading-relaxed text-slate-600">
-                {summary}
-              </p>
+        <>
+          <h3 className="lex-subtitle lex-subtitle-first">Información relevante</h3>
+          <ul className="lex-checklist">
+            {relevant.map((item) => (
+              <li key={item.label} className={item.tone === 'done' ? 'is-done' : 'is-pending'}>
+                <span className="lex-check-icon" aria-hidden="true">{item.tone === 'done' ? '✓' : '!'}</span>
+                <span>{item.label}</span>
+              </li>
+            ))}
+          </ul>
 
-              {/* Tag Pills */}
-              <div className="flex flex-wrap gap-2 pt-1">
-                {detectedTags.map((tag, idx) => (
-                  <span
-                    key={idx}
-                    className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${
-                      tag.tone === 'amber'
-                        ? 'bg-[#FEF3C7] text-[#92400E] border border-amber-200/60'
-                        : 'bg-[#EFF6FF] text-[#1D4ED8] border border-blue-100'
-                    }`}
-                  >
-                    {tag.label}
-                  </span>
-                ))}
-              </div>
-            </>
-          )}
-
-          {activeTab === 'hechos' && (
-            <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
-              {facts.length === 0 ? (
-                <p className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
-                  No se identificaron hechos procesales independientes.
-                </p>
-              ) : (
-                facts.map((fact, idx) => (
-                  <div key={fact.id || idx} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
-                    <div className="flex items-start gap-2.5">
-                      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0B2545] text-[11px] font-bold text-white">
-                        {idx + 1}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm leading-relaxed text-slate-700">
-                          {fact.text}
-                        </p>
-                        {fact.date && (
-                          <p className="mt-1 text-[11px] font-medium text-slate-400">
-                            Fecha: {fact.date}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
+          {(facts.length > 0 || claims.length > 0) && (
+            <details className="lex-disclosure">
+              <summary>
+                <span>Ver hechos y prestaciones</span>
+                <span className="lex-disclosure-hint">{facts.length} · {claims.length}</span>
+              </summary>
+              {facts.length > 0 && (
+                <>
+                  <h4 className="lex-list-title">Hechos</h4>
+                  <ol className="lex-numbered">
+                    {facts.map((fact, idx) => (
+                      <li key={fact.id || idx}>{String(fact.text || '').replace(/\s+/g, ' ')}</li>
+                    ))}
+                  </ol>
+                </>
               )}
-            </div>
-          )}
-
-          {activeTab === 'prestaciones' && (
-            <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
-              {claims.length === 0 ? (
-                <p className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
-                  No se identificaron prestaciones o reclamaciones específicas.
-                </p>
-              ) : (
-                claims.map((claim, idx) => (
-                  <div key={(claim as any)?.id || idx} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
-                    <div className="flex items-start gap-2.5">
-                      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">
-                        {idx + 1}
-                      </span>
-                      <p className="text-sm leading-relaxed text-slate-700">
-                        {typeof claim === 'string' ? claim : ((claim as any)?.text || (claim as any)?.claim || 'Prestación identificada')}
-                      </p>
-                    </div>
-                  </div>
-                ))
+              {claims.length > 0 && (
+                <>
+                  <h4 className="lex-list-title">Prestaciones</h4>
+                  <ol className="lex-numbered">
+                    {claims.map((claim, idx) => (
+                      <li key={(claim as any)?.id || idx}>
+                        {String(typeof claim === 'string' ? claim : ((claim as any)?.text || (claim as any)?.claim || '')).replace(/\s+/g, ' ')}
+                      </li>
+                    ))}
+                  </ol>
+                </>
               )}
-            </div>
+            </details>
           )}
-
-          {activeTab === 'excepciones' && (
-            <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
-              {[...vulnerabilities, ...argumentAxes].length === 0 ? (
-                <p className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
-                  Aún no se detectan vulnerabilidades o ejes argumentativos destacados.
-                </p>
-              ) : (
-                [...vulnerabilities, ...argumentAxes].map((item, idx) => (
-                  <div key={idx} className="rounded-lg border border-amber-100 bg-amber-50/40 p-3">
-                    <div className="flex items-start gap-2.5">
-                      <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 text-[11px] font-bold text-white">
-                        !
-                      </span>
-                      <p className="text-sm leading-relaxed text-amber-900">
-                        {typeof item === 'string' ? item : JSON.stringify(item)}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+        </>
       )}
     </section>
   );

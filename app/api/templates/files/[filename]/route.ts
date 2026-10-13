@@ -54,7 +54,8 @@ export async function GET(
       where: {
         organizationId: access.context.organizationId,
         createdBy: access.context.userId,
-        structureJson: { path: ['storage', 'savedFileName'], equals: sanitized },
+        // SQLite: la ruta JSON se expresa como cadena JSONPath (en Postgres era un arreglo).
+        structureJson: { path: '$.storage.savedFileName', equals: sanitized },
       },
       select: { id: true },
     });

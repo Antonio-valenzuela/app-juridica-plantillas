@@ -22,7 +22,7 @@ UI → /api/legal-engine/generate → runLegalAI() → providerChain(nvidia) →
 
 ## Requisitos
 
-* Node.js ≥20, npm ≥10, PostgreSQL (opcional, fallback InMemory)
+* Node.js ≥20 (≥22.5 para los scripts de respaldo `db:*`), npm ≥10. Sin base de datos externa: los datos viven en SQLite local
 
 ## Instalación
 
@@ -31,6 +31,7 @@ Copy-Item .env.example .env
 # Editar .env con tus valores (ver abajo)
 npm install
 npm run db:generate
+npm run db:migrate   # opcional: la base también se crea y migra sola al primer uso
 npm run dev      # http://localhost:3200
 ```
 
@@ -38,7 +39,7 @@ npm run dev      # http://localhost:3200
 
 | Variable | Valor prod | Notas |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://...` | Requerido prod, fallback dev |
+| `LEXPLANTILLAS_DATABASE_PATH` | *(opcional)* | Ruta del archivo SQLite; por defecto `%LOCALAPPDATA%\LexPlantillas\data\lexplantillas.db` |
 | `NVIDIA_API_KEY` | `nvapi-…` | **Secreto**, no subir a Git |
 | `NVIDIA_BASE_URL` | `https://integrate.api.nvidia.com/v1` |  |
 | `NVIDIA_MODEL` | `meta/llama-3.2-11b-vision-instruct` | Verificado 2026-08-28 |
@@ -86,3 +87,7 @@ DOCX/PDF conservan formato/márgenes/encabezados/numeración/`Otro` custom. Ver 
 6. Editar en editor paginado, `✓ Guardado`/`● Cambios`, exportar.
 
 No se sube `.env`, no se loguean keys, no se inventan citas (ver `FUENTE/INFERENCIA/REDACCIÓN`).
+
+## Datos locales
+
+Expedientes, partes, borradores y preferencias se guardan en SQLite local (sin Neon ni red). Detalles, protección real, respaldo e importación: [docs/persistencia-local.md](docs/persistencia-local.md).

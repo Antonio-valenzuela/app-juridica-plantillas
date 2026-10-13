@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { factsPolicyFor, evaluateFactsCriterion } from '@/lib/legal-engine/factsPolicy';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';
@@ -9,6 +10,8 @@ import { createSourceDocument } from '@/lib/legal-engine/context';
 import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
 import { readDocxPackage } from '../helpers/docxPackageReader';
+import { syntheticSourceBody } from '../helpers/evidenceFixture';
+import { COMMERCIAL_FACT, COMMERCIAL_MANUAL } from '../helpers/commercialFixture';
 import { hasSeedMarkers } from '@/lib/legal-engine/seedMarkers';
 
 /**
@@ -52,14 +55,10 @@ function canonicalCombination(identity: WritingTypeIdentity) {
 }
 
 function sourceFor(sourceDocumentType: string) {
-  const body = /SENTENCIA|LAUDO/.test(sourceDocumentType)
-    ? 'SENTENCIA QUE DA ORIGEN AL ESCRITO. '
-    : /DEMANDA/.test(sourceDocumentType)
-      ? 'DEMANDA QUE ORIGINA EL JUICIO. '
-      : 'DOCUMENTO FUENTE CLASIFICADO. ';
+  const body = syntheticSourceBody(sourceDocumentType);
   return createSourceDocument({
     id: 'src-evidence', filename: 'fuente.txt',
-    content: `${body}${CASE_TOKENS[0]}. ${CASE_TOKENS[1]}. ` + 'CONTENIDO VERIFICABLE DE AUTOS. '.repeat(8),
+    content: `${body}FUENTE_SINTETICA_A. FUENTE_SINTETICA_B. ` + 'CONTENIDO VERIFICABLE DE AUTOS. '.repeat(8),
     sourceValidated: true,
     classification: { sourceDocumentType, role: 'PRIMARY', provenance: 'KNOWN_PROVENANCE' },
   } as any);
@@ -71,10 +70,10 @@ function analysis() {
     authorities: ['AUTORIDAD COMPETENTE SINTETICA'],
     caseNumbers: { principal: 'EXP-EVID-2026/001' },
     proceduralTimeline: [
-      { date: '2026-01-15', event: `Actuación previa ${CASE_TOKENS[0]}`, sourceDocument: 'src-evidence', certainty: 1 },
-      { date: '2026-02-20', event: `Actuación posterior ${CASE_TOKENS[1]}`, sourceDocument: 'src-evidence', certainty: 1 },
+      { date: '2026-01-15', event: 'Actuación previa ACTUACION_SINTETICA_1', sourceDocument: 'src-evidence', certainty: 1 },
+      { date: '2026-02-20', event: 'Actuación posterior ACTUACION_SINTETICA_2', sourceDocument: 'src-evidence', certainty: 1 },
     ],
-    challengedActs: [], claims: [`Pretensión ${CASE_TOKENS[0]}`], claimResponses: [], arguments: [],
+    challengedActs: [], claims: ['Pretensión PRETENSION_SINTETICA_1'], claimResponses: [], arguments: [],
     evidence: [{ id: 'ev-1', type: 'DOCUMENTAL', description: 'Constancia documental aportada', confirmed: true, provenance: 'LAWYER_CONFIRMED' }],
     facts: [
       { id: 'f-1', number: '1', text: `${CASE_TOKENS[0]}: hecho verificable acreditado en el expediente.`, confidence: 1 },
@@ -117,7 +116,9 @@ async function evaluate(identity: WritingTypeIdentity): Promise<Entry> {
   metrics.combination = combination;
 
   if (!identity.capabilities.draft) { reasons.push('NOT_GENERABLE'); return { id: identity.id, pass: false, reasons, metrics }; }
-  if (identity.functionalStatus !== 'PASS') reasons.push('NOT_FUNCTIONAL_PASS');
+  // La evidencia se calcula SOLO desde resultados observables de esta ejecución.
+  // Leer identity.functionalStatus aquí (derivado de la evidencia anterior) crearía
+  // un cerrojo: un tipo en FAIL no podría volver a PASS aunque generara bien.
   if (!identity.template || !identity.requiredSections.length) reasons.push('NO_BLUEPRINT');
   if (identity.generationStrategy.templateId !== identity.id) reasons.push('NO_STRATEGY');
   if (!identity.compatibleSources.declared && !identity.compatibleSources.acceptsAnySource) reasons.push('NO_SOURCE_POLICY');
@@ -130,6 +131,7 @@ async function evaluate(identity: WritingTypeIdentity): Promise<Entry> {
       userInstruction: `Promover ${identity.label} con los hechos del expediente.`,
       sourceDocuments: [sourceFor(combination.sourceDocumentType)],
       caseAnalysis: analysis(),
+      ...(identity.id === 'demanda_ejecutiva_mercantil' ? { commercialManualInput: COMMERCIAL_MANUAL } : {}),
       workflow: { flow: 'DOCUMENT_ANALYSIS', selection: { mode: 'automatic' }, updatedAt: new Date().toISOString() },
     } as any) as any;
   } catch (error) {
@@ -156,7 +158,16 @@ async function evaluate(identity: WritingTypeIdentity): Promise<Entry> {
   metrics.factsCovered = factsInBody;
   const hasPending = hasSeedMarkers(body);
   metrics.hasPending = hasPending;
-  if (factsInBody === 0 && !hasPending) reasons.push('FACTS_SILENTLY_DROPPED');
+  // Criterio por clase de escrito (factsPolicy): sustantivo → hechos obligatorios;
+  // trámite → contexto procesal + petición; instrumento → partes.
+  const decision = factsPolicyFor(identity);
+  metrics.factsPolicy = decision.policy;
+  reasons.push(...evaluateFactsCriterion({
+    policy: decision.policy, body, factTokens: CASE_TOKENS,
+    expedienteToken: 'EXP-EVID-2026/001', partyTokens: ['ACTOR SINTETICO', 'DEMANDADO SINTETICO'],
+    timelineTokens: ['ACTUACION_SINTETICA_1', 'ACTUACION_SINTETICA_2'],
+    commercialTokens: [COMMERCIAL_FACT],
+  }));
 
   // Sin contaminación de UI
   const leaks = detectUiAssistantLeak(body);
@@ -202,6 +213,23 @@ describe('evidencia funcional real por tipo (snapshot generado, no editado a man
     const identities = visibleWritingTypes();
     const generable = identities.filter(identity => identity.capabilities.draft);
     const entries: Entry[] = [];
+
+    // Modo subconjunto (iteración rápida): evalúa solo los IDs indicados, escribe
+    // el resultado en WRITING_TYPE_EVIDENCE_OUT y NO toca el snapshot generado.
+    const only = (process.env.WRITING_TYPE_EVIDENCE_ONLY || '').split(',').map(id => id.trim()).filter(Boolean);
+    if (only.length) {
+      for (const identity of generable.filter(candidate => only.includes(candidate.id))) entries.push(await evaluate(identity));
+      const out = process.env.WRITING_TYPE_EVIDENCE_OUT;
+      if (out) writeFileSync(out, JSON.stringify({ mode: 'subset', requested: only.length, entries }, null, 2), 'utf8');
+      expect(entries.length).toBe(only.length);
+      return;
+    }
+
+    // Snapshot ANTERIOR, leído antes de sobrescribirlo: es la referencia contra la
+    // que se compara la evidencia viva (releer el archivo recién escrito sería circular).
+    const previousSnapshot = existsSync(SNAPSHOT) ? readFileSync(SNAPSHOT, 'utf8') : '';
+    const previousPass = [...previousSnapshot.matchAll(/^ {2}'([^']+)': true,$/gm)].map(match => match[1]).sort();
+
     for (const identity of generable) entries.push(await evaluate(identity));
 
     const passed = entries.filter(entry => entry.pass);
@@ -236,19 +264,23 @@ ${failed.map(entry => `  '${entry.id}': [${entry.reasons.map(r => `'${r.replace(
 ${blocked.length ? `\n${blocked.map(identity => `  // ${identity.id}: ${identity.implementationStatus} (no generable por contrato de producto)`).join('\n')}\n` : ''}
 });
 `;
+    const livePass = passed.map(entry => entry.id).sort();
+    const drift = {
+      newlyPassing: livePass.filter(id => !previousPass.includes(id)),
+      noLongerPassing: previousPass.filter(id => !livePass.includes(id)),
+    };
     writeFileSync(SNAPSHOT, snapshot, 'utf8');
     writeFileSync(EVIDENCE_JSON, JSON.stringify({
       generatedAt: new Date().toISOString(), contract: CONTRACT_VERSION,
       total: identities.length, generable: generable.length,
       pass: passed.length, fail: failed.length, notGenerable: blocked.length,
+      driftFromPreviousSnapshot: drift,
       entries,
     }, null, 2), 'utf8');
 
-    // LIVE EVIDENCE === SNAPSHOT COMMITTED
-    const committed = readFileSync(SNAPSHOT, 'utf8');
-    const committedPass = [...committed.matchAll(/^ {2}'([^']+)': true,$/gm)].map(match => match[1]).sort();
-    const livePass = passed.map(entry => entry.id).sort();
-    expect(committedPass).toEqual(livePass);
+    // La evidencia viva no puede retirar tipos que el snapshot anterior acreditaba
+    // sin que el cambio quede explícito en driftFromPreviousSnapshot.
+    expect(drift.noLongerPassing).toEqual([]);
 
     expect(identities.length).toBe(277);
     expect(generable.length).toBe(265);

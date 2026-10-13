@@ -230,10 +230,13 @@ describe('motor universal de documentos', () => {
         }),
       });
       const finalText = result.sections.flatMap((section) => section.content).map((block) => block.text).join('\n');
-      expect(finalText).toContain('PRIMERO. A');
-      expect(finalText).toContain('SEGUNDO. B');
-      expect(finalText).toContain('TERCERO. C');
-      expect(finalText).toContain('CUARTO. D');
+      // Fase 2 (2026-10-13): el hecho ya no se imprime con su número duplicado («AL HECHO PRIMERO.- PRIMERO. A»);
+      // la intención de la prueba —todos los hechos numerados llegan al documento final, cada uno con su
+      // número— se conserva con el formato limpio «AL HECHO <n>.- La parte actora afirma: "<texto>."» (sin repetir el hecho).
+      expect(finalText).toContain('AL HECHO PRIMERO.- La parte actora afirma: "A."');
+      expect(finalText).toContain('AL HECHO SEGUNDO.- La parte actora afirma: "B."');
+      expect(finalText).toContain('AL HECHO TERCERO.- La parte actora afirma: "C."');
+      expect(finalText).toContain('AL HECHO CUARTO.- La parte actora afirma: "D."');
     } finally {
       if (previousKey === undefined) delete process.env.NVIDIA_API_KEY;
       else process.env.NVIDIA_API_KEY = previousKey;

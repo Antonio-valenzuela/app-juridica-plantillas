@@ -1,16 +1,21 @@
 /**
- * writingTypeEvidence.generated.ts — EVIDENCIA FUNCIONAL POR TIPO.
+ * writingTypeEvidence.generated.ts — EVIDENCIA FUNCIONAL POR TIPO (GENERADA).
  *
- * Generado por 	ests/catalog/writingTypeEvidence.test.ts, que recorre cada
- * tipo visible de forma DETERMINISTA (sin proveedor) y comprueba el contrato
- * completo: identidad, generaci\u00f3n, secciones, DOCX, PDF y lifecycle fail-closed.
+ * Generada por `tests/catalog/writingTypeEvidence.test.ts`, que recorre cada
+ * tipo GENERABLE de forma determinista (sin proveedor) y comprueba:
+ * contrato → pipeline → requiredSections → hechos → DOCX body + mammoth →
+ * texto de PDF extraído → 0 contaminación de UI → FINAL fail-closed.
  *
- * NO es una lista manual: es el resultado de la ejecuci\u00f3n. El cat\u00e1logo lo
- * consume para COMPUTAR functionalStatus; FUNCTIONAL_STATUS_OVERRIDES queda
- * reservado a excepciones justificadas.
+ * NO editar a mano. Regenerar con la suite.
  *
- * Evidencia: 2026-10-05T02:19:04.108Z  |  tipos con evidencia completa: 277/277
+ *Evidencia: 2026-10-13T04:37:06.895Z
+ * Contrato: writing-type-evidence/2
+ * Total: 277 | Generables: 265 | PASS: 265 | FAIL: 0 | No generables: 12
  */
+
+export const WRITING_TYPE_EVIDENCE_CONTRACT = 'writing-type-evidence/2';
+export const WRITING_TYPE_EVIDENCE_GENERATED_AT = '2026-10-13T04:37:06.895Z';
+
 export const WRITING_TYPE_EVIDENCE: Readonly<Record<string, true>> = Object.freeze({
   'demanda_ordinaria_civil': true,
   'demanda_oral_civil': true,
@@ -34,7 +39,6 @@ export const WRITING_TYPE_EVIDENCE: Readonly<Record<string, true>> = Object.free
   'objecion_pruebas_civil': true,
   'desahogo_vista_civil': true,
   'alegatos_civil': true,
-  'conclusiones_civil': true,
   'incidente_nulidad_actuaciones': true,
   'incidente_liquidacion': true,
   'incidente_costas': true,
@@ -151,9 +155,6 @@ export const WRITING_TYPE_EVIDENCE: Readonly<Record<string, true>> = Object.free
   'solicitud_acceso_carpeta': true,
   'solicitud_copias_carpeta': true,
   'solicitud_medida_proteccion': true,
-  'oposicion_medida_cautelar': true,
-  'solicitud_revision_medida_cautelar': true,
-  'acuerdo_reparatorio_propuesta': true,
   'escrito_coadyuvancia': true,
   'apelacion_penal': true,
   'revocacion_penal': true,
@@ -215,13 +216,6 @@ export const WRITING_TYPE_EVIDENCE: Readonly<Record<string, true>> = Object.free
   'convenio_desocupacion': true,
   'reconocimiento_adeudo_arrendamiento': true,
   'demanda_desocupacion': true,
-  'solicitud_registro_marca': true,
-  'contestacion_impedimento': true,
-  'oposicion_marca': true,
-  'nulidad_registro': true,
-  'caducidad_registro': true,
-  'infraccion_propiedad_industrial': true,
-  'recurso_propiedad_intelectual': true,
   'contrato_licencia_marca': true,
   'cesion_derechos_marca': true,
   'licencia_derechos_autor': true,
@@ -250,7 +244,6 @@ export const WRITING_TYPE_EVIDENCE: Readonly<Record<string, true>> = Object.free
   'alegatos_migratorios': true,
   'solicitud_acceso_informacion': true,
   'recurso_revision_transparencia': true,
-  'solicitud_derechos_arco': true,
   'recurso_datos_personales': true,
   'escrito_cumplimiento_transparencia': true,
   'promocion_simple': true,
@@ -292,4 +285,19 @@ export const WRITING_TYPE_EVIDENCE: Readonly<Record<string, true>> = Object.free
 });
 
 export const WRITING_TYPE_EVIDENCE_BLOCKERS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+
+
+  // conclusiones_civil: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // oposicion_medida_cautelar: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // solicitud_revision_medida_cautelar: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // acuerdo_reparatorio_propuesta: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // solicitud_registro_marca: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // contestacion_impedimento: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // oposicion_marca: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // nulidad_registro: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // caducidad_registro: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // infraccion_propiedad_industrial: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // recurso_propiedad_intelectual: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+  // solicitud_derechos_arco: IMPLEMENTED_BUT_UNCERTIFIED (no generable por contrato de producto)
+
 });

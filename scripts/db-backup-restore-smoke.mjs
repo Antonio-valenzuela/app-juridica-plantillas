@@ -1,22 +1,36 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+// Humo de respaldo -> validación -> restauración sobre una base temporal sintética.
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 
-const databaseUrl = process.env.TEST_DATABASE_URL?.trim();
-const adminUrl = process.env.TEST_DATABASE_ADMIN_URL?.trim();
-if (!databaseUrl || !adminUrl) {
-  console.log('BACKUP_RESTORE_SMOKE=SKIPPED_NO_ISOLATED_TEST_DATABASE');
-  process.exit(0);
+const directory = await mkdtemp(join(tmpdir(), 'lex-db-smoke-'));
+const env = {
+  ...process.env,
+  LEXPLANTILLAS_STORAGE_ROOT: directory,
+  LEXPLANTILLAS_DATABASE_PATH: join(directory, 'data', 'lexplantillas.db'),
+};
+function run(args) {
+  const result = spawnSync(process.execPath, ['--no-warnings', ...args], { env, stdio: 'inherit' });
+  if (result.status !== 0) throw new Error(`SMOKE_STEP_FAILED:${args[0]}`);
 }
-
-const directory = await mkdtemp(join(tmpdir(), 'app-plantillas-db-smoke-'));
-const dump = join(directory, 'database.dump');
 try {
-  const backup = spawnSync(process.execPath, ['scripts/db-backup.mjs', directory], { env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: 'inherit' });
-  if (backup.status !== 0) throw new Error('BACKUP_STEP_FAILED');
-  const restore = spawnSync(process.execPath, ['scripts/db-restore.mjs', `--dump=${dump}`, `--database-url=${databaseUrl}`, '--confirm-target=YES'], { env: { ...process.env, TEST_DATABASE_URL: databaseUrl, TEST_DATABASE_ADMIN_URL: adminUrl }, stdio: 'inherit' });
-  if (restore.status !== 0) throw new Error('RESTORE_STEP_FAILED');
+  mkdirSync(join(directory, 'data'), { recursive: true });
+  const db = new DatabaseSync(env.LEXPLANTILLAS_DATABASE_PATH);
+  db.exec('PRAGMA journal_mode = WAL');
+  const migrations = readdirSync('prisma/migrations', { withFileTypes: true })
+    .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  for (const name of migrations) db.exec(readFileSync(join('prisma/migrations', name, 'migration.sql'), 'utf8'));
+  db.exec('CREATE TABLE IF NOT EXISTS _prisma_migrations (id TEXT PRIMARY KEY, checksum TEXT, finished_at DATETIME, migration_name TEXT, logs TEXT, rolled_back_at DATETIME, started_at DATETIME, applied_steps_count INTEGER)');
+  db.exec("INSERT INTO _prisma_migrations VALUES ('smoke','x',current_timestamp,'smoke',NULL,NULL,current_timestamp,1)");
+  db.close();
+  const out = join(directory, 'backup');
+  run(['scripts/db-backup.mjs', out]);
+  run(['scripts/db-validate-backup.mjs', join(out, 'lexplantillas.db')]);
+  run(['scripts/db-restore.mjs', `--backup=${join(out, 'lexplantillas.db')}`, '--confirm-target=YES']);
+  JSON.parse(await readFile(join(out, 'manifest.json'), 'utf8'));
   console.log('BACKUP_RESTORE_SMOKE=PASS');
 } finally {
   await rm(directory, { recursive: true, force: true });

@@ -60,6 +60,8 @@ export interface FamilyBlueprint {
   reglasPrueba?: readonly string[];
   /** Familias de engine compartidas: agrupan variantes con el mismo patrón. */
   engine: 'demanda' | 'recurso' | 'escrito_tramite' | 'prueba_cierre' | 'convenio' | 'audiencia' | 'petitorio';
+  /** Variantes que heredan plantilla/estrategia de un tipo base */
+  variants?: Readonly<Record<string, { baseType: string }>>;
 }
 
 /* ── BLOQUES BASE reutilizables ─────────────────────────────────────────── */
@@ -194,14 +196,18 @@ export const FAMILY_BLUEPRINTS: Readonly<Record<string, FamilyBlueprint>> = Obje
     camposObligatorios: ['juzgado', 'expediente', 'objeto del incidente', 'agravios'],
     reglas: ['Delimita el objeto exacto del incidente.'],
   },
-  /* ── mercantil ─────────────────────────────────────────────────────── */
+/* ── mercantil ─────────────────────────────────────────────────────── */
   mercantil_demandas: {
-    familyId: ' mercantil_demandas', engine: 'demanda',
+    familyId: 'mercantil_demandas', engine: 'demanda',
     blocks: [...APERTURA_DEMANDA, 'VIA_ACCION', 'PRESTACIONES', 'HECHOS', 'DERECHO', 'PRUEBAS', ...CIERRE],
     materia: 'MERCANTIL', via: 'proceso mercantil', procedimiento: 'JUICIO MERCANTIL',
-    objetivoProcesal: 'Reclamar una pretensión de naturaleza mercantil.',
-    camposObligatorios: ['órgano mercantil', 'expediente', 'demandante', 'demandado', 'prestaciones', 'hechos'],
-    reglas: ['Identifica la fuente mercantil de la obligación.'],
+    objetivoProcesal: 'Reclamar una pretensi\u00f3n de naturaleza mercantil.',
+    camposObligatorios: ['\u00f3rgano mercantil', 'expediente', 'demandante', 'demandado', 'prestaciones', 'hechos'],
+    reglas: ['Identifica la fuente mercantil de la obligaci\u00f3n.'],
+    /** Variantes que heredan plantilla/estrategia de un tipo base */
+    variants: {
+      'demanda_oral_mercantil': { baseType: 'demanda_ejecutiva_mercantil' },
+    },
   },
   /* ── Migratorio ────────────────────────────────────────────────────── */
   migratorio_administrativo: {

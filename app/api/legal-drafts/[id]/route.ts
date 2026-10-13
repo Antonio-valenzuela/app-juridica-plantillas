@@ -5,6 +5,7 @@ import { requireCaseAccess } from '@/lib/cases/access';
 import { markDocumentAsDraft, markDocumentAsSource } from '@/lib/legal-engine/documentLifecycle';
 import { stripTransientAuditTrace } from '@/lib/legal-engine/legalDocumentSanitizer';
 import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { draftSaveFailureResponse } from '@/lib/db/draftRecovery';
 
 export const dynamic = 'force-dynamic';
 
@@ -149,7 +150,16 @@ export async function PATCH(
         persistence: existing.generationMetadata.persistence,
       };
     }
-    const draft = local?.ok ? await local.store.update(id, data) : await prisma.legalDraft.update({ where: { id }, data });
+    let draft;
+    if (local?.ok) {
+      draft = await local.store.update(id, data);
+    } else {
+      try {
+        draft = await prisma.legalDraft.update({ where: { id }, data });
+      } catch (writeError) {
+        return draftSaveFailureResponse({ operation: 'update', draftId: id, payload: body, error: writeError });
+      }
+    }
 
     return NextResponse.json({ ok: true, draft });
   } catch (error: any) {

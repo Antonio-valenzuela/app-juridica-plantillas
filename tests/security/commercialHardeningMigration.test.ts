@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+// Fase 1 (2026-10-13): las migraciones de Postgres se archivaron; esta prueba sigue
+// protegiendo que esa reparación histórica fuera solo aditiva.
 const migrationPath = path.resolve(
-  'prisma/migrations/202609240002_commercial_hardening_runtime/migration.sql',
+  'prisma/migrations-postgres-historical/202609240002_commercial_hardening_runtime/migration.sql',
 );
 
 describe('commercial hardening runtime migration', () => {

@@ -17,6 +17,9 @@ import { hasSeedMarkers, stripSeedMarkers } from './seedMarkers';
 import { buildCoverageMatrix, type CoverageMatrix } from './coverageMatrix';
 import { bindCoverageToSections } from './richCoverage';
 import { buildLegalIssueMatrix, type LegalIssueMatrix } from './legalIssueMatrix';
+import { factsPolicyFor } from './factsPolicy';
+import { injectNarrativeFacts } from './factsSeed';
+import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 
 /**
  * documentPlan.ts — PLAN DOCUMENTAL ÚNICO (FASES 4, 7, 10, 11)
@@ -151,8 +154,12 @@ function seedForSection(
         generationInstruction: 'Formular peticiones mercantiles ejecutivas confirmadas por el abogado y congruentes con el título ejecutivo.',
       };
     }
+    // Los hechos CONFIRMADOS por el abogado se conservan de forma determinista (sin proveedor no se pierden).
+    const confirmedFacts = type === 'background'
+      ? (commercial?.facts || []).filter((fact) => fact.status === 'CONFIRMED' && fact.text.value)
+      : [];
     return {
-      text: '',
+      text: confirmedFacts.map((fact, index) => `${index + 1}. ${fact.text.value}`).join('\n'),
       generationRequirement: 'AI_REQUIRED',
       generationStatus: 'pending',
       generationInstruction: `Desarrollar únicamente con el CommercialEnforcementContext confirmado para ${title}.`,
@@ -219,6 +226,61 @@ function seedForSection(
  * Determinístico: los IDs son estables entre generaciones
  * (`sec-{tipo}-{n}`), lo que preserva referencias externas y ediciones.
  */
+/**
+ * ¿La estructura declarada del tipo tiene la forma de una contestación de
+ * demanda (la que construye `buildContestacionSkeleton`)? Las contestaciones
+ * especializadas (nulidad fiscal/administrativa, agraria, proveedor, seguridad
+ * social…) declaran estructura propia: no pueden recibir secciones de una
+ * contestación civil ni perder las suyas (identidad del escrito, no etiqueta).
+ */
+function declaresDemandContestacionShape(template: DocumentTemplate): boolean {
+  return template.estructura.some((title) => normalizeTitleKey(title) === 'comparecencia y personalidad');
+}
+
+/**
+ * Toda sección que el tipo DECLARA debe existir en el plan. Las que el
+ * constructor no emitió se insertan en su posición declarada con la semilla
+ * de plantilla (pendiente de redacción/postura): no se inventa contenido.
+ */
+function reconcileDeclaredSections(
+  sections: DocumentNode[],
+  template: DocumentTemplate,
+  doc: UniversalLegalDocument,
+): DocumentNode[] {
+  // Coincidencia por prioridad (exacta > comienza con > contiene) para anclar
+  // cada sección declarada a la sección correcta y no a la primera que la mencione.
+  const findSection = (declared: string) => {
+    const wanted = normalizeTitleKey(declared);
+    const keys = result.map((section) => normalizeTitleKey(section.title));
+    const exact = keys.findIndex((key) => key === wanted);
+    if (exact >= 0) return exact;
+    const starts = keys.findIndex((key) => key.startsWith(wanted) || wanted.startsWith(key));
+    if (starts >= 0) return starts;
+    return keys.findIndex((key) => key.includes(wanted) || wanted.includes(key));
+  };
+  const seeded = buildTemplateSkeleton(template, doc);
+  const result = [...sections];
+  let anchorIndex = -1;
+  template.estructura.forEach((declared, declaredIndex) => {
+    const found = findSection(declared);
+    if (found >= 0) {
+      anchorIndex = found;
+      return;
+    }
+    const node = seeded[declaredIndex];
+    // Una sección sin texto no sobrevive al ensamblado; el marcador deja explícito
+    // que la redacción queda a cargo del abogado (no se inventa contenido).
+    const firstBlock = node.content[0];
+    const inserted = firstBlock && !firstBlock.text.trim()
+      ? { ...node, content: [{ ...firstBlock, text: `${declared}:
+[REQUIERE POSTURA DEL ABOGADO]` }, ...node.content.slice(1)] }
+      : node;
+    result.splice(anchorIndex + 1, 0, inserted);
+    anchorIndex += 1;
+  });
+  return result;
+}
+
 export function buildTemplateSkeleton(tpl: DocumentTemplate, doc: UniversalLegalDocument): DocumentNode[] {
   return tpl.estructura.map((title, i) => {
     const secType = inferSectionType(title);
@@ -451,18 +513,34 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
     && template.tipo !== 'contestacion_demanda_civil'
     && template.tipo !== 'contestacion_demanda_mercantil') {
     sections = buildCivilMercantileResponseSkeleton(doc, caseAnalysis, template.tipo);
+    if (isContestacionFlow && declaresDemandContestacionShape(template)) {
+      sections = reconcileDeclaredSections(sections, template, doc);
+    }
     planSource = 'GENERATED';
   } else if (isCivilMercantileEvidenceArgumentDocumentType(template.tipo)) {
     sections = buildCivilMercantileEvidenceArgumentSkeleton(doc, template.tipo);
     planSource = 'GENERATED';
-  } else if (isContestacionFlow) {
-    sections = buildContestacionSkeleton(doc, caseAnalysis, savedParties, template.tipo);
+  } else if (isContestacionFlow && declaresDemandContestacionShape(template)) {
+    sections = reconcileDeclaredSections(
+      buildContestacionSkeleton(doc, caseAnalysis, savedParties, template.tipo),
+      template,
+      doc,
+    );
     planSource = 'GENERATED';
   } else {
     sections = buildTemplateSkeleton(template, doc);
     planSource = 'GENERATED';
   }
 
+  // Hechos del análisis → sección de hechos de los escritos sustantivos
+  // (clase NARRATIVE_REQUIRED). Solo sustituye una semilla puramente pendiente;
+  // la demanda ejecutiva mercantil se excluye (solo admite su contexto confirmado).
+  if (caseAnalysis?.facts?.length && template.tipo !== 'demanda_ejecutiva_mercantil') {
+    const entry = getCatalogDocument(template.tipo);
+    const familyId = entry && entry.kind === 'DOCUMENT_TYPE' ? entry.familyId : '';
+    const { policy } = factsPolicyFor({ id: template.tipo, familyId, requiredSections: template.estructura });
+    if (policy === 'NARRATIVE_REQUIRED') sections = injectNarrativeFacts(sections, caseAnalysis.facts);
+  }
   // FASE 11 — canonicidad garantizada EN EL PLAN.
   sections = ensureCanonicalSections(sections);
   // FASE 12 — herencia de IDs y ediciones manuales.

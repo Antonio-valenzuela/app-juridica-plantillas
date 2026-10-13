@@ -91,9 +91,17 @@ describe('P0-B: recorrido de tipos implementados, 0 fugas', () => {
     expect(identities.length).toBe(277);
     const implemented = identities.filter(identity => identity.implementationStatus === 'IMPLEMENTED');
     expect(implemented.length).toBe(265);
-    // Invariante §20: nunca PASS + draftable + routing NOT_IMPLEMENTED.
-    const inconsistent = identities.filter(identity => identity.capabilities.draft && identity.functionalStatus !== 'PASS');
-    expect(inconsistent).toEqual([]);
+    // Invariante §20: draftable ⇔ tipo IMPLEMENTED (el routing lo resuelve).
+    // Un borrador de tipo IMPLEMENTED con functionalStatus FAIL es legítimo
+    // (borrador no certificado; FINAL sigue bloqueado por humanReview/gates).
+    // Lo que no puede ocurrir: draftable sin implementación, ni implementado
+    // sin draftable, ni PASS sin draftable.
+    const draftableButNotImplemented = identities.filter(identity => identity.capabilities.draft && identity.implementationStatus !== 'IMPLEMENTED');
+    expect(draftableButNotImplemented.map(identity => identity.id)).toEqual([]);
+    const implementedButBlocked = identities.filter(identity => identity.implementationStatus === 'IMPLEMENTED' && !identity.capabilities.draft);
+    expect(implementedButBlocked.map(identity => identity.id)).toEqual([]);
+    const passButBlocked = identities.filter(identity => identity.functionalStatus === 'PASS' && !identity.capabilities.draft);
+    expect(passButBlocked.map(identity => identity.id)).toEqual([]);
   });
 
   it('el guard de UI está declarado en la capa de admisión', () => {

@@ -14,7 +14,7 @@ try {
   await mkdir(path.join(output, '.next'), {recursive:true});
   await cp(path.join(root, '.next', 'static'), path.join(output, '.next', 'static'), {recursive:true});
   await cp(manual, path.join(output, 'data', 'documents', 'operational-manual', 'v1.0'), {recursive:true});
-  for (const relative of ['public', 'spa.traineddata', 'scripts/desktop/local-next-lifecycle.mjs']) {
+  for (const relative of ['public', 'spa.traineddata', 'scripts/desktop/local-next-lifecycle.mjs', 'prisma/migrations']) {
     try { await access(path.join(root,relative)); } catch { continue; }
     await mkdir(path.dirname(path.join(output,relative)), {recursive:true});
     await cp(path.join(root,relative), path.join(output,relative), {recursive:true});

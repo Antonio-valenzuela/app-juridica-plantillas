@@ -1,8 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runFastMode, runDeepReviewMode, getProvidersStatus } from '@/lib/ai/orchestrator';
 import { NVIDIAProvider } from '@/lib/ai/providers/nvidia';
 
 describe('Arquitectura NVIDIA ONLY (Fast vs Deep Review)', () => {
+  // La cadena de proveedores es configuración ambiente; se fija aquí para que el resultado no dependa del .env.
+  const saved = { chain: process.env.AI_PROVIDER_CHAIN, primary: process.env.NVIDIA_PRIMARY_PROVIDER };
+  beforeEach(() => { process.env.AI_PROVIDER_CHAIN = 'nvidia,local'; process.env.NVIDIA_PRIMARY_PROVIDER = 'true'; });
+  afterEach(() => {
+    if (saved.chain === undefined) delete process.env.AI_PROVIDER_CHAIN; else process.env.AI_PROVIDER_CHAIN = saved.chain;
+    if (saved.primary === undefined) delete process.env.NVIDIA_PRIMARY_PROVIDER; else process.env.NVIDIA_PRIMARY_PROVIDER = saved.primary;
+  });
   it('Modo Rápido: NVIDIA disponible → nvidia', async () => {
     vi.spyOn(NVIDIAProvider.prototype, 'isAvailable').mockResolvedValue(true);
     vi.spyOn(NVIDIAProvider.prototype, 'generate').mockResolvedValue({

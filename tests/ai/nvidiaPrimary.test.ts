@@ -4,7 +4,13 @@ import { runFastMode } from '@/lib/ai/orchestrator';
 
 describe('BLOCK B/J — NVIDIA ONLY (4 escenarios + metadata)', () => {
   const originalEnv = { ...process.env };
-  beforeEach(() => vi.restoreAllMocks());
+  // El orden de la cadena es configuración ambiente (.env del usuario): estos escenarios la fijan
+  // explícitamente para ser reproducibles. No altera la configuración real de la aplicación.
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    process.env.AI_PROVIDER_CHAIN = 'nvidia,local';
+    process.env.NVIDIA_PRIMARY_PROVIDER = 'true';
+  });
   afterEach(() => { process.env = { ...originalEnv }; vi.restoreAllMocks(); });
 
   it('1. NVIDIA disponible → nvidia', async () => {

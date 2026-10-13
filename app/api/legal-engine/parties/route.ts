@@ -121,10 +121,19 @@ export async function POST(req: NextRequest) {
     });
 
     if (!existing) {
-      const party = await prisma.caseParty.create({
-        data: { organizationId, caseKey, role, name: rawName, source, confidence },
-      });
-      return NextResponse.json({ ok: true, party });
+      try {
+        const party = await prisma.caseParty.create({
+          data: { organizationId, caseKey, role, name: rawName, source, confidence },
+        });
+        return NextResponse.json({ ok: true, party });
+      } catch (createError: any) {
+        // Reintento/solicitud concurrente: el índice único (organización, expediente, rol)
+        // ya tiene la parte. Se devuelve la existente en vez de duplicar o fallar.
+        if (createError?.code !== 'P2002') throw createError;
+        const winner = await prisma.caseParty.findFirst({ where: { organizationId, caseKey, role } });
+        if (!winner) throw createError;
+        return NextResponse.json({ ok: true, party: winner });
+      }
     }
 
     // Idempotencia: nunca sobrescribir una parte confirmada manualmente con una detectada.

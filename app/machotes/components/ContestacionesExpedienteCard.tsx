@@ -12,11 +12,19 @@ export interface ExpedienteFichaData {
   estadoProcesal?: string;
 }
 
+export type ExpedienteFieldStatus = 'DETECTED_UNCONFIRMED' | 'CONFIRMED' | 'PENDING' | 'CONFLICT';
+type ExpedienteField = 'expediente' | 'actor' | 'demandado' | 'autoridad' | 'materia' | 'estadoProcesal';
+
 interface ContestacionesExpedienteCardProps {
   caseFicha?: ExpedienteFichaData | null;
   caseAnalysis?: CaseAnalysis | null;
   inferredMatter?: string | null;
   onUpdateFicha?: (updated: ExpedienteFichaData) => void;
+  fieldStatuses?: Partial<Record<ExpedienteField, ExpedienteFieldStatus>>;
+  /** Tipo del documento fuente en lenguaje del abogado ("Demanda civil"). */
+  documentTypeLabel?: string;
+  /** Preparación real para generar; sustituye al estado procesal supuesto. */
+  readiness?: { label: string; tone: 'success' | 'warning' | 'neutral' | 'danger' };
 }
 
 export function ContestacionesExpedienteCard({
@@ -24,6 +32,9 @@ export function ContestacionesExpedienteCard({
   caseAnalysis,
   inferredMatter,
   onUpdateFicha,
+  fieldStatuses,
+  documentTypeLabel,
+  readiness,
 }: ContestacionesExpedienteCardProps) {
   const [isEditing, setIsEditing] = useState(false);
 
@@ -51,10 +62,12 @@ export function ContestacionesExpedienteCard({
     caseAnalysis?.authorities?.[0] ||
     '';
 
-  const initialMateria =
-    caseFicha?.materia ||
-    inferredMatter ||
-    'Civil';
+  // Sin señales suficientes la materia queda "Por confirmar"; nunca se supone "Civil".
+  const fichaMateria = caseFicha?.materia && caseFicha.materia !== 'Por confirmar' ? caseFicha.materia : '';
+  const engineMateria = inferredMatter && inferredMatter !== 'NO_IDENTIFICADA'
+    ? inferredMatter.charAt(0).toUpperCase() + inferredMatter.slice(1).toLowerCase()
+    : '';
+  const initialMateria = fichaMateria || engineMateria || 'Por confirmar';
 
   const derivedData: ExpedienteFichaData = {
     expediente: initialExpediente,
@@ -67,6 +80,13 @@ export function ContestacionesExpedienteCard({
 
   const [editData, setEditData] = useState<ExpedienteFichaData | null>(null);
   const formData = isEditing ? (editData ?? derivedData) : derivedData;
+  const statusLabel: Record<ExpedienteFieldStatus, string> = {
+    DETECTED_UNCONFIRMED: 'Detectado',
+    CONFIRMED: 'Confirmado',
+    PENDING: 'Pendiente',
+    CONFLICT: 'Por revisar',
+  };
+  const status = (field: ExpedienteField) => fieldStatuses?.[field] ? <span className="lex-field-status">{statusLabel[fieldStatuses[field]!]}</span> : null;
 
   const handleStartEdit = () => {
     setEditData(derivedData);
@@ -85,23 +105,14 @@ export function ContestacionesExpedienteCard({
   };
 
   return (
-    <section className="contestaciones-summary-card rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-xs transition hover:border-slate-300/80">
-      <div className="mb-2 flex items-center justify-between border-b border-slate-100 pb-2">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
-          </div>
-          <h2 className="text-base font-bold text-slate-900">
-            Resumen del expediente
-          </h2>
-        </div>
+    <section className="lex-card contestaciones-summary-card">
+      <div className="lex-card-header">
+        <h2 className="lex-card-title">Resumen del expediente</h2>
 
         <button
           type="button"
           onClick={() => (isEditing ? handleCancel() : handleStartEdit())}
-          className="inline-flex items-center gap-1 rounded-md px-1 py-1 text-sm font-semibold text-blue-700 transition hover:text-blue-900"
+          className="lex-link-button"
         >
           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -114,7 +125,7 @@ export function ContestacionesExpedienteCard({
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Expediente
+              Expediente {status('expediente')}
             </label>
             <input
               type="text"
@@ -126,7 +137,7 @@ export function ContestacionesExpedienteCard({
 
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Materia
+              Materia {status('materia')}
             </label>
             <input
               type="text"
@@ -138,7 +149,7 @@ export function ContestacionesExpedienteCard({
 
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Actor
+              Actor {status('actor')}
             </label>
             <input
               type="text"
@@ -150,7 +161,7 @@ export function ContestacionesExpedienteCard({
 
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Demandado
+              Demandado {status('demandado')}
             </label>
             <input
               type="text"
@@ -162,7 +173,7 @@ export function ContestacionesExpedienteCard({
 
           <div className="sm:col-span-2">
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Autoridad
+              Autoridad {status('autoridad')}
             </label>
             <input
               type="text"
@@ -174,7 +185,7 @@ export function ContestacionesExpedienteCard({
 
           <div className="sm:col-span-2">
             <label className="mb-1 block text-xs font-medium text-slate-500">
-              Estado procesal
+              Estado procesal {status('estadoProcesal')}
             </label>
             <input
               type="text"
@@ -202,54 +213,44 @@ export function ContestacionesExpedienteCard({
           </div>
         </div>
       ) : (
-        <div className="contestaciones-summary-fields">
-          {/* Columna Izquierda */}
-          <div className="contestaciones-summary-column">
-            <div className="contestaciones-summary-field">
-              <p className="text-[11px] font-medium text-slate-400">Expediente:</p>
-              <p className="truncate text-xs font-semibold text-slate-800 font-mono">
-                {formData.expediente || 'No identificado'}
-              </p>
+        <dl className="lex-facts">
+          {documentTypeLabel && (
+            <div className="lex-facts-row">
+              <dt>Tipo de documento</dt>
+              <dd><span className="lex-pill lex-pill-info">{documentTypeLabel}</span></dd>
             </div>
-            <div className="contestaciones-summary-field">
-              <p className="text-[11px] font-medium text-slate-400">Actor:</p>
-              <p className="truncate text-xs font-semibold text-slate-800" title={formData.actor}>
-                {formData.actor || '—'}
-              </p>
-            </div>
-            <div className="contestaciones-summary-field">
-              <p className="text-[11px] font-medium text-slate-400">Demandado:</p>
-              <p className="truncate text-xs font-semibold text-slate-800" title={formData.demandado}>
-                {formData.demandado || '—'}
-              </p>
-            </div>
+          )}
+          <div className="lex-facts-row">
+            <dt>Expediente {status('expediente')}</dt>
+            <dd className="font-mono">{formData.expediente || <span className="lex-muted">No identificado</span>}</dd>
           </div>
-
-          {/* Columna Derecha */}
-          <div className="contestaciones-summary-column">
-            <div className="contestaciones-summary-field">
-              <p className="text-[11px] font-medium text-slate-400">Autoridad:</p>
-              <p className="line-clamp-2 text-xs font-semibold text-slate-800" title={formData.autoridad}>
-                {formData.autoridad || '—'}
-              </p>
-            </div>
-            <div className="contestaciones-summary-field">
-              <p className="text-[11px] font-medium text-slate-400">Materia:</p>
-              <p className="text-xs font-semibold text-slate-800">
-                {formData.materia || '—'}
-              </p>
-            </div>
-            <div className="contestaciones-summary-field contestaciones-summary-field-status">
-              <p className="text-[11px] font-medium text-slate-400">Estado:</p>
-              <div>
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200/60 bg-[#FEF3C7] px-2 py-0.5 text-[11px] font-semibold text-[#92400E]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  {formData.estadoProcesal || 'En trámite'}
-                </span>
-              </div>
-            </div>
+          <div className="lex-facts-row">
+            <dt>Órgano jurisdiccional {status('autoridad')}</dt>
+            <dd title={formData.autoridad}>{formData.autoridad || <span className="lex-muted">Por identificar</span>}</dd>
           </div>
-        </div>
+          <div className="lex-facts-row">
+            <dt>Parte actora {status('actor')}</dt>
+            <dd title={formData.actor}>{formData.actor || <span className="lex-muted">Por identificar</span>}</dd>
+          </div>
+          <div className="lex-facts-row">
+            <dt>Parte demandada {status('demandado')}</dt>
+            <dd title={formData.demandado}>{formData.demandado || <span className="lex-muted">Por identificar</span>}</dd>
+          </div>
+          <div className="lex-facts-row">
+            <dt>Materia {status('materia')}</dt>
+            <dd>
+              {formData.materia && formData.materia !== 'Por confirmar'
+                ? <span className="lex-pill lex-pill-success">{formData.materia}</span>
+                : <span className="lex-muted">Por confirmar</span>}
+            </dd>
+          </div>
+          {readiness && (
+            <div className="lex-facts-row">
+              <dt>Estado</dt>
+              <dd><span className={`lex-pill lex-pill-${readiness.tone}`}>{readiness.label}</span></dd>
+            </div>
+          )}
+        </dl>
       )}
     </section>
   );
