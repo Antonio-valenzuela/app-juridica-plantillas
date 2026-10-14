@@ -738,7 +738,11 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
   const targetWords = Number.isFinite(task.targetWords) && Number(task.targetWords) > 0
     ? Math.ceil(Number(task.targetWords))
     : undefined;
-  const lengthDirective = targetWords ? [
+  const maxWords = !targetWords && Number.isFinite(task.maxWords) && Number(task.maxWords) > 0 ? Math.ceil(Number(task.maxWords)) : undefined;
+  const lengthDirective = maxWords ? [
+    `LENGTH MAXIMUM: no excedas aproximadamente ${maxWords} palabras. Es un máximo, no una meta: escribe solo lo que el contexto permitido sostiene y termina antes si no hay más material.`,
+    'Nunca repitas, parafrasees en bucle ni agregues relleno; no escribas encabezados, firma ni notas al abogado.',
+  ] : targetWords ? [
     `LENGTH TARGET: desarrolla aproximadamente ${targetWords} palabras sustantivas y específicas para esta issue; la salida no es completa si queda por debajo de ${Math.ceil(targetWords * 0.8)} palabras.`,
     'Cada párrafo debe aportar una función distinta prevista por el contrato de salida; no repitas, no parafrasees en bucle ni agregues relleno para alcanzar la extensión.',
     'La extensión nunca autoriza hechos, pruebas, posturas ni autoridades no incluidas en el contexto. Si el soporte permitido no alcanza, conserva una respuesta más breve, añade UNSUPPORTED_REQUIRED_ELEMENT o el requisito pendiente aplicable y no simules completitud.',

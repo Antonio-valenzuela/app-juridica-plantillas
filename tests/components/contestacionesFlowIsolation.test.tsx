@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ContestacionesChecklist } from '@/app/machotes/components/ContestacionesChecklist';
 import { CaseDocumentsReader } from '@/app/machotes/components/CaseDocumentsReader';
+import { confirmCaseDossierInUi } from '../helpers/confirmCaseDossier';
 
 afterEach(cleanup);
 
@@ -87,6 +88,7 @@ describe('inicio de generación por flujo', () => {
       />,
     );
 
+    confirmCaseDossierInUi();
     const button = screen.getByRole('button', { name: /Generar contestación/i }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     fireEvent.click(button);

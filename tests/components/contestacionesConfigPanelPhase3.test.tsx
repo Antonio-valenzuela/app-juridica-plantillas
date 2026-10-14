@@ -24,7 +24,9 @@ describe('selector de extensión de la contestación', () => {
     const html = render();
     for (const label of ['Breve', 'Intermedio', 'Detallado', 'Extenso', 'Personalizado']) expect(html).toContain(label);
     expect(html).toContain(PAGE_TARGET_HELP_TEXT);
-    expect(html).toContain('no añadirá contenido para llenar páginas');
+    // Contrato cambiado (2026-10-14): la extensión es un máximo, no una meta.
+    expect(html).toContain('no añade contenido para llenar páginas');
+    expect(html).toContain('Extensión máxima del escrito');
     expect(html).toMatch(/checked=""[^>]*value="DETALLADO"|value="DETALLADO"[^>]*checked=""/);
     expect(html).not.toMatch(/checked=""[^>]*value="EXTENSO"|value="EXTENSO"[^>]*checked=""/);
     expect(html).not.toContain('name="draftDepth"');
@@ -33,7 +35,9 @@ describe('selector de extensión de la contestación', () => {
   it('el selector está fuera de «Más opciones» (visible antes de Generar)', () => {
     const html = render();
     expect(html.indexOf('data-testid="page-target-selector"')).toBeGreaterThan(-1);
-    expect(html.indexOf('data-testid="page-target-selector"')).toBeLessThan(html.indexOf('<details'));
+    // «Más opciones» ahora abre un panel superpuesto; el selector queda antes del botón que lo abre.
+    expect(html.indexOf('data-testid="contestaciones-more-options"')).toBeGreaterThan(-1);
+    expect(html.indexOf('data-testid="page-target-selector"')).toBeLessThan(html.indexOf('data-testid="contestaciones-more-options"'));
   });
 
   it('con «Personalizado» aparece un campo numérico acotado y accesible', () => {

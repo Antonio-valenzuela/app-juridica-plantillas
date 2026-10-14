@@ -107,6 +107,8 @@ export interface DocumentStrategyDefinition {
     | 'actor'
     | 'demandado'
     | 'parte_interesada'
+    | 'apelado'
+    | 'apelante'
     | 'quejoso'
     | 'recurrente'
     | 'promovente'
@@ -395,6 +397,15 @@ const RECURSO_FIELD_IDS = [
 
 export const CIVIL_APELACION_STRATEGY = responseStrategy(
   'apelacion_civil', 'CIVIL', 'APELACION_CIVIL', 'parte_interesada', RECURSO_FIELD_IDS, RECURSO_REQUIRED_SECTION_IDS,
+);
+const CONTESTACION_AGRAVIOS_SECTION_IDS = [
+  'rubro', 'proemio', 'oportunidad', 'sintesis_sentencia', 'agravios', 'constancias', 'petitorios', 'lugar_fecha', 'firma',
+] as const;
+const CONTESTACION_AGRAVIOS_FIELD_IDS = [
+  'destinatario', 'expediente', 'parte_apelada', 'parte_apelante', 'sentencia_apelada', 'agravios', 'petitorios',
+] as const;
+export const CIVIL_CONTESTACION_AGRAVIOS_STRATEGY = responseStrategy(
+  'contestacion_agravios', 'CIVIL', 'CONTESTACION_AGRAVIOS', 'apelado', CONTESTACION_AGRAVIOS_FIELD_IDS, CONTESTACION_AGRAVIOS_SECTION_IDS,
 );
 export const CIVIL_REVOCACION_STRATEGY = responseStrategy(
   'revocacion_civil', 'CIVIL', 'REVOCACION_CIVIL', 'parte_interesada', RECURSO_FIELD_IDS, RECURSO_REQUIRED_SECTION_IDS,
@@ -1574,6 +1585,7 @@ export const DOCUMENT_STRATEGIES: Readonly<Record<string, DocumentStrategyDefini
   solicitud_embargo_precautorio: CIVIL_EMBARGO_PRECAUTORIO_STRATEGY,
   providencias_precautorias_mercantiles: MERCANTILE_PROVIDENCIAS_PRECAUTORIAS_STRATEGY,
   apelacion_civil: CIVIL_APELACION_STRATEGY,
+  contestacion_agravios: CIVIL_CONTESTACION_AGRAVIOS_STRATEGY,
   revocacion_civil: CIVIL_REVOCACION_STRATEGY,
   aclaracion_sentencia_civil: CIVIL_ACLARACION_SENTENCIA_STRATEGY,
   apelacion_mercantil: MERCANTILE_APELACION_STRATEGY,

@@ -44,6 +44,8 @@ describe('factsPolicy — clasificación por tipo', () => {
     const DOCUMENTED_EXEMPTIONS = new Map([
       ['contestacion_revision_extraordinaria_amparo_directo', 'PROCEDURAL_ANTECEDENTS'],
       ['demanda_ejecutiva_mercantil', 'COMMERCIAL_CONTEXT'],
+      // Responde los agravios del apelante con apoyo en la sentencia: no narra hechos del litigio.
+      ['contestacion_agravios', 'PROCEDURAL_CONTEXT'],
     ]);
     const offenders = visibleWritingTypes()
       .filter(identity => identity.capabilities.draft && SUBSTANTIVE.test(identity.id))

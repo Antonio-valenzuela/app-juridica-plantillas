@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { appealPdf } from '../helpers/syntheticPdf';
+import { acceptExternalConsentOnce } from '../helpers/externalConsent';
 
 /**
  * Flujo directo de apelación en la aplicación real: PDF de 44 páginas → tipo elegido → Generar → borrador.
@@ -57,12 +58,8 @@ test.describe('apelación: del PDF de 44 páginas al borrador', () => {
   test('Generar envía el PDF completo con la confirmación provisional y llega al borrador editable', async ({ page }) => {
     const sent = await mockGeneration(page, 'ok');
     await openWithPdf(page);
-    page.once('dialog', async (dialog) => {
-      // Consentimiento de privacidad obligatorio: NO es una confirmación redundante.
-      expect(dialog.message()).toContain('se enviará contenido del expediente');
-      expect(dialog.message()).not.toMatch(/contestación/i);
-      await dialog.accept();
-    });
+    // Consentimiento de privacidad obligatorio: NO es una confirmación redundante.
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect.poll(() => sent.length, { timeout: 15_000 }).toBe(1);
     const body = sent[0];
@@ -80,10 +77,11 @@ test.describe('apelación: del PDF de 44 páginas al borrador', () => {
     const sent = await mockGeneration(page, 'fail');
     await openWithPdf(page);
     const instruction = 'Impugnar la sentencia por indebida valoración de la prueba documental.';
-    // La instrucción directa vive en «Opciones de redacción», desplegable.
-    await page.getByText('Opciones de redacción').click();
-    await page.getByPlaceholder(/Ej\. Elabora recurso/).fill(instruction);
-    page.once('dialog', (dialog) => dialog.accept());
+    // La instrucción directa vive en el panel «Opciones de redacción» (botón «Más opciones»).
+    await page.getByTestId('contestaciones-more-options').click();
+    await page.getByLabel('Instrucción directa (opcional)').fill(instruction);
+    await page.getByRole('button', { name: 'Listo' }).click();
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect.poll(() => sent.length, { timeout: 15_000 }).toBe(1);
     await expect(page.getByText(/Fallo en la generación/)).toBeVisible({ timeout: 10_000 });

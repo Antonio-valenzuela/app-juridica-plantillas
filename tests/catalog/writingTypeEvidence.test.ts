@@ -282,11 +282,11 @@ ${blocked.length ? `\n${blocked.map(identity => `  // ${identity.id}: ${identity
     // sin que el cambio quede explícito en driftFromPreviousSnapshot.
     expect(drift.noLongerPassing).toEqual([]);
 
-    expect(identities.length).toBe(277);
-    expect(generable.length).toBe(265);
+    expect(identities.length).toBe(278);
+    expect(generable.length).toBe(266);
     expect(blocked.length).toBe(12);
     expect(failed.length).toBe(0);
-    expect(passed.length).toBe(265);
+    expect(passed.length).toBe(266);
   }, 3_600_000);
 });
 

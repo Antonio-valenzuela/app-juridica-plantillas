@@ -35,11 +35,12 @@ describe('Configuración: guía operativa compacta', () => {
     expect(await screen.findByText('Versión 1.0 · Inactiva')).toBeInTheDocument();
   });
 
-  it('mantiene la presentación completa de Biblioteca y su enlace original', async () => {
+  it('en Biblioteca la guía es una línea discreta con su enlace original, sin ficha técnica', async () => {
     responses();
     render(<WorkspaceModulesView mode="biblioteca" onNavigate={() => undefined} />);
-    expect(await screen.findByText(/SHA-256: test-full-sha/)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Guía Operativa LEX PLANTILLAS' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Consultar PDF original →' })).toHaveAttribute('href', '/api/operational-manual/original');
+    expect(await screen.findByText(/Metodología interna · Versión/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Guía operativa del despacho' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ver documento' })).toHaveAttribute('href', '/api/operational-manual/original');
+    expect(screen.queryByText(/SHA-256/)).toBeNull();
   });
 });

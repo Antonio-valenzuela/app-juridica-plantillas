@@ -13,6 +13,7 @@ import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumen
 import { extractMachoteStructure } from './structureBuilder';
 import { formatCaseContextField } from './caseContext';
 import { renderRequestLedSection } from './generationRequestContract';
+import { AGRAVIOS_PLACEHOLDER_TITLE, agravioInstruction, agravioSectionTitle, renderAgravioFallback } from './contestacionAgraviosStructure';
 import { hasSeedMarkers, stripSeedMarkers } from './seedMarkers';
 import { buildCoverageMatrix, type CoverageMatrix } from './coverageMatrix';
 import { bindCoverageToSections } from './richCoverage';
@@ -94,7 +95,7 @@ export function inferSectionType(title: string): SectionType {
   const t = normalizeTitleKey(title);
   if (/petitorio|peticion/.test(t)) return 'petition';
   if (/firma/.test(t)) return 'signature';
-  if (/protesto|lugar y fecha/.test(t)) return 'closing';
+  if (/protesto|lugar (?:y )?fecha/.test(t)) return 'closing';
   if (/anexo/.test(t)) return 'annex';
   if (/prueba|instrumental|evidencia/.test(t)) return 'evidence';
   if (ARGUMENT_TITLE_RE.test(t)) return 'argument';
@@ -319,6 +320,47 @@ export function buildTemplateSkeleton(tpl: DocumentTemplate, doc: UniversalLegal
 }
 
 /**
+ * Contestación de agravios (parte apelada): estructura FIJA y un bloque por cada agravio del apelante. Los
+ * agravios salen de la ficha confirmada; sin ellos queda una sola sección que lo indica (no se inventan).
+ */
+function buildContestacionAgraviosSkeleton(tpl: DocumentTemplate, doc: UniversalLegalDocument): DocumentNode[] {
+  const base = buildTemplateSkeleton(tpl, doc);
+  const agravios = doc.generationMetadata.caseDossier?.agravios || [];
+  const typeOverride: Record<string, SectionType> = { 'constancias invocadas': 'evidence' };
+  const out: DocumentNode[] = [];
+  for (const node of base) {
+    const key = normalizeTitleKey(node.title);
+    if (key === normalizeTitleKey(AGRAVIOS_PLACEHOLDER_TITLE) && agravios.length > 0) {
+      for (const agravio of agravios) {
+        out.push(createDocumentNode({
+          id: `sec-${tpl.tipo}-agravio-${agravio.number}`,
+          type: 'argument',
+          title: agravioSectionTitle(agravio.number),
+          order: 0,
+          isRepeatable: true,
+          generationInstruction: agravioInstruction(agravio),
+          generation: { provider: null, model: null, fallbackUsed: false, generationReason: 'ISSUE_SCOPED_AGRAVIO_ANSWER', status: 'pending' },
+          content: [{
+            id: `blk-${tpl.tipo}-agravio-${agravio.number}`,
+            layer: 'USER_POSITION' as const,
+            trustLevel: 'VERIFIED' as const,
+            text: renderAgravioFallback(agravio),
+            isManuallyEdited: false,
+            generationRequirement: 'AI_REQUIRED' as const,
+            generationStatus: 'pending' as const,
+          }],
+          _templateId: tpl.tipo,
+          _provenance: 'GENERATED',
+        }));
+      }
+      continue;
+    }
+    out.push(typeOverride[key] ? { ...node, type: typeOverride[key] } : node);
+  }
+  return out.map((node, index) => ({ ...node, order: index * 10 }));
+}
+
+/**
  * Registro canónico mínimo para apelación civil cuando no existe machote.
  * Solo define arquitectura reusable; los hechos, normas y agravios concretos
  * siguen dependiendo de las fuentes y de la posición confirmada por el abogado.
@@ -485,6 +527,9 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
       }));
     }
     planSource = 'CANONICAL_GENERATED';
+  } else if (template.tipo === 'contestacion_agravios') {
+    sections = buildContestacionAgraviosSkeleton(template, doc);
+    planSource = 'GENERATED';
   } else if (isContestacionRevisionAmparoDirectoType(template.tipo, doc.documentTypeLabel)) {
     sections = buildRevisionAmparoDirectoSkeleton(doc, caseAnalysis, template.tipo);
     planSource = 'GENERATED';
@@ -546,7 +591,9 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
   // FASE 12 — herencia de IDs y ediciones manuales.
   sections = inheritFromPrevious(sections, previous);
 
-  if (caseAnalysis) {
+  // La parte apelada responde agravios: el análisis del caso (hechos, «actos impugnados») es el de quien apela y no
+  // debe generar cobertura ni asuntos jurídicos propios; sus bloques salen de la ficha confirmada.
+  if (caseAnalysis && template.tipo !== 'contestacion_agravios') {
     const matrix = buildCoverageMatrix(caseAnalysis, { ...doc, sections }, sections);
     const legalIssueMatrix = buildLegalIssueMatrix({ caseAnalysis, coverageMatrix: matrix });
     const binding = caseAnalysis.richCaseAnalysis

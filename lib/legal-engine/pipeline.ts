@@ -42,7 +42,8 @@ import { updateJobProgress } from './generationJobs';
 import { sanitizeLegalDocument, stripInternalPromptMetadata } from './legalDocumentSanitizer';
 import { normalizeMarkdownFormatting, normalizeTitleText } from './markdownNormalizer';
 import { CONTESTACION_SECTION_INSTRUCTIONS, REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS, resolveContestacionRoles, buildContestacionSignatureBlock, getRevisionAmparoDirectoSectionText, formatIndividualAgravio, renderFactResponseProjection, renderClaimResponseProjection } from './contestacionStructure';
-import { DocumentRoutingError, getDocumentTemplate, buildReferenceOnlyDirective, isContestacionType, isDemandContestacionType, isContestacionRevisionAmparoDirectoType } from './documentTemplates';
+import { DocumentRoutingError, getDocumentTemplate, buildReferenceOnlyDirective, isAgraviosAnswerType, isContestacionType, isDemandContestacionType, isContestacionRevisionAmparoDirectoType } from './documentTemplates';
+import { getWritingContract } from './writingContract';
 import { resolveDocumentRouting, type DocumentRoutingResolution } from './documentRouting';
 import { buildDocumentPlan } from './documentPlan';
 import { isOptInSection } from './optInSections';
@@ -379,7 +380,13 @@ import { validateDocumentEvidence } from './documentEvidence';
 import { validateDocumentAuthorities } from './documentAuthority';
 import { markUnverifiedAuthorityReferences } from './authorityReferenceAudit';
 import { enforceOutputHygiene } from './generatedOutputValidator';
-import { MAX_REDUNDANCY_RATIO, evaluatePageTarget, pageTargetToGenerationExtension, parsePageTarget, type PageTarget, type PageTargetResult } from './pageTarget';
+import { MAX_REDUNDANCY_RATIO, evaluatePageTarget, pageTargetToGenerationExtension, parsePageTarget, tryParsePageTarget, type PageTarget, type PageTargetResult } from './pageTarget';
+import { unreadableSourcePages } from './extractionCoverage';
+import { applyDossierToDocument, enforceWritingContract, finalizeReviewAnnex, prepareWritingContract, type PreparedWritingContract } from './writingContractStage';
+import { emptyReviewAnnex, reviewAnnexHasItems, separateReviewMaterial } from './reviewAnnex';
+import { agravioInstruction, closingText, renderAgraviosAnswerSection, renderAgravioFallback, signatureText } from './contestacionAgraviosStructure';
+import { supportTextOf } from './writingContractStage';
+import type { CaseDossier } from './caseDossier';
 import { redundancyRatio, splitParagraphs } from './textRedundancy';
 import { findDocumentRedundancy } from './documentRedundancy';
 import { reconcileDocumentCoverage } from './documentCoverage';
@@ -771,6 +778,8 @@ export interface PipelineInput {
   appealConfirmation?: AppealConfirmation;
   /** Consentimiento explícito para enviar este expediente privado a Gemini/Groq/NVIDIA. */
   externalProviderOptIn?: boolean;
+  /** Proveedores remotos autorizados expresamente para esta generación; ningún otro se intenta. */
+  authorizedExternalProviders?: string[];
   prompt?: string;
   userInstruction?: string;
   sourceDocuments?: UploadedSourceDocument[];
@@ -832,6 +841,12 @@ export interface PipelineInput {
   /** Meta de extensión (5/10/20/40/personalizada). Tiene prioridad sobre `draftDepth` y `generationExtension`. */
   pageTarget?: PageTarget | { preset?: string; pages?: number };
   legalResearchProvider?: LegalResearchProvider;
+  /** Ficha del caso confirmada por el abogado (única fuente de nombres, órgano, lugar y fechas). */
+  caseDossier?: CaseDossier;
+  /** Exige ficha confirmada y representación elegida (la interfaz lo activa; las pruebas internas no). */
+  requireCaseDossier?: boolean;
+  /** Separa del cuerpo notas, marcadores y citas no verificadas hacia el anexo de revisión. */
+  separateReviewAnnex?: boolean;
 }
 
 export function buildLawyerStyleDirective(profile: LawyerProfile): string {
@@ -1335,6 +1350,30 @@ const MANUAL_TITLE_INTENT: Array<[RegExp, string]> = [
   [/consideracion/, 'consideraciones combatidas razonamiento error'],
 ];
 
+/**
+ * Procedimientos del manual que aplican a TODO el escrito de una familia, no a una sección.
+ * El índice parte las tablas en líneas cortas («Hecho Admitir / negar / aclarar») que nunca
+ * ganan por coincidencia de términos frente a reglas genéricas; por eso se fijan completas.
+ * pág. 154 «23. PROCEDIMIENTO PARA CONTESTACIONES»: matriz de respuesta y orden de construcción.
+ */
+/** Medio de impugnación que nombra el escrito según su tipo; `null` si el escrito no impugna. */
+export function impugnationMediumLabel(documentType: string): string | null {
+  const type = documentType.toLowerCase();
+  if (/^apelacion|_apelacion|apelacion_/.test(type)) return 'el recurso de apelación';
+  if (/revocacion/.test(type)) return 'el recurso de revocación';
+  if (/reclamacion/.test(type)) return 'el recurso de reclamación';
+  if (/queja/.test(type)) return 'el recurso de queja';
+  if (/revision_fiscal/.test(type)) return 'el recurso de revisión fiscal';
+  if (/revision/.test(type)) return 'el recurso de revisión';
+  if (/reposicion/.test(type)) return 'el recurso de reposición';
+  if (/^recurso_/.test(type)) return 'el recurso';
+  return null;
+}
+
+const MANUAL_PINNED_PROCEDURES: Array<[RegExp, string]> = [
+  [/^contestacion_/, 'CONTESTACIONES'],
+];
+
 export async function buildBlockManualMethodology(
   doc: UniversalLegalDocument, sectionTitle: string, sectionType: string,
 ): Promise<{
@@ -1351,10 +1390,16 @@ export async function buildBlockManualMethodology(
   const titleKey = sectionTitle.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const titleIntent = MANUAL_TITLE_INTENT.find(([pattern]) => pattern.test(titleKey))?.[1] || '';
   const taskQuery = [sectionTitle, MANUAL_METHODOLOGY_INTENT[sectionType] || '', titleIntent, doc.documentType].filter(Boolean).join(' ');
-  const selection = retrieveManualRules(manual, {
+  const pinnedSection = MANUAL_PINNED_PROCEDURES.find(([pattern]) => pattern.test(String(doc.documentType || '')))?.[1];
+  const pinned = pinnedSection
+    ? manual.fragments.filter(fragment => fragment.section.trim() === pinnedSection && fragment.originalText.trim())
+    : [];
+  const pinnedIds = new Set(pinned.map(fragment => fragment.stableRuleId));
+  const retrieved = retrieveManualRules(manual, {
     matter, caseType: doc.documentType, stage: sectionType, task: taskQuery,
-    budgetChars: 4500, measureContext: rules => formatManualTaskContext(rules).length,
+    budgetChars: 4500, measureContext: rules => formatManualTaskContext([...pinned, ...rules]).length,
   });
+  const selection = { selected: [...pinned, ...retrieved.selected.filter(rule => !pinnedIds.has(rule.stableRuleId))] };
   return {
     context: formatManualTaskContext(selection.selected),
     matter,
@@ -1538,7 +1583,7 @@ ${manualMethodologyContext}
 REGLAS OBLIGATORIAS:
 1. NO inventes hechos, fechas, autoridades ni jurisprudencia que no consten en las fuentes.
 2. Si un dato no está disponible, utiliza estrictamente: [DATO PENDIENTE DE EXPEDIENTE].
-3. Aplica contraste riguroso con la resolución impugnada ("El Tribunal sostuvo... Sin embargo... El problema constitucional radica en... Por tanto...").
+3. ${isAgraviosAnswerType(doc.documentType, doc.documentTypeLabel) ? "Contrasta cada agravio con lo que la sentencia efectivamente resolvió y con las constancias del expediente que consten en las fuentes. Defiende la sentencia: nunca la combatas ni interpongas recurso." : 'Aplica contraste riguroso con la resolución impugnada ("El Tribunal sostuvo... Sin embargo... El problema constitucional radica en... Por tanto...").'}
 4. Mantén redacción forense mexicana formal, técnica y persuasiva sin relleno.
 5. Concluye el bloque solo con el efecto expresamente solicitado y sustentado; si falta soporte, marca la cuestión como pendiente, no inventes una consecuencia jurídica.
 6. PROHIBIDO usar Markdown: nada de **asteriscos**, *cursivas*, #encabezados ni viñetas "-". Los títulos o rúbricas van SOLO EN MAYÚSCULAS, sin símbolos.
@@ -1762,7 +1807,25 @@ const admission = evaluateGeneratedLegalAdmission({ text: rawText, sectionType: 
   };
 }
 
+/** Texto determinista de la contestación de agravios (parte apelada), solo con datos de la ficha confirmada. */
+function renderAgraviosDeterministic(block: LegalBlock, doc: UniversalLegalDocument): string | undefined {
+  const dossier = doc.generationMetadata.caseDossier as CaseDossier | undefined;
+  const agravio = block.title.match(/^CONTESTACI[ÓO]N\s+AL\s+AGRAVIO\s+(\S+)/i);
+  if (agravio) {
+    const ordinals = ['PRIMERO', 'SEGUNDO', 'TERCERO', 'CUARTO', 'QUINTO', 'SEXTO', 'SÉPTIMO', 'OCTAVO', 'NOVENO', 'DÉCIMO'];
+    const index = ordinals.indexOf(agravio[1].toUpperCase());
+    const number = index >= 0 ? index + 1 : Number(agravio[1]);
+    const found = dossier?.agravios.find((item) => item.number === number);
+    return found ? renderAgravioFallback(found) : '[DATO PENDIENTE: agravio del apelante que se contesta]';
+  }
+  return renderAgraviosAnswerSection(block.title, block.sectionType, { dossier, expediente: doc.caseRefs.expediente, resolutivos: dossier?.resolutivos });
+}
+
 function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocument, caseAnalysis?: CaseAnalysis): string {
+  if (isAgraviosAnswerType(doc.documentType, doc.documentTypeLabel)) {
+    const agraviosText = renderAgraviosDeterministic(block, doc);
+    if (agraviosText !== undefined) return agraviosText;
+  }
   const requestLedText = renderRequestLedSection(doc, block.sectionType, block.title);
   if (requestLedText !== undefined) return requestLedText;
   const projection = caseAnalysis?.richCaseAnalysis?.draftingProjection;
@@ -1822,11 +1885,17 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
   // DEMANDADO; en demanda inicial es el ACTOR.
   const appealMeta = (doc.generationMetadata as any)?.appealResolutionConfirmation;
   const appealParties = appealAppearingParties(appealMeta);
-  const firmanteName = appealParties?.appellant ?? (isContestacionDoc
+  // Ficha confirmada: quien firma es la parte que el abogado eligió representar; la contraparte, la del otro lado.
+  const confirmedDossier = (doc.generationMetadata.caseDossier as CaseDossier | undefined);
+  const dossierFirmante = confirmedDossier?.confirmed ? confirmedDossier.representedName : undefined;
+  const dossierContraparte = confirmedDossier?.confirmed && confirmedDossier.representedSide
+    ? confirmedDossier.parties.filter((party) => party.role !== confirmedDossier.representedSide && party.role !== 'otro').map((party) => party.name).join(', ') || undefined
+    : undefined;
+  const firmanteName = dossierFirmante ?? appealParties?.appellant ?? (isContestacionDoc
     ? inmobCtx?.arrendatarioOComprador?.value || agrarioCtx?.demandadoAgrario?.value || laborCtx?.patron?.value || doc.parties.demandado || caseAnalysis?.parties?.demandado || formatCaseContextField(doc.caseContext, 'demandado', '[DATO PENDIENTE: Nombre del demandado]')
     : tramiteCtx?.promovente?.value || agrarioCtx?.actorAgrario?.value || inmobCtx?.arrendadorOVendedor?.value || penalCtx?.denuncianteOQuerellante?.value || penalCtx?.victimaUOfendido?.value || laborCtx?.trabajador?.value || doc.parties.actor || doc.parties.quejoso || adminCtx?.actor?.value || fiscalCtx?.contribuyente?.value || caseAnalysis?.parties?.actor || caseAnalysis?.parties?.quejoso || formatCaseContextField(doc.caseContext, 'promovente', isAgrario ? '[DATO PENDIENTE: Nombre del actor / ejidatario / comunero]' : isInmobiliario ? '[DATO PENDIENTE: Nombre del arrendador / vendedor]' : isPenal ? '[DATO PENDIENTE: Nombre del denunciante / víctima / promovente]' : isLaboral ? '[DATO PENDIENTE: Nombre del trabajador]' : isFiscal ? '[DATO PENDIENTE: Nombre del contribuyente]' : isAdministrativo ? '[DATO PENDIENTE: Nombre del actor / promovente]' : isTramiteGeneral ? '[DATO PENDIENTE: Nombre del promovente]' : '[DATO PENDIENTE: Nombre del promovente]'));
   const quejosoName = firmanteName;
-  const demandadoName = appealParties?.counterpart ?? (isContestacionDoc
+  const demandadoName = dossierContraparte ?? appealParties?.counterpart ?? (isContestacionDoc
     ? agrarioCtx?.actorAgrario?.value || inmobCtx?.arrendadorOVendedor?.value || laborCtx?.trabajador?.value || doc.parties.actor || adminCtx?.actor?.value || fiscalCtx?.contribuyente?.value || caseAnalysis?.parties?.actor || formatCaseContextField(doc.caseContext, 'actor', isAgrario ? '[DATO PENDIENTE: Nombre del actor agrario]' : isFiscal ? '[DATO PENDIENTE: Nombre del contribuyente]' : '[DATO PENDIENTE: Nombre del trabajador / actor]')
     : agrarioCtx?.demandadoAgrario?.value || inmobCtx?.arrendatarioOComprador?.value || penalCtx?.imputado?.value || laborCtx?.patron?.value || adminCtx?.autoridadDemandada?.value || fiscalCtx?.autoridadFiscalDemandada?.value || doc.parties.demandado || caseAnalysis?.parties?.demandado || formatCaseContextField(doc.caseContext, 'demandado', isAgrario ? '[DATO PENDIENTE: Demandado / Órgano ejidal]' : isInmobiliario ? '[DATO PENDIENTE: Arrendatario / Comprador / Demandado]' : isPenal ? '[DATO PENDIENTE: Persona imputada o investigada]' : isLaboral ? '[DATO PENDIENTE: Nombre del patrón o empresa demandada]' : isFiscal ? '[DATO PENDIENTE: Autoridad fiscal demandada]' : isAdministrativo ? '[DATO PENDIENTE: Autoridad demandada]' : '[DATO PENDIENTE: Nombre del demandado]'));
   // Autoridad
@@ -1918,7 +1987,9 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       const courtesy = (court: string) => /^(?:C\.|H\.)/i.test(court) ? court
         : /^JUE[ZC]/i.test(court) ? `C. ${court}`
           : /^(?:TRIBUNAL|JUZGADO|SALA|JUNTA)/i.test(court) ? `H. ${court}` : court;
-      const destinationAuthority = (demandCourt && genericTemplateDestination ? courtesy(demandCourt) : undefined)
+      const dossierCourt = (doc.generationMetadata.caseDossier as CaseDossier | undefined)?.court;
+      const destinationAuthority = (dossierCourt ? courtesy(dossierCourt) : undefined)
+        || (demandCourt && genericTemplateDestination ? courtesy(demandCourt) : undefined)
         || templateDestination
         || doc.parties?.autoridadDestinataria
         || doc.parties?.autoridadResponsable || caseAnalysis?.parties?.autoridadResponsable || (caseAnalysis?.authorities && caseAnalysis.authorities[0]) || defaultAutoridad;
@@ -1928,6 +1999,9 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
     case 'identity': {
       if (isContestacionDoc) {
         const roles = resolveContestacionRoles(doc, caseAnalysis, (doc as any).caseParties || []);
+        if (/reconvencion/i.test(String(doc.documentType || ''))) {
+          return `${roles.contesta}, en su carácter de parte actora en lo principal y demandada en la reconvención, comparece para contestar la reconvención formulada por ${roles.contraparte}, dentro del expediente ${roles.expediente}, ante la autoridad competente.`;
+        }
         return `${roles.contesta}, en su carácter de parte demandada, comparece para contestar la demanda promovida por ${roles.contraparte}, dentro del expediente ${roles.expediente}, ante la autoridad competente.`;
       }
       // Cada sección de identidad cumple una función procesal distinta. La Guía
@@ -1936,16 +2010,22 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
       // Un único texto indiferenciado al título producía tres encabezados
       // idénticos en el recurso de apelación.
       const identityKey = block.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      const isRecurso = /apelacion|recurso|revision/.test(`${doc.documentType || ''} ${doc.documentTypeLabel || ''}`);
-      const recursoLabel = isRecurso ? 'el recurso de apelación' : 'el presente escrito';
+      // El medio se nombra por el tipo elegido: una revocación, revisión o queja no es una apelación, y
+      // un escrito que no impugna (réplica, desahogo, promoción) no habla de agravios ni de resolución combatida.
+      const impugnationLabel = impugnationMediumLabel(String(doc.documentType || ''));
+      const isRecurso = Boolean(impugnationLabel);
       if (/proemio/.test(identityKey)) {
-        return `Se comparece a promover ${recursoLabel} contra la resolución dictada dentro del expediente ${expedienteNum}, `
+        if (!impugnationLabel) {
+          return `Se comparece a presentar el presente escrito dentro del expediente ${expedienteNum}, en relación con la actuación que se precisa en los antecedentes; `
+            + `lo que se solicita se concreta en los puntos petitorios.`;
+        }
+        return `Se comparece a promover ${impugnationLabel} contra la resolución dictada dentro del expediente ${expedienteNum}, `
           + `con el propósito de que la autoridad revise la determinación combatida. `
           + `La impugnación se sostiene en los antecedentes y en los agravios que se desarrollan más adelante, `
           + `y la congruencia de lo pedido se verifica en los puntos petitorios.`;
       }
       if (/identificaci|asunto|rubro/.test(identityKey)) {
-        const tipoPromocion = doc.documentTypeLabel || (isRecurso ? 'Recurso de apelación' : 'Escrito procesal');
+        const tipoPromocion = doc.documentTypeLabel || (isRecurso ? impugnationLabel!.replace(/^el /, '').replace(/^./, (c) => c.toUpperCase()) : 'Escrito procesal');
         return `EXPEDIENTE: ${expedienteNum}\n`
           + `TIPO DE PROMOCIÓN: ${tipoPromocion}\n`
           + `MATERIA: ${doc.matter || '[DATO PENDIENTE: materia del asunto]'}\n`
@@ -2169,7 +2249,8 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
           : caseAnalysis?.proceduralTimeline && caseAnalysis.proceduralTimeline.length > 0
           ? caseAnalysis.proceduralTimeline.slice(0, 5).map((e, idx) => `${idx + 1}. Con fecha ${e.date}: ${e.event}.`).join('\n\n')
           : `1. En el expediente principal ${expedienteNum}, la autoridad responsable emitió la resolución materia del presente medio de defensa.\n\n` +
-            `2. Dicha determinación lesiona las garantías fundamentales de la parte promovente al carecer de debida fundamentación y motivación.\n\n` +
+            // El perjuicio y el vicio de la resolución son postura del abogado: no se afirman por defecto.
+            `2. [REQUIERE POSTURA DEL ABOGADO: perjuicio que causa la resolución y vicio concreto que se le atribuye; no se afirma por inferencia].\n\n` +
             `3. [DATO PENDIENTE: Fecha y términos de la notificación legal].`);
     case 'legal_grounds':
       if (isNewWriting) return 'FUNDAMENTO JURÍDICO:\n\nSe invocan los preceptos legales y constitucionales aplicables al caso concreto conforme al orden jurídico vigente.';
@@ -2498,15 +2579,28 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
           `SEGUNDO. Tener por formulada la petición y trámite procesal consistente en: ${peticion}.\n` +
           `TERCERO. Proveer lo conducente conforme a derecho y ordenar las anotaciones, certificaciones y diligencias correspondientes.`;
       }
-      return `PUNTOS PETITORIOS:\n\n` +
-        `PRIMERO. Tenerme por presentado en tiempo y forma con el presente escrito y anexos acompañados.\n` +
-        `SEGUNDO. Admitir a trámite el medio de defensa promovido.\n` +
-        `TERCERO. En su oportunidad procesal, dictar resolución favorable declarando fundadas las pretensiones de esta parte.`;
+      {
+        const medium = impugnationMediumLabel(String(doc.documentType || ''));
+        return `PUNTOS PETITORIOS:\n\n` +
+          `PRIMERO. Tenerme por presentado en tiempo y forma con el presente escrito y anexos acompañados.\n` +
+          (medium
+            ? `SEGUNDO. Admitir a trámite ${medium} que se interpone.\n` +
+              `TERCERO. En su oportunidad procesal, declarar fundados los agravios y resolver conforme a lo solicitado.`
+            : `SEGUNDO. Tener por formuladas las manifestaciones contenidas en el presente escrito.\n` +
+              `TERCERO. Proveer lo conducente conforme a derecho.`);
+      }
     case 'closing':
       if (isNewWriting) return 'LUGAR Y FECHA: [DATO PENDIENTE: lugar y fecha de presentación]';
-      return `PROTESTO LO NECESARIO EN DERECHO.\nCiudad de México, a la fecha de su presentación.`;
-    case 'signature':
+      // El lugar sale de la ficha; la fecha de presentación no consta y queda en blanco solo aquí.
+      return closingText((doc.generationMetadata.caseDossier as CaseDossier | undefined)?.city);
+    case 'signature': {
+      const signatureDossier = doc.generationMetadata.caseDossier as CaseDossier | undefined;
+      if (signatureDossier?.confirmed && signatureDossier.representedName) {
+        const role = getWritingContract(doc.documentType).signerLabel;
+        return signatureText(signatureDossier.representedName, role.charAt(0).toUpperCase() + role.slice(1));
+      }
       return `_________________________________________\n${quejosoName}`;
+    }
     default: {
       if (isNewWriting) return `${titleUpper}\n\n[REQUIERE DEFINIR CONTENIDO ESPECÍFICO DEL APARTADO]`;
       if (isFamiliar) {
@@ -3226,7 +3320,11 @@ export async function generateSection(
 
   // Adaptar DocumentNode a LegalBlock para reutilizar orchestrator
   const sectionTitleKey = sec.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const formalSection = ['header', 'identity', 'petition', 'closing', 'signature'].includes(sec.type);
+  // En la contestación de agravios (parte apelada) solo los bloques de cada agravio los redacta la IA: el resto
+  // son secciones fijas que se construyen con la ficha confirmada.
+  const agraviosAnswerFixedSection = isAgraviosAnswerType(doc.documentType, doc.documentTypeLabel)
+    && !/^contestacion al agravio\b/.test(sectionTitleKey);
+  const formalSection = ['header', 'identity', 'petition', 'closing', 'signature'].includes(sec.type) || agraviosAnswerFixedSection;
   const hasConfirmedDefenses = Boolean(caseAnalysis?.arguments?.length);
   const hasEvidence = Boolean(caseAnalysis?.evidence?.length);
   const hasConfirmedFactPositions = Boolean(caseAnalysis?.facts?.some((fact) => fact.position && !['REQUIRE_LAWYER_INPUT', 'UNDETERMINED'].includes(fact.position)));
@@ -3289,7 +3387,9 @@ export async function generateSection(
   // REFERENCE_ONLY guard: si la sección es de tipo background con cobertura REFERENCE_ONLY
   // y eventos procesales respaldados por fuente, el contenido se materializa determinísticamente
   // y NO debe pasar por el flujo jerárquico de invocación al provider.
-  const hasHierarchicalPlans = !sourceBackedProceduralReferenceSection && Boolean(
+  // La parte apelada no recibe los asuntos jurídicos del apelante (su análisis trata la sentencia como acto
+  // impugnado): sus bloques se redactan por agravio con la instrucción de la ficha.
+  const hasHierarchicalPlans = !sourceBackedProceduralReferenceSection && !isAgraviosAnswerType(doc.documentType, doc.documentTypeLabel) && Boolean(
     sectionPlan && (
       (sectionPlan.issuePlans && sectionPlan.issuePlans.length > 0) ||
       (sectionPlan.claimPlans && sectionPlan.claimPlans.length > 0) ||
@@ -3718,6 +3818,15 @@ export async function runGenerationPipeline(
     markDocumentAsSource({ ...source }, source.id)
   );
   const lawyerProfile = input.lawyerProfile || DEFAULT_LAWYER_PROFILE;
+  // Contrato del tipo: ficha confirmada, representación elegida y documentos fuente obligatorios. Si falta algo,
+  // se pide al abogado; nunca se inventa.
+  const writingPrepared: PreparedWritingContract | undefined = prepareWritingContract({
+    documentType: input.selectedDocumentType?.trim()
+      || (input.taxonomy?.documentType && input.taxonomy.documentType !== 'otro' ? input.taxonomy.documentType.trim() : ''),
+    flags: { caseDossier: input.caseDossier, requireCaseDossier: input.requireCaseDossier, separateReviewAnnex: input.separateReviewAnnex },
+    suppliedSources,
+    maxPages: input.pageTarget === undefined ? undefined : tryParsePageTarget(input.pageTarget)?.pages,
+  });
   const userPrompt = input.userInstruction || input.prompt || '';
   const isReferenceDrivenRequest = input.workflow?.flow === 'DOCUMENT_ANALYSIS';
 
@@ -3760,6 +3869,9 @@ export async function runGenerationPipeline(
   };
   if (draftDepthProfile) doc.generationMetadata.draftDepth = draftDepthProfile.draftDepth;
   doc.generationMetadata.externalProviderOptIn = input.externalProviderOptIn === true;
+  if (Array.isArray(input.authorizedExternalProviders)) doc.generationMetadata.authorizedExternalProviders = [...input.authorizedExternalProviders];
+  else delete doc.generationMetadata.authorizedExternalProviders;
+  if (writingPrepared) applyDossierToDocument(doc, writingPrepared);
   (doc.generationMetadata as any).generationExtension = generationExtension;
   const generationId = input.generationId || `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   let traceContext: GenerationTraceContext | undefined;
@@ -4575,9 +4687,11 @@ export async function runGenerationPipeline(
 
       const secPlan = draftingPlan.sections.find((p) => p.templateSectionId === section.id);
       // Instrucción enfocada por sección para el esqueleto de contestación.
-      const sectionFocused = isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
-        ? REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS[section.id]
-        : CONTESTACION_SECTION_INSTRUCTIONS[section.id];
+      const sectionFocused = isAgraviosAnswerType(doc.documentType, doc.documentTypeLabel)
+        ? section.generationInstruction
+        : isContestacionRevisionAmparoDirectoType(doc.documentType, doc.documentTypeLabel)
+          ? REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS[section.id]
+          : CONTESTACION_SECTION_INSTRUCTIONS[section.id];
       const combinedInstruction = sectionFocused
         ? `${input.sectionInstruction || input.userInstruction || ''}\n\nINSTRUCCIÓN DE SECCIÓN: ${sectionFocused}`
         : (input.sectionInstruction || input.userInstruction);
@@ -4859,7 +4973,32 @@ export async function runGenerationPipeline(
       callbacks?.onBlockComplete?.(completedBlocks, doc.sections.length, pseudoBlock as LegalBlock, { aiUsed: effectiveAiUsed, aiProvider: generated.aiProvider || null, fallback: !effectiveAiUsed && !!generated.aiError }, doc);
     }
 
-    if (generationExtension.generationMode === 'extended-legal') {
+    // Contrato del escrito: separa notas y marcadores hacia el anexo, valida, repara cierre y firma y regenera
+    // (una vez) las secciones que incumplan. Lo que persiste queda registrado y bloquea FINAL.
+    const reviewAnnex = emptyReviewAnnex();
+    let contractResult: Awaited<ReturnType<typeof enforceWritingContract>> | undefined;
+    if (writingPrepared) {
+      jobUpdate((input as any).jobId, { phase: 'verify', stage: 'Verificando el contrato del escrito' });
+      contractResult = await enforceWritingContract(doc, {
+        prepared: writingPrepared,
+        annex: reviewAnnex,
+        maxRegenerations: 1,
+        regenerateText: async (section, correction) => {
+          const sectionPlanForRetry = draftingPlan.sections.find((p) => p.templateSectionId === section.id);
+          const retryInstruction = `${section.generationInstruction || input.userInstruction || ''}\n\n${correction}`;
+          const retry = await generateSection(
+            doc, section.id, retryInstruction, input.generateSection, lawyerProfile, sectionPlanForRetry, caseAnalysis, traceContext,
+            input.issueProviderInvoker, input.maxIssueConcurrency, input.researchBundlesByIssueId, input.derivedReadinessByIssueId,
+            input.sectionGenerationMode || 'legacy', generationExtension, documentState,
+          );
+          return retry.aiUsed !== false && !retry.blocks?.length && retry.text?.trim() ? retry.text : undefined;
+        },
+      });
+    }
+
+    // Extensión como MÁXIMO: no hay etapa de ampliación. El escrito mide lo que el material sostiene; nunca se
+    // amplía ni se regeneran secciones para llenar páginas.
+    if (generationExtension.generationMode === 'extended-legal' && !generationExtension.lengthIsCeiling) {
       jobUpdate((input as any).jobId, { phase: 'extend', stage: 'Extensión jurídica' });
       const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
       finalExpansionBudgetState = {
@@ -5118,7 +5257,10 @@ export async function runGenerationPipeline(
         generationExtension.actualPages = finalPageMetrics.actualPages;
         generationExtension.wordCount = finalPageMetrics.wordCount;
         generationExtension.characterCount = finalPageMetrics.characterCount;
-        generationExtension.extensionTargetUnmet = finalPageMetrics.actualPages < generationExtension.minPages;
+        // Con extensión como máximo, «no cumplida» significa SUPERAR el máximo; ser más corto no es una falla.
+        generationExtension.extensionTargetUnmet = generationExtension.lengthIsCeiling
+          ? finalPageMetrics.actualPages > generationExtension.maxPages
+          : finalPageMetrics.actualPages < generationExtension.minPages;
         const requiredCoverage = (doc.coverageMatrix?.items || []).filter((item) => item.required);
         const pendingCoverageItems = requiredCoverage.filter((item) => !['covered', 'not_applicable'].includes(item.status));
         const pendingSectionIds = new Set(pendingCoverageItems.flatMap((item) => item.targetSectionIds || []));
@@ -5163,7 +5305,7 @@ export async function runGenerationPipeline(
           const redundancy = redundancyRatio(paragraphs, 0.85);
           const result = evaluatePageTarget(pageTarget, finalPageMetrics.actualPages, redundancy.ratio);
           (doc.generationMetadata as any).pageTargetResult = result;
-          if (result.notice) doc.validation.warnings.push({ checkId: 'PAGE_TARGET_UNMET', message: result.notice } as ValidationIssue);
+          if (result.notice) doc.validation.warnings.push({ checkId: 'PAGE_TARGET_EXCEEDED', message: result.notice } as ValidationIssue);
           if (redundancy.ratio > MAX_REDUNDANCY_RATIO) {
             doc.validation.warnings.push({
               checkId: 'REDUNDANCY_THRESHOLD_EXCEEDED',
@@ -5222,7 +5364,7 @@ export async function runGenerationPipeline(
     // resultado medido para que no se pierdan.
     const recordedPageTarget = (doc.generationMetadata as any).pageTargetResult as PageTargetResult | undefined;
     if (recordedPageTarget?.notice) {
-      doc.validation.warnings.push({ checkId: 'PAGE_TARGET_UNMET', message: recordedPageTarget.notice } as ValidationIssue);
+      doc.validation.warnings.push({ checkId: 'PAGE_TARGET_EXCEEDED', message: recordedPageTarget.notice } as ValidationIssue);
     }
     if ((recordedPageTarget?.redundancyRatio ?? 0) > MAX_REDUNDANCY_RATIO) {
       doc.validation.warnings.push({
@@ -5236,6 +5378,13 @@ export async function runGenerationPipeline(
       doc.validation.errors.push(...requestContractErrors);
     }
     doc.validation.warnings.push(...roleIntegrityWarnings);
+    // Páginas sin texto legible: el borrador no se presenta como basado en el documento completo.
+    for (const gap of unreadableSourcePages(doc.sourceDocuments || [])) {
+      doc.validation.warnings.push({
+        checkId: 'SOURCE_PAGES_UNREAD',
+        message: `No se pudo leer texto en ${gap.pages.length} de ${gap.totalPages} páginas de «${gap.name}» (${gap.pages.slice(0, 12).join(', ')}${gap.pages.length > 12 ? '…' : ''}). El borrador no considera su contenido; revisa esas páginas o aplica el reconocimiento de texto local antes de presentarlo.`,
+      } as ValidationIssue);
+    }
 
     populateDeterministicFactualClaimAudit(doc);
     const operationalManual = await loadActiveManual();
@@ -5388,6 +5537,11 @@ export async function runGenerationPipeline(
       console.warn('[pipeline:validation] Error en validación semántica final (no bloqueante):', e?.message);
     }
 
+    // Segunda pasada (idempotente): las etapas posteriores pueden haber reintroducido notas o marcadores.
+    if (writingPrepared) {
+      separateReviewMaterial(doc, reviewAnnex, { supportText: supportTextOf(doc, writingPrepared.dossier) });
+      finalizeReviewAnnex(doc, reviewAnnex, contractResult);
+    }
     const allDocText = doc.sections.flatMap((s) => s.content.map((b) => b.text)).join('\n');
     const hasAnySeedMarker = hasSeedMarkers(allDocText);
     const hasAnyUnresolvedDeps = hasUnresolvedFactualDependencies(allDocText);
@@ -5412,6 +5566,8 @@ export async function runGenerationPipeline(
       !hasUnresolvedCoverage &&
       docSemanticEval.overallVerdict !== 'FAIL' &&
       doc.validation.isValid &&
+      // Fail-closed: las notas, citas sin verificar y pendientes que se retiraron del cuerpo siguen bloqueando FINAL.
+      !reviewAnnexHasItems(doc.generationMetadata.reviewAnnex) &&
       documentAssemblyGatePassed;
 
     doc.generationMetadata.pipelineState.isComplete = isDocumentTrulyComplete;

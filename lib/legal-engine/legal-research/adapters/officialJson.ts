@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { withOfficialRetry, type OfficialRetryOptions } from '../officialFetch';
 import { sha256ResearchValue, stableResearchId } from '../canonical';
 import type { AuthorityCandidate, AuthorityType, OfficialSourceEvidence, SupportedProposition } from '../types';
 import type {
@@ -49,6 +50,8 @@ export interface OfficialExtractedDocument {
 }
 
 export interface OfficialAdapterConfig {
+  /** Reintentos y ritmo de peticiones a la fuente oficial. */
+  retry?: OfficialRetryOptions;
   searchUrl: string;
   allowedDomains: readonly string[];
   fetch?: OfficialFetch;
@@ -209,7 +212,7 @@ function makeCandidate(record: OfficialRecord, input: LegalResearchSearchInput, 
 }
 
 export function createOfficialJsonAdapter(config: OfficialAdapterConfig & { id: 'SCJN' | 'FEDERAL_LEGISLATION'; supportedAuthorityTypes: AuthorityType[] }): LegalResearchProvider {
-  const fetcher = config.fetch || fetch;
+  const fetcher = withOfficialRetry(config.fetch || fetch, config.retry);
   const clock = config.clock || (() => new Date());
   const timeoutMs = Number.isFinite(config.timeoutMs) && (config.timeoutMs || 0) >= 1000 ? Number(config.timeoutMs) : 15000;
   const byId = new Map<string, { candidate: AuthorityCandidate; record: OfficialRecord }>();

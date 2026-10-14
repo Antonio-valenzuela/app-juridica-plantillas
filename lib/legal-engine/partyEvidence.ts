@@ -38,6 +38,7 @@ const REPRESENTED_RE = new RegExp(
 const PROMOVIDO_POR_RE = new RegExp(
   String.raw`(?:promovid[oa]|instaurad[oa]|entablad[oa]|iniciad[oa]|interpuest[oa])\s+(?:en\s+(?:su|mi)\s+contra\s+)?por\s+` + NAME + COMPANY_SUFFIX + String.raw`(?:,|\s+ante\b|\.)`,
 );
+const OWN_DEFENSE_RE = /contestar\s+(?:la\s+)?demanda[^.]{0,160}?\ben\s+mi\s+contra\b|en\s+mi\s+car[aá]cter\s+de\s+(?:parte\s+)?demandad[oa]\b/i;
 const CONTESTA_RE = /\b(?:contestaci[oó]n\s+(?:de\s+la\s+|a\s+la\s+)?demanda|contestar\s+la\s+demanda|dar\s+contestaci[oó]n)\b/i;
 
 function collapse(value: string): string {
@@ -61,6 +62,12 @@ export function extractContestacionParties(corpus: string): { actor?: string; de
   if (demandado) {
     const candidate = cleanName(demandado);
     if (isValidProceduralPartyName(candidate)) result.demandado = candidate;
+  }
+  // «…por mi propio derecho… vengo a contestar la demanda instaurada en mi contra»: quien comparece declara
+  // literalmente que la demanda se dirige contra él.
+  if (!result.demandado && OWN_DEFENSE_RE.test(corpus)) {
+    const compareciente = extractProemioCompareciente(corpus);
+    if (compareciente && isValidProceduralPartyName(compareciente)) result.demandado = cleanName(compareciente);
   }
   const actor = corpus.match(PROMOVIDO_POR_RE)?.[1];
   if (actor) {

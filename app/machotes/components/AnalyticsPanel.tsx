@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AnalyticsDataset, AnalyticsRangeDays, AnalyticsStatus } from '@/lib/workspace/analytics';
 import { describeWorkspaceHttpError } from '@/lib/workspace/httpErrors';
+import { ExternalAiEgressPanel } from './ExternalAiEgressPanel';
 
 const ranges: AnalyticsRangeDays[] = [7, 30, 90];
 
@@ -103,7 +104,7 @@ function AnalyticsContent({ data }: { data: AnalyticsDataset }) {
       <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
         <summary className="cursor-pointer text-sm font-extrabold text-[#0B2545]">Diagnóstico avanzado</summary>
 <div className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-2 lg:grid-cols-5"><p>OCR validado: <strong>{data.advanced.ocrSuccessRate === null ? 'Sin datos' : `${data.advanced.ocrSuccessRate}%`}</strong></p><p>Fuentes listas: <strong>{data.observations?.sourceQuality ? formatNumber(data.advanced.sourceReady) : data.hasActivity ? 'No medido' : 'Sin datos'}</strong></p><p>Fuentes en revisión: <strong>{data.observations?.sourceQuality ? formatNumber(data.advanced.sourceReview) : data.hasActivity ? 'No medido' : 'Sin datos'}</strong></p><p>Fallos de extracción: <strong>{data.observations?.sourceQuality ? formatNumber(data.advanced.extractionFailures) : data.hasActivity ? 'No medido' : 'Sin datos'}</strong></p><p>Actividad de secciones y extensión: <strong>{data.observations?.providerAttempts ? formatNumber(data.advanced.providerAttempts) : data.hasActivity ? 'No medido' : 'Sin datos'}</strong></p><p>Secciones con fallback: <strong>{data.observations?.providerFallbacks ? formatNumber(data.advanced.providerFallbacks) : data.hasActivity ? 'No medido' : 'Sin datos'}</strong></p><p>Timeouts: <strong>{data.observations?.timeouts ? formatNumber(data.advanced.timeoutCount) : data.hasActivity ? 'No medido' : 'Sin datos'}</strong></p><p>Errores HTTP: <strong>{data.observations?.httpErrors ? formatNumber(data.advanced.httpErrors) : data.hasActivity ? 'No medido' : 'Sin datos'}</strong></p><p>Generación promedio: <strong>{formatDuration(data.advanced.averageGenerationMs)}</strong></p><p>Extensión promedio: <strong>{formatDuration(data.advanced.extensionAverageMs)}</strong></p></div>
-        <p className="mt-3 text-xs text-slate-600">Solicitudes totales al proveedor: <strong>No medido</strong></p>
+        <p className="mt-3 text-xs text-slate-600">Solicitudes totales al proveedor: <strong>No medido en este resumen; ver «Envíos a IA en la nube»</strong></p>
         <p className="mt-1 text-xs text-slate-600">Tokens globales: <strong>No medido</strong></p>
         <p className="mt-1 text-xs text-slate-500">La actividad combina metadatos de secciones y extensión; no representa el total de solicitudes HTTP a los proveedores.</p>
         {Object.keys(data.advanced.averageStageDurationsMs).length ? <div className="mt-4 border-t border-slate-200 pt-3"><p className="font-bold text-[#0B2545]">Tiempo promedio por etapa</p><div className="mt-2 flex flex-wrap gap-2">{Object.entries(data.advanced.averageStageDurationsMs).map(([stage, duration]) => <span key={stage} className="rounded-full bg-white px-2 py-1">{stage}: {formatDuration(duration)}</span>)}</div></div> : null}
@@ -112,7 +113,7 @@ function AnalyticsContent({ data }: { data: AnalyticsDataset }) {
   );
 }
 
-export function AnalyticsPanel({ endpoint = '/api/workspace/analytics' }: { endpoint?: string }) {
+export function AnalyticsPanel({ endpoint = '/api/workspace/analytics', egressEndpoint = '/api/workspace/analytics/ai-egress' }: { endpoint?: string; egressEndpoint?: string | null }) {
   const [rangeDays, setRangeDays] = useState<AnalyticsRangeDays>(30);
   const [state, setState] = useState<{ status: 'loading' | 'ready' | 'error'; data: AnalyticsDataset | null; errorMessage?: string }>({ status: 'loading', data: null });
 
@@ -146,6 +147,7 @@ export function AnalyticsPanel({ endpoint = '/api/workspace/analytics' }: { endp
       {state.status === 'error' ? <div className="rounded-xl border border-red-100 bg-red-50 p-6 text-center" role="alert"><p className="text-sm font-bold text-red-700">No fue posible cargar las analíticas.</p>{state.errorMessage && <p className="mt-2 text-xs text-red-800">{state.errorMessage}</p>}<button type="button" onClick={() => void load(rangeDays)} className="mt-3 min-h-10 rounded-lg bg-[#0B2545] px-4 text-xs font-bold text-white">Reintentar</button></div> : null}
       {state.status === 'ready' && state.data && !hasActivity ? <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">Aún no hay suficiente actividad.</div> : null}
       {state.status === 'ready' && state.data && hasActivity ? <AnalyticsContent data={state.data} /> : null}
+      {egressEndpoint && state.status !== 'loading' ? <ExternalAiEgressPanel rangeDays={rangeDays} endpoint={egressEndpoint} /> : null}
     </section>
   );
 }

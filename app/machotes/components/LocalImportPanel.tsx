@@ -160,7 +160,7 @@ export function LocalImportPanel() {
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <p className="text-[10px] font-bold uppercase tracking-[.16em] text-[#B58A5A]">Zona de revisión local</p>
-        <h2 className="mt-1 text-lg font-extrabold text-[#0B2545]">Incorporar documentos del despacho</h2>
+        <h2 className="mt-1 !mb-0 !text-lg !leading-tight font-extrabold text-[#0B2545]">Incorporar documentos del despacho</h2>
         <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">Analiza una carpeta o ZIP en esta computadora, revisa el resumen y elige qué documentos deben entrar a la Biblioteca o a un expediente.</p>
       </div>
       <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold text-emerald-700">Procesamiento local</span>

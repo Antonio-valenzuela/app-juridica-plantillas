@@ -22,8 +22,9 @@ import { getGenerationJobDeadlineMs } from '@/lib/legal-engine/generationDeadlin
 import { resolveDraftDepthProfile } from '@/lib/legal-engine/draftDepth';
 import { generationExtensionForDraftDepth } from '@/lib/legal-engine/generationExtension';
 import { PageTargetValidationError, parsePageTarget, tryParsePageTarget, type PageTarget } from '@/lib/legal-engine/pageTarget';
-import { explicitExternalProviderConsent, scopeConsentIdempotencyKey } from '@/lib/ai/caseProviderConsent';
+import { explicitAuthorizedProviders, explicitExternalProviderConsent, scopeConsentIdempotencyKey } from '@/lib/ai/caseProviderConsent';
 import { getUncertifiedDraftAcknowledgementError } from '@/lib/legal-engine/uncertifiedDraftAcknowledgement';
+import { parseCaseDossier } from '@/lib/legal-engine/caseDossier';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -121,6 +122,8 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const externalProviderOptIn = explicitExternalProviderConsent(body.externalProviderOptIn);
+  // Solo los proveedores que el abogado vio y autorizó; ningún otro remoto (tampoco como respaldo).
+  const authorizedExternalProviders = explicitAuthorizedProviders(body.authorizedExternalProviders);
   if (Buffer.byteLength(JSON.stringify(body), 'utf8') > maxGenerationInputChars()) {
     return NextResponse.json({ ok: false, errorCode: 'GENERATION_INPUT_TOO_LARGE', message: 'La solicitud de generación excede el tamaño permitido.' }, { status: 413 });
   }
@@ -168,6 +171,15 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
   }
+
+  // Ficha del caso confirmada por el abogado: se valida su forma; el pipeline comprueba que corresponda a las fuentes.
+  const parsedCaseDossier = body.caseDossier === undefined || body.caseDossier === null ? undefined : parseCaseDossier(body.caseDossier);
+  const caseDossier = parsedCaseDossier ?? undefined;
+  if (body.caseDossier !== undefined && body.caseDossier !== null && !parsedCaseDossier) {
+    return NextResponse.json({ ok: false, errorCode: 'INVALID_CASE_DOSSIER', message: 'La ficha del caso no es válida. Vuelve a revisarla y confirmarla.' }, { status: 400 });
+  }
+  const requireCaseDossier = body.requireCaseDossier === true;
+  const separateReviewAnnex = body.separateReviewAnnex === true || requireCaseDossier;
 
   // VERIFY-only continuation: re-evaluate the same materialized document and
   // never re-enter section generation or extension.
@@ -320,7 +332,9 @@ export async function POST(req: NextRequest) {
         referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension: effectiveGenerationExtension,
         draftDepth,
         pageTarget,
+        caseDossier, requireCaseDossier, separateReviewAnnex,
         externalProviderOptIn,
+        authorizedExternalProviders,
       }, {} as any);
       if (owner.desktopOwnerId) await saveGenerationArtifact({ ...owner, document: doc, progress: 100,
         terminalStatus: doc.status === 'draft' ? 'NEEDS_REVIEW' : 'COMPLETED' });
@@ -333,6 +347,8 @@ export async function POST(req: NextRequest) {
         'UNKNOWN_DOCUMENT_TYPE',
         'INCOMPATIBLE_DOCUMENT_ROUTE',
         'NEEDS_SOURCE_REVIEW',
+        'CASE_DOSSIER_REQUIRED',
+        'REQUIRED_SOURCE_MISSING',
       ].includes(err?.code)) {
         return NextResponse.json({ ok: false, error: err.message, errorCode: err.code, errorMetadata: err.metadata }, { status: 422 });
       }
@@ -462,7 +478,9 @@ export async function POST(req: NextRequest) {
           generationExtension: effectiveGenerationExtension,
           draftDepth,
           pageTarget,
+          caseDossier, requireCaseDossier, separateReviewAnnex,
           externalProviderOptIn,
+          authorizedExternalProviders,
         },
         // Bridge: además de callbacks estándar, enganchar progreso real por bloque
         {

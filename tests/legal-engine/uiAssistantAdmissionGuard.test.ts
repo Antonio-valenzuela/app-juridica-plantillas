@@ -88,9 +88,9 @@ describe('P0-B: admisión de contenido de UI', () => {
 describe('P0-B: recorrido de tipos implementados, 0 fugas', () => {
   it('los tipos visibles se identifican y ninguno declara fuga de UI', () => {
     const identities = visibleWritingTypes();
-    expect(identities.length).toBe(277);
+    expect(identities.length).toBe(278);
     const implemented = identities.filter(identity => identity.implementationStatus === 'IMPLEMENTED');
-    expect(implemented.length).toBe(265);
+    expect(implemented.length).toBe(266);
     // Invariante §20: draftable ⇔ tipo IMPLEMENTED (el routing lo resuelve).
     // Un borrador de tipo IMPLEMENTED con functionalStatus FAIL es legítimo
     // (borrador no certificado; FINAL sigue bloqueado por humanReview/gates).

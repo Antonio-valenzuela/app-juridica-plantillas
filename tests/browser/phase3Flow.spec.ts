@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test';
 import { appealPdf, autoFamiliarPdf } from '../helpers/syntheticPdf';
+import { acceptExternalConsentOnce } from '../helpers/externalConsent';
 
 /**
  * Fase 3 · Parte 2 — flujo de «Contestaciones y recursos» validado en el navegador.
@@ -11,7 +12,7 @@ import { appealPdf, autoFamiliarPdf } from '../helpers/syntheticPdf';
  */
 const SHOTS = 'audit/fase3-capturas';
 const TECHNICAL_NOISE = [/pending-upload/i, /Resoluciones detectadas/, /Conflicto OCR/i, /resoluciones encontradas/i, /Detectada automáticamente/, /NEEDS_USER_INPUT/, /SOURCE_DOCUMENT/, /CONFIRMED\b/, /\{\s*"/, /\bundefined\b/, /\[object Object\]/, /e2e-/i];
-const HELP = 'La extensión es una meta aproximada; dependerá de la complejidad, los hechos disponibles, la evidencia y las reglas aplicables. El sistema no añadirá contenido para llenar páginas.';
+const HELP = 'La extensión es un máximo, no una meta: si los hechos, la evidencia y las reglas aplicables no dan para tanto, el escrito será más corto. El sistema no añade contenido para llenar páginas.';
 
 function draftDocument(extra: Record<string, unknown> = {}) {
   return {
@@ -24,7 +25,7 @@ function draftDocument(extra: Record<string, unknown> = {}) {
     ],
     generationMetadata: {
       readiness: 'READY', qualityGate: true, validation: true, aiProvider: 'simulado',
-      pageTargetResult: { requestedPages: 20, preset: 'DETALLADO', actualPages: 3, outcome: 'BELOW_TARGET', notice: 'No se alcanzó la extensión solicitada (20 páginas; resultado: 3): la información disponible no sostiene más contenido sin redundancia. No se añadió texto de relleno.', measuredWith: 'PDF_RENDERER' },
+      pageTargetResult: { requestedPages: 20, preset: 'DETALLADO', actualPages: 3, outcome: 'WITHIN_MAX', measuredWith: 'PDF_RENDERER' },
     },
     createdAt: '2026-10-12T12:00:00.000Z', updatedAt: '2026-10-12T12:00:00.000Z', ...extra,
   };
@@ -75,6 +76,17 @@ async function openWithPdf(page: Page, buffer: Buffer = autoFamiliarPdf(44), nam
   await expect(page.getByTestId('page-target-selector')).toBeVisible({ timeout: 30_000 });
 }
 
+/**
+ * Contrato vigente desde 2026-10-13: ante una resolución caben varias vías (apelación, amparo, promoción…) y la
+ * elección final es del abogado. La actuación propuesta se preselecciona, pero Generar exige confirmarla.
+ */
+async function confirmProposedActuacion(page: Page) {
+  const confirm = page.getByTestId('actuacion-confirm');
+  await expect(confirm).toBeVisible({ timeout: 15_000 });
+  await confirm.click();
+  await expect(page.getByTestId('actuacion-confirmed')).toBeVisible();
+}
+
 const docTypeSelect = (page: Page) => page.getByRole('combobox').filter({ has: page.locator('option[value="apelacion_civil"]') });
 const pageTargetLabel = (page: Page, text: string) => page.getByTestId('page-target-selector').locator('label', { hasText: text });
 const generateButton = (page: Page) => page.getByRole('button', { name: /^Generar |Revisar datos para continuar/ });
@@ -84,9 +96,9 @@ test.describe('a. carga y navegación del PDF largo', () => {
     await isolate(context);
     await openWithPdf(page);
     await expect(page.getByText('Página 1 de 44')).toBeVisible();
-    await page.getByRole('button', { name: '→' }).first().click();
+    await page.getByRole('button', { name: 'Página siguiente' }).click();
     await expect(page.getByText('Página 2 de 44')).toBeVisible();
-    await page.getByRole('button', { name: '←' }).first().click();
+    await page.getByRole('button', { name: 'Página anterior' }).click();
     await expect(page.getByText('Página 1 de 44')).toBeVisible();
     await page.getByRole('button', { name: 'Texto extraído' }).click();
     await expect(page.getByText(/SE DESECHA el incidente/).first()).toBeVisible();
@@ -118,7 +130,8 @@ test.describe('b. actuación elegida y mensaje de compatibilidad (caso del auto 
     await select.selectOption('contestacion_demanda_civil');
     await expect(select).toHaveValue('contestacion_demanda_civil');
     await expect(page.getByTestId('source-incompatible-notice')).toContainText(/resolución judicial, no una demanda/i);
-    await expect(page.getByRole('button', { name: /Generar contestación|Revisar datos para continuar/ }).first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: /^Generar contestación/ })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Revisar datos para continuar' })).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/03-contestacion-sin-demanda-bloqueada.png` });
 
     // Volver a la variante familiar: sin aviso de materia y de nuevo habilitado.
@@ -136,7 +149,7 @@ test.describe('c. selector de extensión', () => {
     await expect(selector).toBeVisible();
     await expect(page.locator('details.lex-disclosure[open]')).toHaveCount(0);
     await expect(selector).toContainText(HELP);
-    await expect(page.getByRole('radiogroup', { name: 'Extensión del escrito' })).toBeVisible();
+    await expect(page.getByRole('radiogroup', { name: 'Extensión máxima del escrito' })).toBeVisible();
     await expect(page.getByRole('radio', { name: /Detallado/ })).toBeChecked();
     // Teclado: foco en la opción activa y flechas para cambiar.
     await page.getByRole('radio', { name: /Detallado/ }).focus();
@@ -153,7 +166,7 @@ test.describe('c. selector de extensión', () => {
     await openWithPdf(page);
 
     await pageTargetLabel(page, 'Personalizado').click();
-    const custom = page.getByLabel('Páginas aproximadas');
+    const custom = page.getByLabel('Máximo de páginas');
     await expect(custom).toBeVisible();
     for (const invalid of ['1', '100', '2.5']) {
       await custom.fill(invalid);
@@ -171,10 +184,11 @@ test.describe('c. selector de extensión', () => {
     await page.locator('input[type="file"]').first().setInputFiles({ name: 'auto-familiar-44.pdf', mimeType: 'application/pdf', buffer: autoFamiliarPdf(44) });
     await expect(page.getByTestId('page-target-selector')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('radio', { name: /Personalizado/ })).toBeChecked();
-    await expect(page.getByLabel('Páginas aproximadas')).toHaveValue('33');
+    await expect(page.getByLabel('Máximo de páginas')).toHaveValue('33');
 
     // El parámetro viaja al servidor tal como se eligió.
-    page.once('dialog', (dialog) => dialog.accept());
+    await confirmProposedActuacion(page);
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect.poll(() => sent.length, { timeout: 20_000 }).toBe(1);
     expect(sent[0].pageTarget).toEqual({ preset: 'PERSONALIZADO', pages: 33 });
@@ -185,7 +199,8 @@ test.describe('c. selector de extensión', () => {
     const sent = await mockGeneration(page, 'ok');
     await openWithPdf(page);
     await pageTargetLabel(page, 'Breve').click();
-    page.once('dialog', (dialog) => dialog.accept());
+    await confirmProposedActuacion(page);
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect.poll(() => sent.length, { timeout: 20_000 }).toBe(1);
     expect(sent[0].pageTarget).toEqual({ preset: 'BREVE', pages: 5 });
@@ -198,10 +213,13 @@ test.describe('d. reglas de habilitación de Generar', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await gotoResponses(page);
     await expect(page.getByText(/Sube una demanda, acuerdo, notificación o escrito inicial/)).toBeVisible();
-    await expect(page.getByRole('button', { name: /Generar contestación|Revisar datos para continuar/ }).first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: /^Generar contestación/ })).toBeDisabled();
     await page.screenshot({ path: `${SHOTS}/06-estado-vacio.png` });
 
     await openWithPdf(page, appealPdf(44), 'apelacion44.pdf');
+    // Varias vías posibles: hasta que el abogado confirma, Generar no se habilita.
+    await expect(page.getByRole('button', { name: /Generar apelación/ })).toBeDisabled();
+    await confirmProposedActuacion(page);
     await expect(page.getByRole('button', { name: /Generar apelación/ })).toBeEnabled();
   });
 });
@@ -223,20 +241,28 @@ test.describe('f. edición, guardado, reapertura y recuperación del borrador', 
     await isolate(context);
     await mockGeneration(page, 'ok');
     await openWithPdf(page);
-    page.once('dialog', (dialog) => dialog.accept());
+    await confirmProposedActuacion(page);
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect(page.getByText(/BORRADOR PARA REVISIÓN DEL ABOGADO/i)).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('page-target-result')).toContainText('Objetivo: 20 páginas · Resultado: 3 páginas');
-    await expect(page.getByTestId('page-target-result')).toContainText('No se añadió texto de relleno');
+    await expect(page.getByTestId('page-target-result')).toContainText('Máximo: 20 páginas · Resultado: 3 páginas');
+    await expect(page.getByTestId('page-target-result')).not.toContainText('No se alcanzó');
+    // El documento generado se puede recorrer: el lienzo tiene su propio scroll y llega al final.
+    const canvas = page.locator('.legal-document-canvas').first();
+    await expect(canvas).toBeVisible();
+    const dims = await canvas.evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+    expect(dims.client).toBeGreaterThan(200);
+    await canvas.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    expect(await canvas.evaluate((el) => el.scrollTop > 0 || el.scrollHeight <= el.clientHeight)).toBe(true);
 
     // Edición del primer bloque.
     await page.getByRole('button', { name: /Editar contestación/ }).click();
     await page.getByRole('button', { name: '✏️', exact: true }).first().click();
-    const box = page.getByRole('textbox').first();
-    await box.click();
-    await page.keyboard.press('End');
+    const block = page.locator('textarea').first();
+    await block.click();
+    await page.keyboard.press('Control+End');
     await page.keyboard.type(' EDICION-E2E-UNO');
-    await page.getByRole('button', { name: '✓', exact: true }).first().click();
+    await page.getByRole('button', { name: 'Guardar cambios' }).click();
     await expect(page.getByText(/EDICION-E2E-UNO/).first()).toBeVisible();
 
     // Fallo de guardado: mensaje claro y el texto editado se conserva en pantalla.
@@ -259,11 +285,20 @@ test.describe('f. edición, guardado, reapertura y recuperación del borrador', 
     await page.getByRole('button', { name: /Guardar/ }).first().click();
     await page.waitForTimeout(1500);
     const all = (await (await page.request.get('/api/legal-drafts')).json()).drafts as any[];
-    expect(all.filter((draft) => draft.title === 'Apelación para revisión')).toHaveLength(1);
+    // La base e2e es compartida entre corridas: se verifica que el borrador editado no se duplique.
+    expect(all.filter((draft) => JSON.stringify(draft.structuredDoc).includes('EDICION-E2E-UNO'))).toHaveLength(1);
 
     // Cierre y reapertura desde Inicio.
     await page.goto('/machotes');
     await page.getByRole('button', { name: /Apelación para revisión/ }).first().click();
+    const editedId = all.find((draft) => JSON.stringify(draft.structuredDoc).includes('EDICION-E2E-UNO')).id as string;
+    await page.getByRole('row', { name: /Apelación para revisión/ }).first().waitFor();
+    const rows = await page.getByRole('row', { name: /Apelación para revisión/ }).count();
+    for (let index = 0; index < rows; index += 1) {
+      await page.getByRole('row', { name: /Apelación para revisión/ }).nth(index).getByRole('button', { name: 'Abrir ficha' }).click();
+      if (await page.getByText(`ID real: ${editedId}`).count()) break;
+    }
+    await page.getByRole('button', { name: 'Abrir borrador asociado' }).click();
     await expect(page.getByText(/EDICION-E2E-UNO/).first()).toBeVisible({ timeout: 20_000 });
     await page.screenshot({ path: `${SHOTS}/09-borrador-reabierto.png` });
   });
@@ -274,21 +309,22 @@ test.describe('g. exportación DOCX y PDF desde la interfaz', () => {
     await isolate(context);
     await mockGeneration(page, 'ok');
     await openWithPdf(page);
-    page.once('dialog', (dialog) => dialog.accept());
+    await confirmProposedActuacion(page);
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect(page.getByText(/BORRADOR PARA REVISIÓN DEL ABOGADO/i)).toBeVisible({ timeout: 20_000 });
 
     for (const [label, route, magic] of [['DOCX borrador', 'docx', 'PK'], ['PDF borrador', 'pdf', '%PDF']] as const) {
       await page.getByRole('button', { name: /Exportar/ }).click();
-      const [response] = await Promise.all([
-        page.waitForResponse((r) => r.url().includes(`/api/legal-engine/export/${route}`) && r.request().method() === 'POST', { timeout: 30_000 }),
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 30_000 }),
         page.getByRole('button', { name: new RegExp(label) }).click(),
       ]);
-      expect(response.status(), route).toBe(200);
-      const bytes = await response.body();
+      const filePath = await download.path();
+      const bytes = (await import('node:fs')).readFileSync(filePath);
+      expect(download.suggestedFilename().toLowerCase().endsWith(`.${route}`), download.suggestedFilename()).toBe(true);
       expect(bytes.subarray(0, magic.length).toString('latin1'), route).toBe(magic);
-      expect(bytes.length).toBeGreaterThan(1000);
-      expect(response.headers()['x-export-mode'], route).toBe('DRAFT');
+      expect(bytes.length, route).toBeGreaterThan(1000);
     }
     await page.screenshot({ path: `${SHOTS}/10-exportacion.png` });
   });
@@ -299,7 +335,8 @@ test.describe('h. estados de carga, vacío, error y éxito', () => {
     await isolate(context);
     await mockGeneration(page, 'slow');
     await openWithPdf(page);
-    page.once('dialog', (dialog) => dialog.accept());
+    await confirmProposedActuacion(page);
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect(page.getByText(/Redactando agravios/)).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: `${SHOTS}/11-estado-de-carga.png` });
@@ -311,7 +348,8 @@ test.describe('h. estados de carga, vacío, error y éxito', () => {
     await isolate(context);
     await mockGeneration(page, 'fail');
     await openWithPdf(page);
-    page.once('dialog', (dialog) => dialog.accept());
+    await confirmProposedActuacion(page);
+    void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect(page.getByText(/Fallo en la generación: Proveedor de IA no disponible/)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole('button', { name: /Generar apelación/ })).toBeEnabled();

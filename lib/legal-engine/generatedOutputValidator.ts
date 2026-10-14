@@ -69,7 +69,10 @@ const SCAFFOLD_PATTERNS: ReadonlyArray<{ code: OutputFindingCode; re: RegExp; de
   { code: 'JSON_LEAK', re: /"(?:blockId|sectionId|taskId|requestId|generationId)"\s*:/, detail: 'Identificadores internos serializados.' },
   { code: 'PROVIDER_ID', re: /\b(?:nvapi-[A-Za-z0-9_-]{8,}|nvidia\/[a-z0-9._-]+|meta\/llama[\w.-]*|nemotron[\w.-]*|gemini-[\w.-]+|gpt-\d[\w.-]*|claude-[\w.-]+|mixtral[\w.-]*|llama-?\d[\w.-]*)\b/i, detail: 'Identificador de proveedor o modelo de IA.' },
   { code: 'PROVIDER_ID', re: /\b(?:aiUsed|providerUsed|requestId|generationId)\s*[:=]/, detail: 'Metadato de generación impreso.' },
-  { code: 'IRRELEVANT_PLACEHOLDER', re: /\{\{[^}]{1,60}\}\}|\$\{[^}]{1,60}\}|\[object Object\]|\bundefined\b|\bnull\b|\bNaN\b|\blorem ipsum\b|\bTODO\b|\bFIXME\b/i, detail: 'Placeholder técnico sin resolver.' },
+  { code: 'IRRELEVANT_PLACEHOLDER', re: /\{\{[^}]{1,60}\}\}|\$\{[^}]{1,60}\}|\[object Object\]|\bundefined\b|\bnull\b|\bNaN\b|\blorem ipsum\b|\bFIXME\b/i, detail: 'Placeholder técnico sin resolver.' },
+  // «todo» es una palabra española («en todo lo que favorezca», «TODO LO ACTUADO»): solo cuenta el marcador
+  // de desarrollo en mayúsculas seguido de «:», «(» o de una nota en minúsculas.
+  { code: 'IRRELEVANT_PLACEHOLDER', re: /(?:^|[\s/#*-])TODO(?:\s*[:(]|\s+[a-z])/, detail: 'Placeholder técnico sin resolver.' },
 ];
 
 function excerptAround(text: string, index: number, length = 90): string {

@@ -91,6 +91,8 @@ export interface GenerationTask {
   tokenBudget: number;
   /** Objetivo informativo de palabras para el modo extended-legal. */
   targetWords?: number;
+  /** Techo de palabras (extensión como máximo): se puede quedar muy por debajo si el material no alcanza. */
+  maxWords?: number;
   minOutputTokens?: number;
   status: GenerationTaskStatus;
   order?: number;
@@ -280,7 +282,9 @@ export function buildGenerationTasksForSection(
               : taskType === 'COVERAGE_ITEM'
                 ? Math.min(80, Math.max(35, allocatedWords))
                 : Math.max(250, allocatedWords);
-        task.targetWords = taskTargetWords;
+        // Extensión como máximo: es un techo, no un objetivo; no se exige un mínimo ni se amplía para alcanzarlo.
+        if (extension.lengthIsCeiling) task.maxWords = taskTargetWords;
+        else task.targetWords = taskTargetWords;
         const smallDescriptiveTask = taskType === 'FACT_RESPONSE' || taskType === 'CLAIM';
         task.tokenBudget = smallDescriptiveTask
           ? Math.min(task.tokenBudget, Math.max(800, taskTargetWords * 5))

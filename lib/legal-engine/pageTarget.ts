@@ -1,21 +1,21 @@
 import type { GenerationExtensionInput } from './generationExtension';
 
 /**
- * Meta de extensión del escrito (páginas aproximadas).
+ * Extensión MÁXIMA del escrito (páginas aproximadas).
  *
  * Es un parámetro REAL del pipeline: viaja tipado desde el selector de la interfaz hasta el
  * contrato de extensión (`generationExtension`), el presupuesto por sección y el registro del
- * borrador. No es una promesa: «el sistema no añadirá contenido para llenar páginas». Si la
- * información disponible no sostiene la meta, se genera lo defendible y se informa.
+ * borrador. Es un TECHO, no una meta: si el material no da para tanto, el escrito es más corto.
+ * El sistema nunca amplía ni regenera secciones para llenar páginas.
  *
  * No debe confundirse con el número de páginas del PDF fuente.
  */
 
 export const PAGE_TARGET_PRESETS = [
-  { id: 'BREVE', pages: 5, label: 'Breve', hint: '≈ 5 páginas' },
-  { id: 'INTERMEDIO', pages: 10, label: 'Intermedio', hint: '≈ 10 páginas' },
-  { id: 'DETALLADO', pages: 20, label: 'Detallado', hint: '≈ 20 páginas' },
-  { id: 'EXTENSO', pages: 40, label: 'Extenso', hint: '≈ 40 páginas' },
+  { id: 'BREVE', pages: 5, label: 'Breve', hint: 'máximo 5 páginas' },
+  { id: 'INTERMEDIO', pages: 10, label: 'Intermedio', hint: 'máximo 10 páginas' },
+  { id: 'DETALLADO', pages: 20, label: 'Detallado', hint: 'máximo 20 páginas' },
+  { id: 'EXTENSO', pages: 40, label: 'Extenso', hint: 'máximo 40 páginas' },
 ] as const;
 
 export type PageTargetPresetId = (typeof PAGE_TARGET_PRESETS)[number]['id'] | 'PERSONALIZADO';
@@ -39,14 +39,15 @@ export const WORDS_PER_PAGE = 340;
 export const MAX_REDUNDANCY_RATIO = 0.03;
 
 export const PAGE_TARGET_HELP_TEXT =
-  'La extensión es una meta aproximada; dependerá de la complejidad, los hechos disponibles, la evidencia y las reglas aplicables. El sistema no añadirá contenido para llenar páginas.';
+  'La extensión es un máximo, no una meta: si los hechos, la evidencia y las reglas aplicables no dan para tanto, el escrito será más corto. El sistema no añade contenido para llenar páginas.';
 
 export interface PageTarget {
   preset: PageTargetPresetId;
   pages: number;
 }
 
-export type PageTargetOutcome = 'MET' | 'BELOW_TARGET' | 'ABOVE_TARGET';
+/** `WITHIN_MAX`: cabe en el máximo (incluso si es mucho más corto). `ABOVE_MAX`: lo supera por estructura obligatoria. */
+export type PageTargetOutcome = 'WITHIN_MAX' | 'ABOVE_MAX';
 
 /** Resultado registrado con el borrador: objetivo vs páginas medidas sobre el documento renderizado. */
 export interface PageTargetResult {
@@ -104,42 +105,38 @@ export function pageTolerance(pages: number): number {
 }
 
 export function pageTargetToGenerationExtension(target: PageTarget): GenerationExtensionInput {
-  const tolerance = pageTolerance(target.pages);
   const heavy = target.pages > 20;
   return {
     generationMode: 'extended-legal',
+    lengthIsCeiling: true,
     targetPages: target.pages,
-    minPages: Math.max(1, target.pages - tolerance),
-    maxPages: target.pages + tolerance,
+    minPages: 1,
+    maxPages: target.pages,
     targetWords: target.pages * WORDS_PER_PAGE,
     maxCallsPerDocument: Math.min(100, Math.max(12, Math.round(target.pages * 1.2))),
     maxContinuationsPerSection: heavy ? 5 : 3,
-    maxExpansionPasses: heavy ? 5 : 3,
+    // Sin ampliación: el máximo no se alcanza a la fuerza.
+    maxExpansionPasses: 1,
     maxGeneratedTokens: heavy ? 6500 : 5000,
   };
 }
 
-/** Compara el resultado medido con la meta. */
+/** Compara el resultado medido con el máximo. Ser más corto nunca es una falla. */
 export function evaluatePageTarget(target: PageTarget, actualPages: number, redundancyRatio?: number): PageTargetResult {
-  const tolerance = pageTolerance(target.pages);
-  const outcome: PageTargetOutcome = actualPages < target.pages - tolerance
-    ? 'BELOW_TARGET'
-    : actualPages > target.pages + tolerance ? 'ABOVE_TARGET' : 'MET';
+  const outcome: PageTargetOutcome = actualPages > target.pages ? 'ABOVE_MAX' : 'WITHIN_MAX';
   return {
     requestedPages: target.pages,
     preset: target.preset,
     actualPages,
     outcome,
-    ...(outcome === 'BELOW_TARGET'
-      ? { notice: `No se alcanzó la extensión solicitada (${target.pages} páginas; resultado: ${actualPages}): la información, la evidencia y las reglas disponibles no sostienen más contenido sin redundancia. No se añadió texto de relleno.` }
-      : outcome === 'ABOVE_TARGET'
-        ? { notice: `El borrador supera la meta (${target.pages} páginas; resultado: ${actualPages}): incluye la estructura obligatoria del escrito (p. ej. responder individualmente cada hecho y cada prestación). No se omitió ninguna respuesta ni sección para ajustar la extensión.` }
-        : {}),
+    ...(outcome === 'ABOVE_MAX'
+      ? { notice: `El borrador supera el máximo (${target.pages} páginas; resultado: ${actualPages}): incluye la estructura obligatoria del escrito (p. ej. responder individualmente cada hecho, prestación o agravio). No se omitió ninguna respuesta ni sección para ajustar la extensión.` }
+      : {}),
     ...(redundancyRatio === undefined ? {} : { redundancyRatio }),
     measuredWith: 'PDF_RENDERER',
   };
 }
 
 export function describePageTargetResult(result: Pick<PageTargetResult, 'requestedPages' | 'actualPages'>): string {
-  return `Objetivo: ${result.requestedPages} páginas · Resultado: ${result.actualPages} páginas`;
+  return `Máximo: ${result.requestedPages} páginas · Resultado: ${result.actualPages} páginas`;
 }

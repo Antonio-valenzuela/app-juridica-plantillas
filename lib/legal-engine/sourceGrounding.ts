@@ -252,7 +252,11 @@ function documentFamily(caseText: string): SourceDocumentFamily {
   if (/\b(?:vengo\s+a\s+)?(?:demandar|entablar\s+formal\s+demanda|interponer\s+juicio)\b/i.test(caseText)) return 'DEMANDA';
   if (/\bcontestaci[oó]n\s+(?:de\s+la\s+)?demanda\b/i.test(caseText)) return 'CONTESTACION';
   if (/\b(?:interpongo|interponer)\s+recurso\b|\bagravio(?:s)?\b/i.test(caseText)) return 'RECURSO';
-  if (/\b(?:juicio\s+de\s+)?amparo\b/i.test(caseText) && /\b(?:acto\s+reclamado|autoridad\s+responsable|conceder\s+el\s+amparo)\b/i.test(caseText)) return 'AMPARO';
+  // Un auto o acuerdo DEL JUZGADO dentro del juicio de amparo («Vista la demanda de amparo… se niega la
+  // suspensión… Notifíquese») menciona el acto reclamado, pero no es una demanda de amparo.
+  const courtAct = /^\s*(?:C\.\s*)?(?:JUZGADO|TRIBUNAL|SALA)\b/i.test(firstLine)
+    && /\b(?:notif[ií]quese|as[ií]\s+lo\s+(?:provey[oó]|acord[oó]|resolvi[oó]))\b/i.test(caseText);
+  if (!courtAct && /\b(?:juicio\s+de\s+)?amparo\b/i.test(caseText) && /\b(?:acto\s+reclamado|autoridad\s+responsable|conceder\s+el\s+amparo)\b/i.test(caseText)) return 'AMPARO';
   return 'UNKNOWN';
 }
 
@@ -286,7 +290,13 @@ function containerType(family: SourceDocumentFamily, matter: string, caseText: s
       ? 'DEMANDA_AMPARO_DIRECTO'
       : 'DEMANDA_AMPARO';
   }
-  if (family === 'SENTENCIA') return /\bamparo\b/i.test(caseText) ? 'SENTENCIA_AMPARO_DIRECTO' : 'SENTENCIA_O_RESOLUCION';
+  if (family === 'SENTENCIA') {
+    if (!/\bamparo\b/i.test(caseText)) return 'SENTENCIA_O_RESOLUCION';
+    // El amparo directo lo resuelve un Tribunal Colegiado; el indirecto, un Juzgado de Distrito.
+    if (/\bamparo\s+directo\b|\btribunal(?:es)?\s+colegiado/i.test(caseText)) return 'SENTENCIA_AMPARO_DIRECTO';
+    if (/\bamparo\s+indirecto\b|\bjuzgado\s+\S+\s+de\s+distrito\b/i.test(caseText)) return 'SENTENCIA_AMPARO';
+    return 'SENTENCIA_AMPARO_DIRECTO';
+  }
   return UNKNOWN_SOURCE_DOCUMENT_TYPE;
 }
 

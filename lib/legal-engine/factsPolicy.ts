@@ -62,12 +62,22 @@ const ANTECEDENTS_EXCEPTIONS: Readonly<Record<string, string>> = Object.freeze({
     'Estrategia post-sentencia de amparo directo: los antecedentes procesales (cronología) y los agravios derivados de la sentencia sustituyen a la narración de hechos del litigio.',
 });
 
+/**
+ * Respuestas a un recurso: el insumo es la sentencia apelada y los agravios del apelante, no una narración de
+ * hechos del litigio; se verifica el contexto procesal (expediente, partes) y la petición.
+ */
+const PROCEDURAL_CONTEXT_EXCEPTIONS: Readonly<Record<string, string>> = Object.freeze({
+  contestacion_agravios: 'Contestación de agravios: responde los agravios del apelante apoyándose en la sentencia apelada; no narra hechos del litigio.',
+});
+
 export function factsPolicyFor(subject: FactsPolicySubject): FactsPolicyDecision {
   if (subject.id === 'demanda_ejecutiva_mercantil') {
     return { policy: 'COMMERCIAL_CONTEXT', reason: 'Su contrato solo admite el contexto mercantil confirmado por el abogado: se verifican esos hechos, no los del análisis genérico.' };
   }
   const antecedents = ANTECEDENTS_EXCEPTIONS[subject.id];
   if (antecedents) return { policy: 'PROCEDURAL_ANTECEDENTS', reason: antecedents };
+  const proceduralException = PROCEDURAL_CONTEXT_EXCEPTIONS[subject.id];
+  if (proceduralException) return { policy: 'PROCEDURAL_CONTEXT', reason: proceduralException };
   const exception = NARRATIVE_EXCEPTIONS[subject.id];
   if (exception) return { policy: 'NARRATIVE_REQUIRED', reason: exception };
 

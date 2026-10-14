@@ -68,15 +68,28 @@ export function deriveRuntimeReadiness(input: RuntimeReadinessInput): RuntimeRea
   };
 }
 
-export async function collectRuntimeReadiness(): Promise<RuntimeReadiness> {
-  const uploadsRoot = resolveLexPlantillasStoragePaths().templates;
-  let storageReady = false;
-  try {
-    await access(uploadsRoot, constants.R_OK | constants.W_OK);
-    storageReady = true;
-  } catch {
-    storageReady = false;
+/**
+ * La carpeta de uploads se crea en la primera subida: en una instalación nueva aún no existe.
+ * Está lista si existe y es escribible, o si su ancestro existente más cercano lo es (se podrá
+ * crear). El colector no crea nada.
+ */
+export async function isWritableOrCreatable(target: string): Promise<boolean> {
+  let current = path.resolve(target);
+  for (;;) {
+    try {
+      await access(current, constants.F_OK);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return false;
+      current = parent;
+      continue;
+    }
+    return access(current, constants.R_OK | constants.W_OK).then(() => true, () => false);
   }
+}
+
+export async function collectRuntimeReadiness(): Promise<RuntimeReadiness> {
+  const storageReady = await isWritableOrCreatable(resolveLexPlantillasStoragePaths().templates);
 
   let databaseConfigured = true;
   let databaseVerified = false;

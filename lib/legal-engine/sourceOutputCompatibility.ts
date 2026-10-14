@@ -340,6 +340,8 @@ export function inferSourceOutputType(
   if (isPartyWriting(layout)) {
     if (/\b(?:replica|réplica)\b/.test(corpus)) return 'REPLICA';
     if (/\bduplica\b/.test(corpus)) return 'DUPLICA';
+    // Una contestación que además reconviene sigue siendo, globalmente, una contestación (admite réplica,
+    // promociones…). Su naturaleza de reconvención se hace valer por actuación en `narrowToControllingActs`.
     if (/contestacion\s+de\s+(?:la\s+)?demanda|contestacion\s+a\s+la\s+demanda/.test(corpus)) return 'CONTESTACION_DEMANDA';
     if (/\b(?:interpongo|interponer)\s+(?:el\s+)?recurso\b|\bagravios?\b/.test(corpus)) return 'RECURSO';
     return UNKNOWN_SOURCE_DOCUMENT_TYPE;
@@ -362,6 +364,18 @@ export function inferSourceOutputType(
   if (/\bduplica\b/.test(corpus)) return 'DUPLICA';
   if (/contestacion\s+de\s+(?:la\s+)?demanda/.test(corpus)) return 'CONTESTACION_DEMANDA';
   if (/resolucion\s+administrativa|acto\s+administrativo/.test(corpus)) return 'RESOLUCION_ADMINISTRATIVA';
+
+  // La naturaleza del acto (foro emisor + fórmula dispositiva) manda sobre las menciones de contenido:
+  // un auto dictado en un juicio sobre un pagaré no es un pagaré.
+  const resolutionKind = classifiedDocuments
+    .flatMap((source) => proceduralActsOf(source))
+    .filter((act) => RESOLUTION_KINDS.includes(act.kind) && act.confidence >= 0.75)
+    .map((act) => act.kind)
+    .pop();
+  if (resolutionKind === 'SENTENCIA_AMPARO') return /\bamparo\s+directo\b|tribunal\s+colegiado/.test(corpus) ? 'SENTENCIA_AMPARO_DIRECTO' : 'SENTENCIA_AMPARO';
+  if (resolutionKind === 'LAUDO') return 'LAUDO';
+  if (resolutionKind === 'SENTENCIA_DEFINITIVA' || resolutionKind === 'AUTO_INTERLOCUTORIO') return 'SENTENCIA_O_RESOLUCION';
+  if (resolutionKind === 'ACUERDO_TRAMITE') return 'ACUERDO';
 
   if (/\b(sentencia|ejecutoria|resolucion)\b/.test(corpus)) {
     if (/\bamparo\s+directo\b/.test(corpus)) return 'SENTENCIA_AMPARO_DIRECTO';
@@ -1173,6 +1187,26 @@ function actSourceType(act: ProceduralAct, source: UploadedSourceDocument, docum
   }
 }
 
+/**
+ * Una contestación que reconviene contiene dos naturalezas: contestación (réplica, promociones…) y demanda
+ * reconvencional. Solo cuando la actuación elegida parte de una RECONVENCIÓN y no acepta la contestación se
+ * hace valer la segunda. Exige un encabezado o fórmula expresa de reconvención, no una mención suelta.
+ */
+const RECONVENTION_HEADING_RE = /(?:^|\n)\s*(?:demanda\s+)?reconvencion(?:al)?\b|\bvengo\s+a\s+reconvenir\b|\bdemanda\s+reconvencional\b/;
+
+function reconventionSourceType(
+  source: UploadedSourceDocument,
+  acts: ProceduralAct[],
+  accepted: ReadonlySet<string>,
+): SourceDocumentTypeValue | null {
+  if (accepted.has('CONTESTACION_DEMANDA')) return null;
+  if (!acts.some((act) => act.kind === 'CONTESTACION')) return null;
+  if (!RECONVENTION_HEADING_RE.test(normalizeWithLines(sourceText([source])))) return null;
+  const matter = inferSourceMatterForDocuments([source], undefined);
+  const type: SourceDocumentTypeValue = matter === 'MERCANTIL' ? 'RECONVENCION_MERCANTIL' : 'RECONVENCION_CIVIL';
+  return accepted.has(type) ? type : null;
+}
+
 /** Prioridad al elegir el acto a impugnar cuando varios son aceptables (menor = mejor). */
 const RESOLUTION_RANK: Partial<Record<ProceduralActKind, number>> = {
   SENTENCIA_DEFINITIVA: 0, SENTENCIA_AMPARO: 1, LAUDO: 2, AUTO_INTERLOCUTORIO: 3, ACUERDO_TRAMITE: 4,
@@ -1227,6 +1261,23 @@ function narrowToControllingActs(
           const { sourceDocumentType: _t, documentType: _d, ...rest } = (source.classification || {}) as Record<string, unknown>;
           return { ...source, classification: { ...rest, sourceDocumentType: actSourceTypeFor(only[0].kind) } };
         }
+      }
+      const reconvention = reconventionSourceType(source, acts, accepted);
+      if (reconvention) {
+        const act = acts.find((item) => item.kind === 'CONTESTACION')!;
+        controllingActs.push({
+          sourceId: source.id,
+          kind: act.kind,
+          label: 'contestación con reconvención',
+          startPage: act.startPage,
+          endPage: act.endPage,
+          sourceType: reconvention,
+          matter: act.matter,
+          evidence: 'encabezado de reconvención dentro de la contestación',
+          actsInDocument: acts.map((item) => ({ kind: item.kind, startPage: item.startPage, endPage: item.endPage })),
+        });
+        const { sourceDocumentType: _t, documentType: _d, ...rest } = (source.classification || {}) as Record<string, unknown>;
+        return { ...source, classification: { ...rest, sourceDocumentType: reconvention } };
       }
       return source;
     }

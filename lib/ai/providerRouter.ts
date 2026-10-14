@@ -11,6 +11,32 @@ import type {
 import { sanitizeAiError } from "./providers/types";
 import { getProviderChain } from "./providerChain";
 import { trackAiUsage } from "./usageTracker";
+import { recordExternalEgress } from "./externalEgressLedger";
+
+/** Caracteres que el adaptador del proveedor pone en el cuerpo (NVIDIA no envía el historial). */
+function requestCharsSent(request: AIRequest, providerId: AIProviderId): number {
+  const history = providerId === "nvidia"
+    ? 0
+    : (request.conversationHistory || []).reduce((sum, message) => sum + (message.content?.length || 0), 0);
+  return (request.systemPrompt?.length || 0) + (request.userMessage?.length || 0) + history;
+}
+
+function recordRemoteAttempt(request: AIRequest, log: ProviderExecutionLog, attempt: number): void {
+  if (log.provider === "local") return;
+  void recordExternalEgress({
+    requestId: request.requestId || null,
+    provider: log.provider,
+    model: log.model && log.model !== "unknown" ? log.model : null,
+    operation: request.taskType || request.purpose || "llm",
+    channel: "llm",
+    attempt,
+    charsSent: requestCharsSent(request, log.provider),
+    charsReceived: log.outputChars,
+    outcome: log.success ? "OK" : "ERROR",
+    errorCode: log.fallbackReason,
+    latencyMs: log.durationMs,
+  });
+}
 
 export interface ProviderExecutionLog {
   provider: AIProviderId;
@@ -85,9 +111,18 @@ export class ProviderRouter {
     return this.providers.get(id);
   }
 
-  async route(request: AIRequest): Promise<RouteResult> {
+  async route(originalRequest: AIRequest): Promise<RouteResult> {
+    // Contrato del escrito (rol de quien firma, datos de la ficha, lo que no debe contener): va primero en el
+    // prompt de sistema de CADA solicitud, sea cual sea el proveedor o el reintento.
+    const request: AIRequest = originalRequest.writingContractPrompt
+      ? { ...originalRequest, systemPrompt: [originalRequest.writingContractPrompt, originalRequest.systemPrompt || ''].filter(Boolean).join(String.fromCharCode(10, 10)) }
+      : originalRequest;
     const externalAllowed = request.externalProviderOptIn === true;
-    const chain = externalAllowed ? this.getChainFn() : ['local'];
+    const authorized = Array.isArray(request.authorizedExternalProviders) ? new Set(request.authorizedExternalProviders) : null;
+    // Un respaldo remoto solo se usa si figura en la autorización expresa de esta operación.
+    const chain = externalAllowed
+      ? this.getChainFn().filter((id) => id === 'local' || !authorized || authorized.has(id))
+      : ['local'];
     const logs: ProviderExecutionLog[] = [];
     let lastFailureReason: string | null = null;
     const requestedProvider = (chain[0] as AIProviderId) || "gemini";
@@ -160,6 +195,7 @@ export class ProviderRouter {
           } satisfies ProviderExecutionLog;
           logs.push(successLog);
           recordProviderUsage(request, successLog, fallbackRank, res.usage);
+          recordRemoteAttempt(request, successLog, attempt + 1);
 
           console.log(
             `[ProviderRouter] SUCCESS ${JSON.stringify({
@@ -216,6 +252,7 @@ export class ProviderRouter {
         } satisfies ProviderExecutionLog;
         logs.push(failureLog);
         recordProviderUsage(request, failureLog, fallbackRank, res.usage);
+        recordRemoteAttempt(request, failureLog, attempt + 1);
 
         console.warn(
           `[ProviderRouter] FALLBACK ${JSON.stringify({
@@ -257,6 +294,7 @@ export class ProviderRouter {
           } satisfies ProviderExecutionLog;
           logs.push(exceptionLog);
           recordProviderUsage(request, exceptionLog, fallbackRank);
+          recordRemoteAttempt(request, exceptionLog, attempt + 1);
 
           console.warn(
             `[ProviderRouter] EXCEPTION ${JSON.stringify({

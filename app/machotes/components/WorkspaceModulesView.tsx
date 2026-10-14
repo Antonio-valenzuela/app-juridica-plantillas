@@ -11,6 +11,8 @@ import { LocalImportPanel } from './LocalImportPanel';
 import { AnalyticsPanel } from './AnalyticsPanel';
 import { LexIcon, type LexIconName } from '@/components/layout/LexIcon';
 import { DesktopCaseManager, DesktopAgendaManager } from './DesktopWorkspaceManagers';
+import { ProceduralTermCalculator } from './ProceduralTermCalculator';
+import { manualConsultationSources } from '@/lib/legal-engine/legal-research/officialSourceRegistry';
 
 export type WorkspaceModule =
   | 'inicio'
@@ -51,6 +53,9 @@ function Icon({ children, className = '' }: { children: React.ReactNode; classNa
     progress_activity: 'calendar',
     search: 'search',
   };
+  if (children === 'progress_activity') {
+    return <span aria-hidden="true" className={`inline-block h-[18px] w-[18px] animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none ${className}`} />;
+  }
   const name = typeof children === 'string' ? iconMap[children] || 'document' : 'document';
   return <LexIcon aria-hidden="true" name={name} size={18} className={className} />;
 }
@@ -90,10 +95,11 @@ function RealResearchView() {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [blockedReasons, setBlockedReasons] = useState<string[]>([]);
 
   async function search() {
     if (query.trim().length < 3) { setStatus('Escribe al menos 3 caracteres.'); return; }
-    setLoading(true); setHasError(false); setStatus('Consultando fuentes jurídicas…');
+    setLoading(true); setHasError(false); setBlockedReasons([]); setStatus('Consultando fuentes jurídicas…');
     try {
       const response = await fetch('/api/workspace/research?q=' + encodeURIComponent(query.trim()));
       const payload = await response.json();
@@ -101,7 +107,11 @@ function RealResearchView() {
       setResults(payload.results || []); setSelected(null);
       if (payload.status === 'FAIL' && !payload.results?.length) {
         setHasError(true);
-        setStatus('El servicio de investigación jurídica no está disponible en este momento.');
+        const reasons: string[] = Array.isArray(payload.reasons) ? payload.reasons : [];
+        setBlockedReasons(reasons);
+        setStatus(reasons.includes('OFFICIAL_SOURCE_ANTIBOT_PROTECTED')
+          ? 'La SCJN no permite la consulta automatizada del Semanario: consulta el criterio en la fuente oficial.'
+          : 'El servicio de investigación jurídica no está disponible en este momento.');
        } else {
          setStatus(payload.results?.length ? `${payload.results.length} resultados verificables o pendientes de confirmar` : 'No encontramos criterios verificables para esta búsqueda.');
       }
@@ -109,10 +119,28 @@ function RealResearchView() {
     finally { setLoading(false); }
   }
 
-   return <WorkspaceFrame title="Jurisprudencia SCJN" eyebrow="Investigación jurídica" description="Consulta criterios reales conservando registro, fuente y estado de verificación."><div className="grid grid-cols-1 gap-4 xl:grid-cols-[210px_minmax(0,1fr)_300px]"><aside className={`${card} h-fit p-4`}><h2 className="text-sm font-extrabold text-[#0B2545]">Criterios de lectura</h2><p className="mt-3 text-xs leading-relaxed text-slate-500">Los resultados secundarios se muestran como pendientes de confirmar y no se presentan como autoridad verificada.</p><div className="mt-4 rounded-xl bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-800">Confirma siempre la fuente oficial antes de incorporar un criterio al escrito.</div></aside><section className="min-w-0"><form onSubmit={(event) => { event.preventDefault(); void search(); }} className={`${card} flex items-center gap-2 p-3`}><Icon className="text-slate-400">search</Icon><input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="Buscar rubro, registro o texto…" /><button disabled={loading} type="submit" className="rounded-lg bg-[#0B2545] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{loading ? 'Buscando…' : 'Buscar'}</button></form><div className="mt-2 flex items-center justify-between gap-3"><p className="text-xs text-slate-500" aria-live="polite">{status}</p>{hasError && <button type="button" onClick={() => void search()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div><div className="mt-4 space-y-3">{results.map((result) => <article key={result.id} role="button" tabIndex={0} onClick={() => setSelected(result)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelected(result); }} className={`${card} cursor-pointer p-4 hover:border-[#B58A5A] ${selected?.id === result.id ? 'border-[#0B2545] ring-1 ring-[#0B2545]' : ''}`}><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{authorityTypeLabel(result.tipo)}</span><span className="text-xs text-slate-400">Registro {result.registroDigital || 'no informado'}</span></div><h3 className="mt-3 text-sm font-extrabold leading-snug text-[#0B2545]">{result.rubro}</h3><p className="mt-2 text-xs leading-relaxed text-slate-500">{result.snippet || 'La fuente no expuso un fragmento en esta consulta.'}</p><div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-400"><span>{sourceLabel(result.source)}</span><span>·</span><span>{verificationLabel(result.verificationStatus)}</span></div></article>)}{!hasError && !loading && query && results.length === 0 && <div className={`${card} p-6 text-center text-sm text-slate-500`}>No encontramos criterios verificables para esta búsqueda.</div>}</div></section><aside className={`${card} p-5`}><p className="text-xs font-bold uppercase tracking-wide text-[#B58A5A]">Criterio seleccionado</p>{selected ? <><h2 className="mt-3 text-lg font-extrabold text-[#0B2545]">{selected.rubro}</h2><p className="mt-3 text-xs text-slate-600">Estado: {verificationLabel(selected.verificationStatus)}</p><p className="mt-1 text-xs text-slate-600">Fuente: {sourceLabel(selected.source)}</p>{selected.officialUrl && <a href={selected.officialUrl} target="_blank" rel="noreferrer" className="mt-5 block text-xs font-bold text-[#0B5ED7]">Abrir fuente consultada →</a>}</> : <p className="mt-3 text-sm leading-relaxed text-slate-600">Selecciona un resultado real para consultar su ficha y fuente.</p>}</aside></div></WorkspaceFrame>;
+   return <WorkspaceFrame title="Jurisprudencia SCJN" eyebrow="Investigación jurídica" description="Consulta criterios reales conservando registro, fuente y estado de verificación."><div className="grid grid-cols-1 gap-4 xl:grid-cols-[210px_minmax(0,1fr)_300px]"><aside className={`${card} h-fit p-4`}><h2 className="text-sm font-extrabold text-[#0B2545]">Criterios de lectura</h2><p className="mt-3 text-xs leading-relaxed text-slate-500">Los resultados secundarios se muestran como pendientes de confirmar y no se presentan como autoridad verificada.</p><div className="mt-4 rounded-xl bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-800">Confirma siempre la fuente oficial antes de incorporar un criterio al escrito.</div></aside><section className="min-w-0"><form onSubmit={(event) => { event.preventDefault(); void search(); }} className={`${card} flex items-center gap-2 p-3`}><Icon className="text-slate-400">search</Icon><input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="Buscar rubro, registro o texto…" /><button disabled={loading} type="submit" className="rounded-lg bg-[#0B2545] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{loading ? 'Buscando…' : 'Buscar'}</button></form><div className="mt-2 flex items-center justify-between gap-3"><p className="text-xs text-slate-500" aria-live="polite">{status}</p>{hasError && <button type="button" onClick={() => void search()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div><div className="mt-4 space-y-3">{results.map((result) => <article key={result.id} role="button" tabIndex={0} onClick={() => setSelected(result)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelected(result); }} className={`${card} cursor-pointer p-4 hover:border-[#B58A5A] ${selected?.id === result.id ? 'border-[#0B2545] ring-1 ring-[#0B2545]' : ''}`}><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{authorityTypeLabel(result.tipo)}</span><span className="text-xs text-slate-400">Registro {result.registroDigital || 'no informado'}</span></div><h3 className="mt-3 text-sm font-extrabold leading-snug text-[#0B2545]">{result.rubro}</h3><p className="mt-2 text-xs leading-relaxed text-slate-500">{result.snippet || 'La fuente no expuso un fragmento en esta consulta.'}</p><div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-400"><span>{sourceLabel(result.source)}</span><span>·</span><span>{verificationLabel(result.verificationStatus)}</span></div></article>)}{hasError && blockedReasons.length > 0 && <ManualJurisprudencePanel query={query} reasons={blockedReasons} />}{!hasError && !loading && query && results.length === 0 && <div className={`${card} p-6 text-center text-sm text-slate-500`}>No encontramos criterios verificables para esta búsqueda.</div>}</div></section><aside className={`${card} p-5`}><p className="text-xs font-bold uppercase tracking-wide text-[#B58A5A]">Criterio seleccionado</p>{selected ? <><h2 className="mt-3 text-lg font-extrabold text-[#0B2545]">{selected.rubro}</h2><p className="mt-3 text-xs text-slate-600">Estado: {verificationLabel(selected.verificationStatus)}</p><p className="mt-1 text-xs text-slate-600">Fuente: {sourceLabel(selected.source)}</p>{selected.officialUrl && <a href={selected.officialUrl} target="_blank" rel="noreferrer" className="mt-5 block text-xs font-bold text-[#0B5ED7]">Abrir fuente consultada →</a>}</> : <p className="mt-3 text-sm leading-relaxed text-slate-600">Selecciona un resultado real para consultar su ficha y fuente.</p>}</aside></div></WorkspaceFrame>;
 }
 
-function OperationalManualPanel({ compact = false }: { compact?: boolean }) {
+function ManualJurisprudencePanel({ query, reasons }: { query: string; reasons: string[] }) {
+  const [copied, setCopied] = useState(false);
+  const sources = manualConsultationSources();
+  return <section data-testid="manual-jurisprudence-panel" className={`${card} p-5`} aria-label="Consulta manual en fuentes oficiales">
+    <p className="text-xs font-bold uppercase tracking-wide text-[#B58A5A]">Consulta manual</p>
+    <h3 className="mt-1 text-sm font-extrabold text-[#0B2545]">Busca el criterio directamente en la fuente oficial</h3>
+    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-relaxed text-slate-600">
+      {reasons.includes('OFFICIAL_SOURCE_ANTIBOT_PROTECTED') && <li>El Semanario Judicial de la Federación usa un control contra consultas automatizadas; LexPlantillas no lo elude.</li>}
+      {reasons.includes('CORPUS_AUTH_REQUIRED') && <li>El buscador secundario (Corpus Iuris) requiere una clave de acceso que no está configurada.</li>}
+      <li>Antes de citar una tesis, verifica registro digital, órgano, época, tipo de criterio y vigencia.</li>
+    </ul>
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      <button type="button" onClick={() => { void navigator.clipboard?.writeText(query.trim()).then(() => setCopied(true), () => setCopied(false)); }} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-[#0B2545] hover:bg-slate-50">{copied ? 'Búsqueda copiada' : 'Copiar búsqueda'}</button>
+    </div>
+    <div className="mt-4 grid gap-3 sm:grid-cols-3">{sources.map((source) => <a key={source.sourceId} href={source.manualUrl} target="_blank" rel="noreferrer" className="rounded-xl border border-slate-200 p-3 transition hover:border-[#B58A5A] hover:bg-amber-50/40"><p className="text-xs font-extrabold text-[#0B2545]">{source.institution}</p><p className="mt-1 text-[11px] text-slate-500">{source.resourceTypes.join(' · ')}</p><p className="mt-2 text-[11px] font-bold text-[#0B5ED7]">Abrir fuente oficial →</p></a>)}</div>
+  </section>;
+}
+
+function OperationalManualPanel({ compact = false, inline = false }: { compact?: boolean; inline?: boolean }) {
   const [manual, setManual] = useState<{ manifest: { version: string; detectedPages: number; sourceHash: string; importedAt: string; status: string; active: boolean }; distribution: Record<string, number>; sections: string[] } | null>(null);
   const [status, setStatus] = useState('Consultando guía operativa…');
   useEffect(() => {
@@ -121,8 +149,15 @@ function OperationalManualPanel({ compact = false }: { compact?: boolean }) {
       .then((payload) => { setManual(payload); setStatus(''); })
       .catch(() => setStatus('La guía operativa no está disponible en este momento.'));
   }, []);
+  if (inline) return <section className={`${card} mb-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3`} aria-label="Guía operativa del despacho">
+    <div className="min-w-0">
+      <p className="text-sm font-bold text-[#0B2545]">Guía operativa del despacho</p>
+      <p className="text-xs text-slate-500" role="status">{manual ? `Metodología interna · Versión ${manual.manifest.version} · ${manual.manifest.active ? 'Activa' : 'Inactiva'} · No es fuente de autoridad` : status}</p>
+    </div>
+    {manual && <a className="inline-flex min-h-11 items-center rounded-lg px-3 text-xs font-bold text-[#0B5ED7] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" href="/api/operational-manual/original" target="_blank" rel="noreferrer">Ver documento</a>}
+  </section>;
   if (compact) return <section className="mt-5 border-t border-slate-200 pt-4" aria-label="Recursos internos">
-    <h2 className="text-xs font-bold text-slate-500">Recursos internos</h2>
+    <h2 className="!mb-0 !text-xs font-bold text-slate-500">Recursos internos</h2>
     <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm">
       <div><p className="font-semibold text-[#0B2545]">Guía operativa</p>
         <p className="mt-1 text-xs text-slate-500" role="status">{manual ? `Versión ${manual.manifest.version} · ${manual.manifest.active ? 'Activa' : 'Inactiva'}` : status}</p>
@@ -131,7 +166,7 @@ function OperationalManualPanel({ compact = false }: { compact?: boolean }) {
     </div>
   </section>;
   return <section className={`${card} mb-5 p-5`} aria-label="Guía Operativa LEX PLANTILLAS">
-    <h2 className="text-base font-extrabold text-[#0B2545]">Guía Operativa LEX PLANTILLAS</h2>
+    <h2 className="!mb-0 !text-base font-extrabold text-[#0B2545]">Guía Operativa LEX PLANTILLAS</h2>
     <p className="mt-1 text-xs text-slate-500">Guía interna; no verifica artículos, jurisprudencia ni precedentes.</p>
     {manual ? <><p className="mt-3 text-sm text-slate-700">Versión {manual.manifest.version} · {manual.manifest.detectedPages} páginas físicas · {manual.manifest.status} / {manual.manifest.active ? 'ACTIVE' : 'INACTIVE'}</p>
       <p className="mt-1 break-all text-[11px] text-slate-500">SHA-256: {manual.manifest.sourceHash}</p>
@@ -143,14 +178,60 @@ function OperationalManualPanel({ compact = false }: { compact?: boolean }) {
   </section>;
 }
 
+interface StateLegislationResult { id: string; title: string; validity: string; category?: string; matter?: string; lastReformDecree?: string; lastReformPublished?: string; officialUrl: string }
+
+/** Legislación de Jalisco desde la API pública de la SCJN; el texto se consulta en el Congreso del estado. */
+function StateLegislationSearch() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<StateLegislationResult[]>([]);
+  const [status, setStatus] = useState('Busca un código o ley de Jalisco (p. ej. «procedimientos civiles», «familia», «tránsito»).');
+  const [loading, setLoading] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [retrievedAt, setRetrievedAt] = useState<string | null>(null);
+  async function search() {
+    if (query.trim().length < 3) { setStatus('Escribe al menos 3 caracteres.'); return; }
+    setLoading(true); setHasError(false); setStatus('Consultando la SCJN…');
+    try {
+      const response = await fetch('/api/workspace/library/state?estado=JALISCO&q=' + encodeURIComponent(query.trim()), { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error('STATE_UNAVAILABLE');
+      const next: StateLegislationResult[] = Array.isArray(payload.items) ? payload.items : [];
+      setResults(next); setRetrievedAt(payload.retrievedAt || null);
+      setStatus(next.length ? `${next.length} ordenamientos vigentes de Jalisco` : 'No hay ordenamientos vigentes de Jalisco que coincidan.');
+    } catch { setResults([]); setHasError(true); setStatus('La consulta de legislación estatal de la SCJN no está disponible en este momento.'); }
+    finally { setLoading(false); }
+  }
+  return <div>
+    <form onSubmit={(event) => { event.preventDefault(); void search(); }} className={`${card} flex items-center gap-2 p-3`}>
+      <Icon className="text-slate-400">search</Icon>
+      <input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="Buscar ley o código de Jalisco…" aria-label="Buscar legislación de Jalisco" />
+      <button disabled={loading} type="submit" className="rounded-lg bg-[#0B2545] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{loading ? 'Buscando…' : 'Buscar'}</button>
+    </form>
+    <div className="mt-2 flex items-center justify-between gap-3"><div><p className="text-xs text-slate-500" aria-live="polite">{status}</p><p className="mt-1 text-[11px] text-slate-400">Fuente: SCJN · Sistema de Consulta de Ordenamientos{retrievedAt ? ` · Consultado: ${new Date(retrievedAt).toLocaleString('es-MX')}` : ''}</p></div>{hasError && <button type="button" onClick={() => void search()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div>
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">{results.map((item) => <article key={item.id} className={`${card} p-4`}>
+      <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{item.validity === 'VIGENTE' ? 'Vigente' : item.validity}</span>{item.category && <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.category}</span>}{item.matter && <span className="text-[10px] text-slate-400">· {item.matter}</span>}</div>
+      <h3 className="mt-2 text-sm font-extrabold text-[#0B2545]">{item.title}</h3>
+      {item.lastReformPublished && <p className="mt-1 text-xs text-slate-500">Última reforma publicada: {new Date(`${item.lastReformPublished}T12:00:00`).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}</p>}
+      {item.lastReformDecree && <p className="mt-1 line-clamp-2 text-[11px] text-slate-400">{item.lastReformDecree}</p>}
+      <a href={item.officialUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs font-bold text-[#0B5ED7]">Consultar texto en el Congreso de Jalisco →</a>
+    </article>)}</div>
+  </div>;
+}
+
 function RealLibraryView() {
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<WorkspaceLibraryItem[]>([]);
   const [status, setStatus] = useState('Cargando catálogo jurídico…');
   const [hasError, setHasError] = useState(false);
   useEffect(() => { fetch('/api/workspace/library', { cache: 'no-store' }).then(async (response) => { const payload = await response.json(); if (!response.ok || !payload.ok) throw new Error('LIBRARY_UNAVAILABLE'); return payload; }).then((payload) => { const nextItems = Array.isArray(payload.items) ? payload.items : []; setItems(nextItems); setStatus(nextItems.length ? `${nextItems.length} ordenamientos disponibles` : 'El catálogo jurídico no está disponible en este momento.'); }).catch(() => { setHasError(true); setStatus('El catálogo jurídico no está disponible en este momento.'); }); }, []);
-  const filtered = useMemo(() => items.filter((item) => `${item.title} ${item.abbreviation}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [items, query]);
-   return <WorkspaceFrame title="Biblioteca Jurídica" eyebrow="Centro documental" description="Catálogo de legislación para consulta, con referencia y enlace a publicación oficial."><LocalImportPanel /><div className="grid grid-cols-1 gap-4 xl:grid-cols-[190px_minmax(0,1fr)_280px]"><aside className={`${card} h-fit p-4`}><h2 className="text-sm font-extrabold text-[#0B2545]">Alcance</h2><div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">Aquí se consultan ordenamientos jurídicos. Los machotes reutilizables pertenecen a Mis Plantillas y los criterios a Jurisprudencia.</div></aside><section><div className={`${card} flex items-center gap-2 p-3`}><Icon className="text-slate-400">search</Icon><input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full bg-transparent text-sm outline-none" placeholder="Buscar ley, código o sigla…" /></div><div className="mt-2 flex items-center justify-between gap-3"><p className="text-xs text-slate-500" aria-live="polite">{status}</p>{hasError && <button type="button" onClick={() => window.location.reload()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div><div className="mt-4 grid gap-3 sm:grid-cols-2">{filtered.map((item) => <article key={item.id} className={`${card} p-4`}><Icon className="text-[#B58A5A]">menu_book</Icon><h3 className="mt-3 text-sm font-extrabold text-[#0B2545]">{item.title}</h3><p className="mt-1 text-xs text-slate-500">{item.abbreviation} · Última reforma: {item.lastReform || 'no informada'}</p><a href={item.officialUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs font-bold text-[#0B5ED7]">Abrir publicación oficial →</a></article>)}{!hasError && filtered.length === 0 && <div className={`${card} p-6 text-center text-sm text-slate-500 sm:col-span-2`}>{query ? 'No hay ordenamientos que coincidan.' : 'No hay ordenamientos disponibles.'}</div>}</div></section><aside className={`${card} p-5`}><p className="text-xs font-bold uppercase tracking-wide text-[#B58A5A]">Fuente de referencia</p><div className="mt-4 rounded-xl bg-slate-50 p-4"><p className="text-sm font-bold text-[#0B2545]">Catálogo jurídico local</p><p className="mt-1 text-xs leading-relaxed text-slate-500">La consulta conserva la referencia de trabajo y enlaza la publicación oficial disponible.</p></div></aside></div></WorkspaceFrame>;
+  const [visibleCount, setVisibleCount] = useState(40);
+  const [scope, setScope] = useState<'FEDERAL' | 'JALISCO'>('FEDERAL');
+  const filtered = useMemo(() => {
+    const needle = query.normalize('NFD').replace(/[̀-ͯ]/g, '').toLocaleLowerCase();
+    return items.filter((item) => `${item.title} ${item.abbreviation}`.normalize('NFD').replace(/[̀-ͯ]/g, '').toLocaleLowerCase().includes(needle));
+  }, [items, query]);
+  const indexRetrievedAt = items.find((item) => item.retrievedAt)?.retrievedAt;
+   return <WorkspaceFrame title="Biblioteca Jurídica" eyebrow="Centro documental" description="Catálogo de legislación para consulta, con referencia y enlace a publicación oficial."><LocalImportPanel /><div className="grid grid-cols-1 gap-4 xl:grid-cols-[190px_minmax(0,1fr)_280px]"><aside className={`${card} h-fit p-4`}><h2 className="text-sm font-extrabold text-[#0B2545]">Alcance</h2><div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">Aquí se consultan ordenamientos jurídicos. Los machotes reutilizables pertenecen a Mis Plantillas y los criterios a Jurisprudencia.</div></aside><section><div className="mb-3 inline-flex rounded-xl border border-slate-200 bg-white p-1" role="tablist" aria-label="Ámbito de la legislación">{([['FEDERAL', `Federal${items.length ? ` (${items.length})` : ''}`], ['JALISCO', 'Jalisco']] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={scope === value} onClick={() => setScope(value)} className={`min-h-9 rounded-lg px-4 text-xs font-bold transition ${scope === value ? 'bg-[#0B2545] text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>{scope === 'JALISCO' ? <StateLegislationSearch /> : <><div className={`${card} flex items-center gap-2 p-3`}><Icon className="text-slate-400">search</Icon><input value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(40); }} className="w-full bg-transparent text-sm outline-none" placeholder="Buscar ley, código o sigla…" /></div><div className="mt-2 flex items-center justify-between gap-3"><p className="text-xs text-slate-500" aria-live="polite">{status}</p>{hasError && <button type="button" onClick={() => window.location.reload()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div><div className="mt-4 grid gap-3 sm:grid-cols-2">{filtered.slice(0, visibleCount).map((item) => <article key={item.id} className={`${card} p-4`}><Icon className="text-[#B58A5A]">menu_book</Icon><h3 className="mt-3 text-sm font-extrabold text-[#0B2545]">{item.title}</h3><p className="mt-1 text-xs text-slate-500">{item.abbreviation} · {item.lastReform ? `Última reforma DOF: ${new Date(`${item.lastReform}T12:00:00`).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}` : `Última reforma: ${item.reformNote || 'no informada'}`}{item.lastReform && item.reformNote ? ` (${item.reformNote})` : ''}</p>{item.validityNote && <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">{item.validityNote}</p>}<a href={item.officialUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block text-xs font-bold text-[#0B5ED7]">Abrir publicación oficial →</a></article>)}{!hasError && filtered.length === 0 && <div className={`${card} p-6 text-center text-sm text-slate-500 sm:col-span-2`}>{query ? 'No hay ordenamientos que coincidan.' : 'No hay ordenamientos disponibles.'}</div>}</div>{filtered.length > visibleCount && <button type="button" onClick={() => setVisibleCount((count) => count + 40)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white py-3 text-xs font-bold text-[#0B2545] hover:border-[#B58A5A]">Mostrar más ({filtered.length - visibleCount} restantes)</button>}</>}</section><aside className={`${card} p-5`}><p className="text-xs font-bold uppercase tracking-wide text-[#B58A5A]">Fuente de referencia</p><div className="mt-4 rounded-xl bg-slate-50 p-4"><p className="text-sm font-bold text-[#0B2545]">Leyes Federales Vigentes — Cámara de Diputados</p><p className="mt-1 text-xs leading-relaxed text-slate-500">Títulos, fechas de publicación y de última reforma tomados del índice oficial; cada ficha enlaza el texto vigente publicado.</p>{indexRetrievedAt && <p className="mt-2 text-[11px] text-slate-500">Índice consultado: {new Date(indexRetrievedAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}</p>}<p className="mt-2 text-[11px] leading-relaxed text-slate-500">Verifica la versión aplicable a la fecha de los hechos: el texto vigente hoy puede no ser el aplicable al asunto.</p></div></aside></div></WorkspaceFrame>;
 }
 
 function RealAlertsView() {
@@ -160,8 +241,9 @@ function RealAlertsView() {
    const [lastUpdated, setLastUpdated] = useState<string | null>(null);
    const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
-   async function search() { setLoading(true); setHasError(false); setStatus('Consultando publicaciones oficiales…'); try { const response = await fetch('/api/workspace/alerts?q=' + encodeURIComponent(query.trim()), { cache: 'no-store' }); const payload = await response.json(); if (!response.ok || !payload.ok) throw new Error('ALERTS_UNAVAILABLE'); const nextResults = Array.isArray(payload.results) ? payload.results : []; setResults(nextResults); setLastUpdated(new Date().toISOString()); setStatus(nextResults.length ? `${nextResults.length} publicaciones verificables` : 'No encontramos publicaciones verificables para esta consulta.'); } catch { setResults([]); setHasError(true); setStatus('El servicio de publicaciones oficiales no está disponible en este momento.'); } finally { setLoading(false); } }
-   return <WorkspaceFrame title="Alertas DOF y Boletín" eyebrow="Novedades legales" description="Consulta publicaciones oficiales bajo demanda; la pantalla no simula vigilancia automática."><section className="max-w-[1100px]"><form onSubmit={(event) => { event.preventDefault(); void search(); }} className={`${card} p-4`}><div className="flex flex-col gap-3 md:flex-row"><input value={query} onChange={(event) => setQuery(event.target.value)} className={input} placeholder="Filtrar por título de publicación…" /><button disabled={loading} type="submit" className="rounded-xl bg-[#0B2545] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{loading ? 'Consultando…' : 'Actualizar publicaciones'}</button></div></form><div className="mt-2 flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs text-slate-500" aria-live="polite">{status}</p><p className="mt-1 text-[11px] text-slate-400">Fuente: Diario Oficial de la Federación (SIDOF){lastUpdated ? ` · Última consulta: ${new Date(lastUpdated).toLocaleString('es-MX')}` : ''}</p></div>{hasError && <button type="button" onClick={() => void search()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div><div className="mt-4 space-y-3">{results.map((result) => <article key={result.id} className={`${card} flex gap-3 p-4`}><span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[#B58A5A]" /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-extrabold text-[#0B2545]">{result.rubro}</h3><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">Fuente oficial</span></div><p className="mt-1 text-xs text-slate-500">{result.snippet || 'La publicación no expuso descripción adicional en esta consulta.'}</p>{result.officialUrl && <a href={result.officialUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-bold text-[#0B5ED7]">Abrir publicación oficial →</a>}</div></article>)}{!loading && results.length === 0 && <div className={`${card} p-6 text-center text-sm text-slate-500`}>{hasError ? 'No fue posible consultar las publicaciones.' : 'Consulta para cargar publicaciones reales del Diario Oficial.'}</div>}</div></section></WorkspaceFrame>;
+  const [editionDate, setEditionDate] = useState('');
+   async function search() { setLoading(true); setHasError(false); setStatus('Consultando publicaciones oficiales…'); try { const response = await fetch('/api/workspace/alerts?q=' + encodeURIComponent(query.trim()) + (editionDate ? '&date=' + encodeURIComponent(editionDate) : ''), { cache: 'no-store' }); const payload = await response.json(); if (!response.ok || !payload.ok) throw new Error('ALERTS_UNAVAILABLE'); const nextResults = Array.isArray(payload.results) ? payload.results : []; setResults(nextResults); setLastUpdated(new Date().toISOString()); setStatus(nextResults.length ? `${nextResults.length} publicaciones de la edición ${editionDate ? new Date(`${editionDate}T12:00:00`).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' }) : 'de hoy'}` : 'No hay publicaciones en esa edición que coincidan con el filtro (los fines de semana y días inhábiles puede no haber edición).'); } catch { setResults([]); setHasError(true); setStatus('El servicio de publicaciones oficiales no está disponible en este momento.'); } finally { setLoading(false); } }
+   return <WorkspaceFrame title="Alertas DOF y Boletín" eyebrow="Novedades legales" description="Consulta publicaciones oficiales bajo demanda; la pantalla no simula vigilancia automática."><section className="max-w-[1100px]"><form onSubmit={(event) => { event.preventDefault(); void search(); }} className={`${card} p-4`}><div className="flex flex-col gap-3 md:flex-row"><input value={query} onChange={(event) => setQuery(event.target.value)} className={input} placeholder="Filtrar por título de publicación…" /><input type="date" aria-label="Fecha de la edición del DOF" value={editionDate} onChange={(event) => setEditionDate(event.target.value)} className={`${input} md:max-w-[180px]`} /><button disabled={loading} type="submit" className="rounded-xl bg-[#0B2545] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{loading ? 'Consultando…' : 'Actualizar publicaciones'}</button></div></form><div className="mt-2 flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs text-slate-500" aria-live="polite">{status}</p><p className="mt-1 text-[11px] text-slate-400">Fuente: Diario Oficial de la Federación (SIDOF){lastUpdated ? ` · Última consulta: ${new Date(lastUpdated).toLocaleString('es-MX')}` : ''}</p></div>{hasError && <button type="button" onClick={() => void search()} className="text-xs font-bold text-[#0B5ED7]">Reintentar</button>}</div><div className="mt-4 space-y-3">{results.map((result) => <article key={result.id} className={`${card} flex gap-3 p-4`}><span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[#B58A5A]" /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-extrabold text-[#0B2545]">{result.rubro}</h3><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">Fuente oficial</span></div><p className="mt-1 text-xs text-slate-500">{result.snippet || 'La publicación no expuso descripción adicional en esta consulta.'}</p>{result.officialUrl && <a href={result.officialUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-bold text-[#0B5ED7]">Abrir publicación oficial →</a>}</div></article>)}{!loading && results.length === 0 && <div className={`${card} p-6 text-center text-sm text-slate-500`}>{hasError ? 'No fue posible consultar las publicaciones.' : 'Consulta para cargar publicaciones reales del Diario Oficial.'}</div>}</div></section></WorkspaceFrame>;
 }
 
 function RealExpedientesView({ onCaseSelected, onOpenCase }: Pick<WorkspaceModulesViewProps, 'onCaseSelected' | 'onOpenCase'>) {
@@ -335,7 +417,10 @@ function RealTermsView({ activeCase }: { activeCase?: LegalWorkspaceCaseContext 
 
   return <WorkspaceFrame title="Cómputo de Términos" eyebrow="Herramienta procesal" description="Cálculo orientativo. Verifica los días inhábiles y las reglas aplicables antes de utilizar la fecha.">
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(460px,1.08fr)]">
-      <section className={`${card} p-5`}>
+      <div className="min-w-0 space-y-4">
+      <ProceduralTermCalculator caseId={activeCase?.caseId} />
+      <section className={`${card} p-5`} aria-label="Cálculo manual">
+        <p className="mb-3 text-[11px] font-bold uppercase tracking-[.16em] text-slate-500">Cálculo manual (orientativo)</p>
         <div className="mb-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">{activeCase?.caseId ? <>Asunto asociado: <strong className="text-[#0B2545]">{activeCase.expedienteNumber || activeCase.caseId}</strong></> : 'Sin expediente asociado: los eventos se muestran como agenda general del equipo.'}</div>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="text-xs font-bold text-slate-600">Fecha inicial<input type="date" value={date} onChange={(event) => setDate(event.target.value)} className={`${input} mt-1.5`} /></label>
@@ -354,6 +439,7 @@ function RealTermsView({ activeCase }: { activeCase?: LegalWorkspaceCaseContext 
         {result.error && <p className="mt-4 rounded-xl bg-red-50 p-3 text-xs text-red-700">{result.error}</p>}
         {result.date && <div className="mt-4 rounded-xl bg-amber-50 p-4 text-xs leading-relaxed text-amber-900"><p className="font-extrabold">Fecha calculada: {new Date(`${result.date}T12:00:00`).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}</p><p className="mt-2 font-bold">Advertencia: resultado PROVISIONAL.</p><p className="mt-1">El conteo usa un calendario genérico; no incorpora el calendario oficial de días inhábiles del Poder Judicial Federal.</p><p className="mt-1">La fecha puede cambiar porque festivos oficiales, suspensiones de labores o acuerdos específicos pueden mover la fecha real. Verifica la fecha aplicable antes de utilizarla.</p><ul className="mt-1 list-disc pl-4">{result.assumptions?.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>{calculatedAt && <p className="mt-3 text-[11px]">Último cálculo guardado en este equipo: {new Date(calculatedAt).toLocaleString('es-MX')}</p>}</div>}
       </section>
+      </div>
 
       <section className={`${card} self-start p-4`} aria-label="Agenda de términos procesales">
         {agendaError && <p role="alert" className="mb-3 text-xs text-red-700">{agendaError}</p>}
@@ -505,7 +591,7 @@ function WorkspaceFrame({ title, eyebrow, description, action, children }: { tit
         action={action ? <button type="button" className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0B2545] px-4 text-sm font-bold text-white shadow-sm hover:bg-[#081d39]"><Icon>add</Icon>{action}</button> : undefined}
       />
       {title === 'Inicio' && <UserFacingSystemStatusPanel />}
-      {title === 'Biblioteca Jurídica' && <OperationalManualPanel />}
+      {title === 'Biblioteca Jurídica' && <OperationalManualPanel inline />}
       <div className={contentClass}>{children}</div>
       {title === 'Configuración' && <OperationalManualPanel compact />}
     </div>

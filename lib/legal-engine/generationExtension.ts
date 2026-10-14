@@ -20,6 +20,11 @@ export interface GenerationExtensionInput {
   maxContinuationsPerSection?: number;
   maxExpansionPasses?: number;
   maxGeneratedTokens?: number;
+  /**
+   * La extensión es un MÁXIMO, no una meta: el documento mide lo que el material sostiene, nunca se amplía ni se
+   * regenera para llenar páginas, y el presupuesto de palabras es un techo.
+   */
+  lengthIsCeiling?: boolean;
 }
 
 export interface GenerationExtensionContract {
@@ -32,6 +37,8 @@ export interface GenerationExtensionContract {
   maxContinuationsPerSection: number;
   maxExpansionPasses: number;
   maxGeneratedTokens: number;
+  /** Ver `GenerationExtensionInput.lengthIsCeiling`. */
+  lengthIsCeiling?: boolean;
   actualPages?: number;
   wordCount?: number;
   characterCount?: number;
@@ -103,8 +110,9 @@ export function resolveGenerationExtensionContract(
   const targetPages = mode === 'extended-legal'
     ? boundedInteger(input?.targetPages, defaults.targetPages, 1, 200)
     : defaults.targetPages;
+  const lengthIsCeiling = mode === 'extended-legal' && input?.lengthIsCeiling === true;
   const minPages = mode === 'extended-legal'
-    ? boundedInteger(input?.minPages, Math.max(1, targetPages - 4), 1, targetPages)
+    ? (lengthIsCeiling ? 1 : boundedInteger(input?.minPages, Math.max(1, targetPages - 4), 1, targetPages))
     : defaults.minPages;
   const maxPages = mode === 'extended-legal'
     ? boundedInteger(input?.maxPages, targetPages + 4, targetPages, 240)
@@ -112,6 +120,7 @@ export function resolveGenerationExtensionContract(
 
   return {
     generationMode: mode,
+    ...(lengthIsCeiling ? { lengthIsCeiling: true } : {}),
     targetPages,
     minPages,
     maxPages,

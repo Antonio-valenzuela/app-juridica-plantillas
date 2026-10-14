@@ -162,7 +162,10 @@ export function selectAppealSources(sources: UploadedSourceDocument[], selected:
     const inRange = (p: { page: number }) => p.page >= selected.startPage && p.page <= selected.endPage;
     const pages = all.filter(inRange);
     const text = pages.map(p => p.text).join('\n\n');
-    const primary: UploadedSourceDocument = { ...s, pages, content: text, extractedText: text };
+    // La resolución a impugnar ya fue identificada y elegida: su tipo no se vuelve a inferir del texto del recorte
+    // (una sentencia que NARRA «agravios» no es un recurso; la primera mención no decide la naturaleza del acto).
+    const { sourceDocumentType: _t, documentType: _d, ...classification } = (s.classification || {}) as Record<string, unknown>;
+    const primary: UploadedSourceDocument = { ...s, pages, content: text, extractedText: text, classification: { ...classification, sourceDocumentType: 'SENTENCIA_O_RESOLUCION' } };
     const rest = all.filter(p => !inRange(p));
     if (!rest.length) return [primary];
     const restText = rest.map(p => p.text).join('\n\n');

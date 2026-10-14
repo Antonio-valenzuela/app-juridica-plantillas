@@ -36,13 +36,13 @@ describe('estado de tipos presentado al abogado', () => {
     expect(screen.queryAllByTestId('writing-type-status')).toHaveLength(0);
   });
 
-  it('los tipos con PASS no se listan como "en desarrollo" (contrato 265/12)', () => {
+  it('los tipos con PASS no se listan como "en desarrollo" (contrato 266/12)', () => {
     const identities = visibleWritingTypes();
-    expect(identities.length).toBe(277);
+    expect(identities.length).toBe(278);
     const functionalPass = identities.filter(identity => identity.functionalStatus === 'PASS');
     const functionalFail = identities.filter(identity => identity.functionalStatus === 'FAIL');
-    // Contrato honesto: 265 PASS + 12 no generables por estado de producto.
-    expect(functionalPass.length).toBe(265);
+    // Contrato honesto: 266 PASS + 12 no generables por estado de producto.
+    expect(functionalPass.length).toBe(266);
     expect(functionalFail.length).toBe(12);
     expect(functionalPass.length + functionalFail.length).toBe(identities.length);
     // PASS => nunca aparece como FAIL ni exige el toggle de "en desarrollo".

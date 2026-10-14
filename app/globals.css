@@ -648,19 +648,23 @@ h1 {
   -webkit-text-fill-color: initial !important;
 }
 
-h2 {
-  font-size: 1.75rem;
-  font-weight: 700;
-  margin-bottom: 1.25rem;
-  color: var(--text-primary);
-  letter-spacing: -0.02em;
-}
+/* En @layer base: estilo por defecto de los títulos sin clase. Fuera de capa ganaban a las
+   utilidades de Tailwind (text-sm, text-lg…) e inflaban los títulos de todas las pestañas. */
+@layer base {
+  h2 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 1.25rem;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+  }
 
-h3 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
+  h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
 }
 
 p.subtitle {
@@ -6437,3 +6441,38 @@ textarea:disabled {
 .lex-radio-list { display: grid; gap: 6px; }
 .lex-radio { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; font-size: 13px; color: var(--ws-ink-soft); cursor: pointer; }
 .lex-radio input { accent-color: var(--ws-navy); }
+
+/* ============================================================
+   Opciones de redacción (Contestaciones) — panel superpuesto.
+   Se monta en <body>, fuera del área de trabajo: redefine sus tokens.
+   ============================================================ */
+.lex-more-options-trigger { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; margin-top: 12px; padding: 0 4px; border: 0; border-top: 1px solid #f0eeea; background: transparent; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ws-accent, #165fae); text-align: left; }
+.lex-more-options-trigger::after { content: '›'; font-size: 16px; color: var(--ws-muted, #6b7684); }
+.lex-more-options-trigger:hover { text-decoration: underline; text-underline-offset: 3px; }
+.lex-more-options-trigger:focus-visible { outline: 2px solid var(--ws-accent, #165fae); outline-offset: 2px; border-radius: 6px; }
+
+.lex-modal-backdrop {
+  --ws-ink: #17283e; --ws-muted: #6b7684; --ws-line: #e4e1dc; --ws-surface: #ffffff;
+  --ws-navy: #11243a; --ws-accent: #165fae; --ws-accent-soft: #edf3fb;
+  position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(15, 23, 42, .5); animation: lex-modal-fade .12s ease-out;
+}
+.lex-modal { display: flex; flex-direction: column; width: min(720px, 100%); max-height: calc(100dvh - 32px); overflow: hidden; border: 1px solid var(--ws-line); border-radius: 16px; background: var(--ws-surface); color: var(--ws-ink); box-shadow: 0 24px 60px rgba(15, 23, 42, .28); }
+.lex-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 24px 12px; border-bottom: 1px solid var(--ws-line); }
+.lex-modal-eyebrow { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: #b58a5a; }
+.lex-modal .lex-modal-title { margin: 2px 0 6px; font-size: 20px; line-height: 1.25; font-weight: 800; color: var(--ws-ink); letter-spacing: -.01em; }
+.lex-modal-close { flex-shrink: 0; width: 40px; height: 40px; border: 1px solid var(--ws-line); border-radius: 10px; background: #fff; font-size: 22px; line-height: 1; color: var(--ws-muted); cursor: pointer; }
+.lex-modal-close:hover { color: var(--ws-ink); background: #f7f6f3; }
+.lex-modal-body { display: grid; gap: 20px; padding: 18px 24px; overflow-y: auto; }
+.lex-modal-section { padding-top: 16px; border-top: 1px solid var(--ws-line); }
+.lex-modal-textarea { min-height: 200px; font-size: 14.5px; line-height: 1.55; resize: vertical; }
+.lex-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--ws-line); background: #faf8f5; }
+.lex-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.lex-chip { min-height: 36px; padding: 0 12px; border: 1px solid var(--ws-line); border-radius: 999px; background: #fff; font-size: 12.5px; font-weight: 600; color: var(--ws-ink); cursor: pointer; transition: border-color .12s, background .12s; }
+.lex-chip:hover:not(:disabled) { border-color: #b58a5a; background: #fbf6ef; }
+.lex-chip:disabled { opacity: .5; cursor: not-allowed; }
+.lex-chip-muted { color: var(--ws-muted); }
+.lex-modal button:focus-visible, .lex-modal textarea:focus-visible { outline: 2px solid var(--ws-accent); outline-offset: 2px; }
+@keyframes lex-modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lex-modal-backdrop { animation: none; } }
+@media (max-width: 640px) { .lex-modal-header, .lex-modal-body, .lex-modal-footer { padding-left: 16px; padding-right: 16px; } }

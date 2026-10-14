@@ -139,6 +139,7 @@ const CONTESTACIONES_DOCUMENT_TYPE_OPTIONS = [
   { id: 'contestacion_demanda_laboral' },
   { id: 'contestacion_demanda_mercantil' },
   { id: 'apelacion_civil', label: 'Apelación Civil' },
+  { id: 'contestacion_agravios', label: 'Contestación de agravios (parte apelada)' },
   { id: 'apelacion_mercantil', label: 'Apelación Mercantil' },
   { id: 'apelacion_familiar', label: 'Apelación Familiar' },
   { id: 'demanda_amparo_directo' },
@@ -179,6 +180,7 @@ const PROPOSED_GROUPS: readonly CatalogGroup[] = [
   ]),
   group('civil', 'civil_recurso', 'Recursos civiles', 'civil_recursos', 'Recursos civiles', [
     document('apelacion_civil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'LAUDO', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
+    document('contestacion_agravios', { sourceRequired: true, acceptedSourceTypes: ['RECURSO'], optionalSourceTypes: ['SENTENCIA_O_RESOLUCION'], incompatibleMatterIds: ['laboral'] }),
     document('revocacion_civil', { sourceRequired: true, acceptedSourceTypes: ['ACUERDO', 'SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),
     'queja_civil',
     document('aclaracion_sentencia_civil', { sourceRequired: true, acceptedSourceTypes: ['SENTENCIA_O_RESOLUCION', 'SENTENCIA_AMPARO', 'SENTENCIA_AMPARO_DIRECTO', 'ACUERDO'], incompatibleMatterIds: ['mercantil', 'laboral'] }),

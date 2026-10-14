@@ -24,6 +24,14 @@ export interface AIRequest {
   purpose?: "UI_ASSISTANT" | "LEGAL_GENERATION";
   /** Per-request external transfer consent, independent of case privacy classification. */
   externalProviderOptIn?: boolean;
+  /**
+   * Proveedores remotos que el abogado autorizó EXPRESAMENTE para esta operación (los que vio en el panel).
+   * Si se indica, ningún otro proveedor remoto —tampoco como respaldo— se intenta. Sin la lista, el
+   * consentimiento cubre la cadena configurada (llamadores que no muestran el panel con proveedores).
+   */
+  authorizedExternalProviders?: string[];
+  /** Contrato de voz y contenido del escrito; el router lo antepone al prompt de sistema. */
+  writingContractPrompt?: string;
   /** Defaults to true; remains true for private case material even with explicit external consent. */
   privateCaseContext?: boolean;
   systemPrompt?: string;

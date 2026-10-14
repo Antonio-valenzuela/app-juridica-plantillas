@@ -79,7 +79,9 @@ describe('AnalyticsPanel', () => {
     await waitFor(() => expect(screen.getByText('Documentos generados')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '7 días' }));
     fireEvent.click(screen.getByRole('button', { name: '90 días' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith('/api/workspace/analytics?rangeDays=90', { cache: 'no-store' }));
+    // Contrato ampliado (2026-10-13): el panel también consulta el registro de envíos a IA en la nube con el mismo periodo.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/workspace/analytics?rangeDays=90', { cache: 'no-store' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/workspace/analytics/ai-egress?rangeDays=90', { cache: 'no-store' }));
   });
 
   it('renders honest empty and error states without fake metrics', async () => {

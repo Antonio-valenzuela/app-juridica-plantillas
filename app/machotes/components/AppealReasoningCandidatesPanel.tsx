@@ -96,6 +96,8 @@ export function AppealReasoningAiReview({ review }: { review: AppealCandidateRev
       setWarning('No se pudo completar la clasificación asistida. Se muestran únicamente los resultados determinísticos; no se reporta uso de IA.');
     } finally {
       setLoading(false);
+      // La autorización vale para un solo envío: otra clasificación exige volver a marcarla.
+      setConsent(false);
     }
   };
 

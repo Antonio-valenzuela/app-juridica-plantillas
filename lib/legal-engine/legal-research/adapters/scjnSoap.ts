@@ -1,9 +1,12 @@
 import { DOMParser } from '@xmldom/xmldom';
+import { withOfficialRetry, type OfficialRetryOptions } from '../officialFetch';
 
 export const SCJN_SEMANARIO_SOAP_URL = 'https://sjf.scjn.gob.mx/sjfsem/Servicios/Semanario.asmx';
 export const SCJN_TESIS_SOAP_URL = 'https://sjf.scjn.gob.mx/sjfsem/Servicios/wsTesis.asmx';
 
 export interface ScjnSoapConfig {
+  /** Reintentos y ritmo de peticiones a la fuente oficial. */
+  retry?: OfficialRetryOptions;
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   semanarioUrl?: string;
   tesisUrl?: string;
@@ -45,7 +48,7 @@ function envelope(operation: string, parameters: Record<string, string | number>
 }
 
 export function createScjnSoapClient(config: ScjnSoapConfig = {}) {
-  const fetcher = config.fetch || fetch;
+  const fetcher = withOfficialRetry(config.fetch || fetch, config.retry);
   const timeoutMs = config.timeoutMs || 15000;
   const semanarioUrl = config.semanarioUrl || SCJN_SEMANARIO_SOAP_URL;
   const tesisUrl = config.tesisUrl || SCJN_TESIS_SOAP_URL;

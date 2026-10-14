@@ -3,6 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CaseDocumentsReader } from '@/app/machotes/components/CaseDocumentsReader';
+import { confirmCaseDossierInUi } from '../helpers/confirmCaseDossier';
 import { sourceFromText } from '../helpers/syntheticCaseDocuments';
 import { CIVIL_ARRENDAMIENTO_DEMAND, demandToText } from '../helpers/syntheticDemandPdf';
 
@@ -40,6 +41,7 @@ describe('recursos de amparo: sin el bloqueo de "resolución a impugnar"', () =>
     renderWith(SENTENCIA_AMPARO_DIRECTO, { onGenerateResponse: generate });
     chooseType('recurso_revision_amparo_directo');
     expect(screen.queryByText(/Selecciona la resolución que deseas impugnar/)).toBeNull();
+    confirmCaseDossierInUi();
     const button = screen.getByRole('button', { name: /Generar recurso/ }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     fireEvent.click(button);
@@ -56,6 +58,7 @@ describe('redacción con la plantilla del abogado', () => {
     chooseType('contestacion_demanda_civil');
     fireEvent.click(screen.getByRole('radio', { name: 'Con mi plantilla' }));
     fireEvent.change(screen.getByLabelText('Plantilla (machote)'), { target: { value: 'tpl-propia' } });
+    confirmCaseDossierInUi();
     fireEvent.click(screen.getByRole('button', { name: /Generar contestación/ }));
     expect(generate).toHaveBeenCalledOnce();
     expect(generate.mock.calls[0][0]).toMatchObject({

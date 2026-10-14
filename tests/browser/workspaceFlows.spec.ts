@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { acceptExternalConsentOnce } from '../helpers/externalConsent';
 
 const analyticsFixture = {
   ok: true,
@@ -68,13 +69,8 @@ async function mockAnalytics(page: Page) {
 
 async function mockGeneration(page: Page, outcome: { readiness: string; terminalStatus?: string } | { error: true }) {
   // These mocked E2E flows explicitly consent to the external-provider notice.
-  // Without a dialog handler, Playwright dismisses window.confirm and the UI
-  // correctly returns before reaching the intercepted generation endpoint.
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    expect(dialog.message()).toContain('se enviará contenido del expediente');
-    await dialog.accept();
-  });
+  // Without consent the UI correctly returns before reaching the intercepted generation endpoint.
+  void acceptExternalConsentOnce(page);
   await page.route('**/api/legal-engine/generate', async (route) => {
     if ('error' in outcome) {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'GENERATION_FAILED' }) });

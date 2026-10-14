@@ -53,17 +53,23 @@ export function resolveContestacionRoles(
   caseAnalysis?: CaseAnalysis,
   savedParties?: SavedParty[]
 ): ContestacionRoles {
-  const contesta =
+  const demandado =
     pickName(savedParties, 'demandado') ||
     doc.parties?.demandado ||
     caseAnalysis?.parties?.demandado ||
     PENDIENTE_DEMANDADO;
 
-  const contraparte =
+  const actor =
     pickName(savedParties, 'actor') ||
     doc.parties?.actor ||
     caseAnalysis?.parties?.actor ||
     PENDIENTE_ACTOR;
+
+  // En la contestación a la reconvención contesta el actor principal (demandado reconvencional) y la
+  // contraparte es quien reconvino (el demandado principal).
+  const reconvention = /reconvencion/i.test(String(doc.documentType || ''));
+  const contesta = reconvention ? actor : demandado;
+  const contraparte = reconvention ? demandado : actor;
 
   const autoridad =
     doc.parties?.autoridadDestinataria ||
@@ -239,7 +245,7 @@ function buildRichContestacionSkeleton(
   const derechoSection = mkSection(templateId, 'sec-con-derecho', 'legal_grounds', 'DERECHO', 8, derechoSeed);
   const alegatosSection = mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
     hasParties
-      ? `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\nSe solicita la total absolución frente a las pretensiones de ${roles.contraparte}, al haberse desvirtuado la procedencia de la acción principal y acreditarse las defensas opuestas.`
+      ? `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: síntesis vinculada a las posturas, excepciones y pruebas efectivamente formuladas; no se presume absolución ni defensas acreditadas].`
       : 'Contenido pendiente de instrucción expresa del abogado.');
   const argumentosSection = mkSection(templateId, 'sec-con-argumentos', 'argument', 'ARGUMENTOS', 8.5,
     '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Argumentos vinculados a las posturas, hechos y pruebas identificados; no se presume absolución ni defensas acreditadas].');
@@ -372,8 +378,8 @@ export function buildContestacionSkeleton(
     (doc.documentType && /laboral/i.test(doc.documentType));
 
   if (!isLaboral) {
-    const objecionPruebasSeed = 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA:\nSe objetan en cuanto a su alcance y valor probatorio las pruebas ofrecidas por la contraria.';
-    const derechoSeed = 'DERECHO:\nSon aplicables las disposiciones legales sustantivas y adjetivas conforme a derecho.';
+    const objecionPruebasSeed = 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA:\n[REQUIERE POSTURA DEL ABOGADO: identificar cada prueba objetada y la causa concreta de objeción; no se objeta de forma genérica].';
+    const derechoSeed = 'DERECHO:\n[DATO PENDIENTE: fundamentos aplicables y verificación en fuente oficial]. No se afirma vigencia ni aplicabilidad sin investigación jurídica verificable.';
 
     return [
       mkSection(templateId, 'sec-con-proemio', 'header', 'PROEMIO', 1, proemioSeed),
@@ -383,7 +389,7 @@ export function buildContestacionSkeleton(
       mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 4, prestacionesSeed),
       mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 5, hechosSeed),
       mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
-        'EXCEPCIONES Y DEFENSAS:\nSe oponen las excepciones y defensas de falta de acción y derecho (sine actione agis), obscuridad y defecto legal de la demanda, y las que deriven de las constancias procesales.'),
+        'EXCEPCIONES Y DEFENSAS:\n[REQUIERE POSTURA DEL ABOGADO: no se formula una excepción por inferencia; cada excepción debe conectar hecho, prueba y fundamento].'),
       mkSection(templateId, 'sec-con-objecion-pruebas', 'argument', 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA', 7, objecionPruebasSeed),
       mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS PROPIAS DE LA DEMANDADA', 8, pruebasSeed),
       mkSection(templateId, 'sec-con-derecho', 'legal_grounds', 'DERECHO', 9, derechoSeed),
@@ -401,10 +407,10 @@ export function buildContestacionSkeleton(
     mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 4, hechosSeed),
     mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 5, prestacionesSeed),
     mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
-      'EXCEPCIONES Y DEFENSAS:\nSe oponen las excepciones y defensas de falta de acción y derecho (sine actione agis), inexistencia de despido injustificado, obscuridad y defecto legal de la demanda, y las demás sustentadas en autos.'),
+      'EXCEPCIONES Y DEFENSAS:\n[REQUIERE POSTURA DEL ABOGADO: no se formula una excepción por inferencia; cada excepción debe conectar hecho, prueba y fundamento].'),
     mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7, pruebasSeed),
     mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
-      `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\nSe solicita la total absolución frente a las pretensiones de la accionante ${roles.contraparte}, al haberse desvirtuado la existencia del despido alegado y acreditarse las excepciones opuestas.`),
+      `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: síntesis vinculada a las posturas, excepciones y pruebas efectivamente formuladas; no se presume absolución ni defensas acreditadas].`),
     mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', 9, 'PETITORIOS'),
     mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', 10,
       `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: A la fecha de su presentación.\n\n_________________________________________\n${roles.contesta}\nPARTE DEMANDADA`),
@@ -680,23 +686,9 @@ function sourceBackedIssueText(caseAnalysis?: CaseAnalysis): string {
     return formatted.join('\n\n---\n\n');
   }
 
-  // Fallback: desarrollar desde caseTheory si existe
-  const theory = caseAnalysis?.caseTheory;
-  if (theory?.constitutionalTheory || theory?.legalTheory) {
-    const developed: string[] = [];
-    if (theory.constitutionalTheory) {
-      developed.push(`PLANTEAMIENTO CONSTITUCIONAL IDENTIFICADO EN LAS FUENTES:\n${theory.constitutionalTheory}`);
-    }
-    if (theory.legalTheory) {
-      developed.push(`MARCO NORMATIVO APLICABLE:\n${theory.legalTheory}`);
-    }
-    if (theory.factualTheory) {
-      developed.push(`CONTROVERSIA SUBYACENTE:\n${theory.factualTheory}`);
-    }
-    return developed.join('\n\n') + '\n\n[PENDIENTE DE REVISIÓN: confirmar la cuestión constitucional y el interés excepcional con el abogado]';
-  }
-
-  return '[DATO PENDIENTE DE EXPEDIENTE: Cuestión constitucional e interés excepcional confirmados]';
+  // La teoría del caso es contexto interno de redacción («debe sostenerse…», «debe contrastarse…»): no es
+  // una cuestión identificada en las fuentes y no se imprime como tal en el escrito.
+  return '[REQUIERE POSTURA DEL ABOGADO: cuestión de constitucionalidad planteada y su interés excepcional, con las constancias que la sustentan]';
 }
 
 function sourceBackedArguments(caseAnalysis?: CaseAnalysis): string {
@@ -706,31 +698,19 @@ function sourceBackedArguments(caseAnalysis?: CaseAnalysis): string {
     return axes.map((axis, i) => formatIndividualAgravio(axis, i, caseAnalysis)).join('\n\n=========================================\n\n');
   }
 
-  // 2. Desarrollar desde caseTheory + challengedActs + rulings
-  const theory = caseAnalysis?.caseTheory;
-  const hasSubstance = theory?.factualTheory || theory?.legalTheory || theory?.constitutionalTheory
-    || caseAnalysis?.challengedActs?.length || caseAnalysis?.rulings?.length;
-  if (hasSubstance) {
-    const parts: string[] = [];
-    if (theory?.factualTheory) {
-      parts.push(`PLANTEAMIENTO FÁCTICO:\n${theory.factualTheory}`);
-    }
-    if (caseAnalysis?.challengedActs?.length) {
-      parts.push(`ACTOS IMPUGNADOS:\n${caseAnalysis.challengedActs.map((act) => `${act.authority}: ${act.actDescription}`).join('\n')}`);
-    }
-    if (theory?.constitutionalTheory) {
-      parts.push(`AGRAVIO CONSTITUCIONAL IDENTIFICADO:\n${theory.constitutionalTheory}`);
-    }
-    if (theory?.legalTheory) {
-      parts.push(`SUSTENTO NORMATIVO DEL AGRAVIO:\n${theory.legalTheory}`);
-    }
-    if (caseAnalysis?.rulings?.length) {
-      parts.push(`RESOLUCIÓN IMPUGNADA:\n${caseAnalysis.rulings.map((r) => [r.body, r.date, r.rulingText].filter(Boolean).join(' — ')).join('\n')}`);
-    }
-    return `AGRAVIO PRIMERO. PLANTEAMIENTO INTEGRAL DE AGRAVIOS\n\n${parts.join('\n\n')}\n\n[PENDIENTE DE REVISIÓN: individualizar y confirmar cada agravio con su sustento procesal]`;
+  // 2. Solo lo extraído de la fuente (actos impugnados, resolución). La teoría del caso es contexto interno
+  // y no se imprime como agravio; sin instrucción no se afirma ninguna violación.
+  const parts: string[] = [];
+  if (caseAnalysis?.challengedActs?.length) {
+    parts.push(`ACTOS IMPUGNADOS:\n${caseAnalysis.challengedActs.map((act) => `${act.authority}: ${act.actDescription}`).join('\n')}`);
   }
-
-  return 'AGRAVIO ÚNICO. VIOLACIÓN AL PARÁMETRO DE CONTROL DE REGULARIDAD CONSTITUCIONAL:\nLa resolución recurrida transgrede en perjuicio de la recurrente las garantías de legalidad, debido proceso y acceso a la justicia consagradas en los artículos 14, 16 y 17 de la Constitución Federal, al haber omitido la fijación e interpretación directa del principio constitucional invocado en la demanda de amparo.\n\n[PENDIENTE DE REVISIÓN: confirmar agravios específicos con el abogado]';
+  if (caseAnalysis?.rulings?.length) {
+    parts.push(`RESOLUCIÓN IMPUGNADA:\n${caseAnalysis.rulings.map((r) => [r.body, r.date, r.rulingText].filter(Boolean).join(' — ')).join('\n')}`);
+  }
+  const pending = '[REQUIERE POSTURA DEL ABOGADO: agravios concretos — consideración combatida, por qué es incorrecta y qué derecho o norma se vulnera; no se formula un agravio por inferencia]';
+  return parts.length
+    ? `AGRAVIOS\n\n${parts.join('\n\n')}\n\n${pending}`
+    : `AGRAVIOS\n\n${pending}`;
 }
 
 export function buildVerifiedLegalGroundsText(
@@ -757,19 +737,12 @@ export function buildVerifiedLegalGroundsText(
     sections.push(`CRITERIOS JURISPRUDENCIALES VERIFICADOS:\n${citsText}`);
   }
 
-  // 2. Parámetro constitucional y convencional
-  const constTheory = caseAnalysis?.caseTheory?.constitutionalTheory;
-  if (constTheory) {
-    sections.push(`PARÁMETRO CONSTITUCIONAL Y CONVENCIONAL:\n${constTheory}`);
-  }
-
-  // 3. Fundamento legal y procesal verificado en las fuentes
-  const legalTheory = caseAnalysis?.caseTheory?.legalTheory;
+  // 2. Fundamento legal y procesal de las fuentes. La teoría del caso (parámetro constitucional, teoría
+  // jurídica) es contexto interno de redacción, no una norma: no se lista como fundamento.
   const docBasis = doc.legalBasis || [];
   const axisRules = Array.from(new Set((caseAnalysis?.argumentAxes || []).flatMap((a) => a.rules || [])));
   const allNorms = Array.from(new Set([
     ...docBasis,
-    ...(legalTheory ? [legalTheory] : []),
     ...axisRules,
   ])).filter(Boolean);
 

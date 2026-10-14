@@ -8,7 +8,7 @@ export interface MaterialLegalCitation {
 }
 
 const ARTICLE_CITATION_RE = /\b(?:art[ií]culos?|art\.)\s+\d+[a-z]?(?:\s*(?:bis|ter|qu[aá]ter))?(?:\s*,?\s*fracci[oó]n\s+[ivxlcdm\d]+)?/giu;
-const STATUTE_TITLE_RE = /\b(?:constituci[oó]n(?:\s+pol[ií]tica)?(?:\s+de\s+(?:los\s+)?estados\s+unidos\s+mexicanos)?|(?:ley|c[oó]digo|reglamento|decreto|acuerdo)\s+(?:(?:federal|general|org[aá]nica|estatal|municipal|nacional)\s+)?(?:de(?:l)?\s+)?[\p{L}\d]+(?:\s+(?!(?:se|que|establece|dispone|prev[eé]|regula|aplica|aplicable|conforme|resulta|considera|ordena|garantiza|protege|permite|sustenta|se[nñ]ala|se[nñ]alan)\b)[\p{L}\d]+){0,7})/giu;
+const STATUTE_TITLE_RE = /\b(?:constituci[oó]n(?!\p{L})(?:\s+pol[ií]tica)?(?:\s+de\s+(?:los\s+)?estados\s+unidos\s+mexicanos)?|(?:ley|c[oó]digo|reglamento|decreto|acuerdo)\s+(?:(?:federal|general|org[aá]nica|estatal|municipal|nacional)\s+)?(?:de(?:l)?\s+)?[\p{L}\d]+(?:\s+(?!(?:se|que|establece|dispone|prev[eé]|regula|aplica|aplicable|conforme|resulta|considera|ordena|garantiza|protege|permite|sustenta|se[nñ]ala|se[nñ]alan)\b)[\p{L}\d]+){0,7})/giu;
 const ARTICLE_STATUTE_ABBREVIATION_RE = /\b(?:art[ií]culos?|art\.)\s+\d+[a-z]?(?:\s*(?:bis|ter|qu[aá]ter))?\s+de\s+(?:la|el)\s+([A-Z][A-Z0-9]{1,8})\b/gu;
 const OTHER_MATERIAL_CITATION_RE = /\b(?:registro\s+digital\s*[:#]?\s*\d+|(?:tesis|jurisprudencia|precedente)\s+(?:[a-z0-9]+\s*){0,2}[a-z0-9]+(?:[./-][a-z0-9]+)+)\b/giu;
 const UNVERIFIED_MARKER_RE = /\[NO VERIFICADO:[^\]]+\]/giu;

@@ -3,6 +3,7 @@ import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';
+import { acceptExternalConsentOnce } from '../helpers/externalConsent';
 
 const evidenceDirectory = path.join(process.cwd(), 'audit', 'draft-export-recovery', 'e2e-ui');
 
@@ -132,10 +133,7 @@ async function mockGenerationApi(page: Page, documentType: string) {
 }
 
 async function acceptExternalProviderNotice(page: Page) {
-  page.once('dialog', async (dialog) => {
-    expect(dialog.type()).toBe('confirm');
-    await dialog.accept();
-  });
+  void acceptExternalConsentOnce(page);
 }
 
 async function exportAndValidateDraft(page: Page, prefix: string) {

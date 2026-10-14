@@ -159,7 +159,9 @@ export function initiatesAction(corpus: string): boolean {
   return /\b(?:vengo\s+a\s+(?:demandar|promover|solicitar\s+el\s+amparo)|promuevo\s+(?:juicio|demanda|formal\s+demanda)|interpongo\s+(?:formal\s+)?(?:demanda|juicio)|demando\s+(?:en\s+la\s+v[ií]a|a\b|de\b|en\s+contra)|solicito\s+(?:el\s+amparo|la\s+protecci[oó]n\s+de\s+la\s+justicia\s+federal)|entablo\s+formal\s+demanda)/i.test(corpus || '');
 }
 
-const PROEMIO_RE = /(?:^|\n)[ \t]*(?:C\.[ \t]+|CIUDADAN[OA][ \t]+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ. \t]{3,80}?),\s*(?:mexican[oa]|mayor\s+de\s+edad|solter[oa]|casad[oa]|por\s+mi\s+propio\s+derecho|por\s+propio\s+derecho|en\s+mi\s+car[aá]cter|en\s+nombre\s+y\s+representaci[oó]n|se[ñn]alando\s+como\s+domicilio)/g;
+// Persona moral: «CRÉDITOS SINTÉTICOS, S.A. DE C.V., por conducto de su apoderado…». El sufijo societario
+// no forma parte del nombre capturado (como en REPRESENTATION_RE).
+const PROEMIO_RE = /(?:^|\n)[ \t]*(?:C\.[ \t]+|CIUDADAN[OA][ \t]+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ. \t]{3,80}?)(?:,\s*(?:S\.?\s*A\.?(?:\s*DE\s*C\.?\s*V\.?)?|S\.?\s*C\.?|S\.?\s*DE\s*R\.?\s*L\.?(?:\s*DE\s*C\.?\s*V\.?)?|A\.?\s*C\.?|S\.?\s*A\.?\s*P\.?\s*I\.?(?:\s*DE\s*C\.?\s*V\.?)?))?,\s*(?:mexican[oa]|mayor\s+de\s+edad|solter[oa]|casad[oa]|por\s+mi\s+propio\s+derecho|por\s+propio\s+derecho|en\s+mi\s+car[aá]cter|en\s+nombre\s+y\s+representaci[oó]n|se[ñn]alando\s+como\s+domicilio|por\s+conducto\s+de\s+su\s+(?:apoderad[oa]|representante))/g;
 
 /**
  * Nombre de quien comparece en el proemio ("JUAN PÉREZ, por mi propio derecho…").
@@ -188,6 +190,16 @@ const REPRESENTATION_RE = /en\s+(?:mi|su)\s+car[aá]cter\s+de\s+(?:apoderad[oa]|
 const ACTION_TARGET_RE = /(?:vengo\s+a\s+demandar(?:\s+formalmente)?(?:\s+en\s+la\s+v[íi]a[^,\n]+?)?\s+(?:en\s+contra\s+de(?:l)?|a)|demando\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|se\s+demanda\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|demandar\s+(?:la\s+nulidad[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a))\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.,\s]{3,80}?)(?:\s+y\/o|\s*,\s*|\s+con\s+domicilio|\s+qui[eé]n|\s*\n)/gi;
 
 /**
+ * «vengo a demandar a JUAN PÉREZ el pago de…»: sin coma, la captura se lleva el objeto de la acción.
+ * El nombre termina donde empieza una frase en minúsculas (artículo o preposición seguido de otra
+ * palabra en minúscula). «María de la Luz» se conserva: tras «la» sigue una mayúscula.
+ */
+export function trimClaimObject(value: string): string {
+  const cut = value.search(/\s(?:el|la|los|las|lo|por|para|que|al|del|un|una)\s+[a-záéíóúñ]/);
+  return cut > 0 ? value.slice(0, cut).trim().replace(/[,;:.]+$/, '') : value;
+}
+
+/**
  * Contraparte contra quien se dirige la acción ("vengo a demandar a X, con
  * domicilio…"). Recorre todas las apariciones y descarta al juzgado y las
  * referencias deícticas ("demando ante ESTE H. JUZGADO…").
@@ -199,7 +211,7 @@ export function extractActionTarget(corpus: string): string | undefined {
   while ((match = re.exec(corpus || '')) !== null && guard < 50) {
     guard++;
     // "en contra de la SECRETARÍA…": el artículo en minúscula no forma parte del nombre.
-    const candidate = trimToSentence(match[1].trim().replace(/^de(?:l)?\s+/i, '').replace(/^(?:la|el|los|las)\s+(?=[A-ZÁÉÍÓÚÑ])/, ''));
+    const candidate = trimClaimObject(trimToSentence(match[1].trim().replace(/^de(?:l)?\s+/i, '').replace(/^(?:la|el|los|las)\s+(?=[A-ZÁÉÍÓÚÑ])/, '')));
     if (isValidProceduralPartyName(candidate)) return candidate;
     if (re.lastIndex === match.index) re.lastIndex++;
   }

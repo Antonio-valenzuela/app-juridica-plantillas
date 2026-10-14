@@ -50,6 +50,33 @@ export function WritingAvailabilityNotice({
   const functionalCount = getFunctionalDocumentTypes().length;
   const inDevelopment = getTypesInDevelopment();
   const reviewPending = inDevelopment.length > 0 || functionalCount === 0;
+  const offersOptIn = Boolean(onShowUncertifiedDraftsChange) && inDevelopment.length > 0;
+
+  // Vista del abogado: sin conteos internos del catálogo; solo la opción consciente de borrador
+  // asistido y, si se activa, su advertencia. Los conteos quedan en el modo técnico.
+  if (!showTechnicalDetails) {
+    if (!offersOptIn && !(showUncertifiedDrafts && inDevelopment.length > 0)) return null;
+    return (
+      <div className="text-xs text-slate-600" data-testid={`writing-availability-${surface.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+        {offersOptIn && (
+          <label className="inline-flex cursor-pointer items-center gap-2" title="Muestra también tipos de escrito aún no certificados. Solo generan un borrador asistido; la exportación FINAL sigue bloqueada.">
+            <input
+              type="checkbox"
+              checked={showUncertifiedDrafts}
+              onChange={(event) => onShowUncertifiedDraftsChange!(event.target.checked)}
+              aria-label="En desarrollo (sin certificar)"
+            />
+            <span>Mostrar tipos en desarrollo (sin certificar)</span>
+          </label>
+        )}
+        {showUncertifiedDrafts && inDevelopment.length > 0 && (
+          <p role="status" className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 font-bold text-amber-900">
+            Borrador asistido: revisión obligatoria. La exportación FINAL seguirá bloqueada.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <section

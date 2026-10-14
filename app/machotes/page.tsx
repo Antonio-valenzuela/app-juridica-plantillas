@@ -65,10 +65,14 @@ import { WorkspaceModulesView, type WorkspaceModule } from './components/Workspa
 import type { WorkspaceCaseSummary } from '@/lib/workspace/cases';
 import { getSafeApiErrorMessage, getGenerationErrorPresentation } from '@/lib/apiErrorMessage';
 import { describePageTargetResult, type PageTargetResult } from '@/lib/legal-engine/pageTarget';
+import type { CaseDossier } from '@/lib/legal-engine/caseDossier';
+import type { ReviewAnnex } from '@/lib/legal-engine/reviewAnnex';
+import { ReviewAnnexPanel } from './components/ReviewAnnexPanel';
 import { compactSourceDocumentsForGeneration, buildContestacionesWorkflowPayload } from '@/lib/legal-engine/generationRequest';
 import { getCachedUploadAnalysis, rememberUploadAnalysis } from '@/lib/uploadAnalysisCache';
 import { toActiveCaseContext } from '@/lib/workspace/activeCaseContext';
 import { canSwitchWorkspaceMode, deriveGenerationDisplayPercentage } from '@/lib/legal-engine/generationUi';
+import { useExternalProviderConsent } from './components/ExternalProviderConsentDialog';
 
 export type LegalWorkspaceMode =
   | WorkspaceModule
@@ -127,6 +131,7 @@ export default function MachotesPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [requestExternalProviderConsent, externalProviderConsentDialog, authorizedExternalProviders] = useExternalProviderConsent();
   const initialTab = (searchParams.get('tab') as LegalWorkspaceMode) || 'inicio';
   const validTabs: LegalWorkspaceMode[] = ['inicio', 'universal', 'initial_writings', 'responses_resources', 'my-templates', 'expedientes', 'terminos', 'jurisprudencia', 'biblioteca', 'alertas', 'configuracion', 'ayuda'];
   const [activeNavTab, setActiveNavTab] = useState<LegalWorkspaceMode>(
@@ -1400,9 +1405,9 @@ export default function MachotesPage() {
       notify('warning', 'Ya hay una generación en curso. Por favor espera.');
       return;
     }
-    const externalProviderOptIn = window.confirm('Para generar este borrador se enviará contenido del expediente a Gemini, Groq o NVIDIA. ¿Autorizas ese envío solo para esta generación? El expediente seguirá marcado como privado.');
+    const externalProviderOptIn = await requestExternalProviderConsent();
     if (!externalProviderOptIn) {
-      notify('warning', 'Generación cancelada: no se autorizó el uso de proveedores externos.');
+      notify('warning', 'Generación no iniciada: elegiste no enviar el expediente a proveedores externos. No se envió ningún dato.');
       return;
     }
     genIsGeneratingRef.current = true;
@@ -1478,6 +1483,7 @@ export default function MachotesPage() {
           workflow: requestWorkflow,
           idempotencyKey: generationId,
           externalProviderOptIn,
+          authorizedExternalProviders: authorizedExternalProviders(),
         }),
       });
 
@@ -1574,6 +1580,12 @@ export default function MachotesPage() {
       notify('warning', 'No se regeneró el apartado: falta confirmar el borrador de un tipo no acreditado.');
       return;
     }
+    // Consentimiento por solicitud: regenerar un apartado vuelve a enviar contenido del expediente.
+    const sectionExternalProviderOptIn = await requestExternalProviderConsent();
+    if (!sectionExternalProviderOptIn) {
+      notify('warning', 'No se regeneró el apartado: elegiste no enviar el expediente a proveedores externos. No se envió ningún dato.');
+      return;
+    }
     setIsUniversalGenerating(true);
     notify('warning', mode === 'reformular' ? 'Reformulando apartado…' : mode === 'ampliar' ? 'Ampliando apartado…' : 'Reduciendo apartado…');
     try {
@@ -1585,6 +1597,8 @@ export default function MachotesPage() {
           sectionId: activeSection.id,
           instruction: REFINEMENT_INSTRUCTIONS[mode],
           uncertifiedDraftAcknowledged: sectionAcknowledgement,
+          externalProviderOptIn: sectionExternalProviderOptIn,
+          authorizedExternalProviders: authorizedExternalProviders(),
         }),
       });
       if (!res.ok) {
@@ -1635,6 +1649,12 @@ export default function MachotesPage() {
       notify('warning', 'No se regeneró el apartado: falta confirmar el borrador de un tipo no acreditado.');
       return;
     }
+    // Consentimiento por solicitud: regenerar un apartado vuelve a enviar contenido del expediente.
+    const sectionExternalProviderOptIn = await requestExternalProviderConsent();
+    if (!sectionExternalProviderOptIn) {
+      notify('warning', 'No se regeneró el apartado: elegiste no enviar el expediente a proveedores externos. No se envió ningún dato.');
+      return;
+    }
     setIsUniversalGenerating(true);
     notify('warning', 'Actualizando apartado con IA...');
 
@@ -1642,7 +1662,7 @@ export default function MachotesPage() {
       const res = await fetch('/api/legal-engine/generate-section', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document: universalDoc, sectionId, instruction, uncertifiedDraftAcknowledged: sectionAcknowledgement }),
+        body: JSON.stringify({ document: universalDoc, sectionId, instruction, uncertifiedDraftAcknowledged: sectionAcknowledgement, externalProviderOptIn: sectionExternalProviderOptIn, authorizedExternalProviders: authorizedExternalProviders() }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => null);
@@ -1703,6 +1723,7 @@ export default function MachotesPage() {
     generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
     draftDepth?: 'PROFESSIONAL_20' | 'EXTENSIVE_40';
     pageTarget?: { preset?: string; pages?: number };
+    caseDossier?: CaseDossier;
     uncertifiedDraftAcknowledged?: boolean;
   }) => {
     const userInstructions = typeof request === 'string' ? request : request.userInstructions;
@@ -1713,6 +1734,7 @@ export default function MachotesPage() {
     const generationExtensionFromUi = typeof request === 'string' ? undefined : request.generationExtension;
     const draftDepthFromUi = typeof request === 'string' ? undefined : request.draftDepth;
     const pageTargetFromUi = typeof request === 'string' ? undefined : request.pageTarget;
+    const caseDossierFromUi = typeof request === 'string' ? undefined : request.caseDossier;
     const referenceDocumentIdFromUi = typeof request === 'string' ? undefined : request.referenceDocumentId;
     const referenceDocumentTextFromUi = typeof request === 'string' ? undefined : request.referenceDocumentText;
     if (!selectedDocumentTypeFromUi || !canGenerateDocumentDraft(selectedDocumentTypeFromUi, uncertifiedDraftAcknowledged)) {
@@ -1724,9 +1746,9 @@ export default function MachotesPage() {
       notify('warning', 'Ya hay una generación en curso. Por favor espera.');
       return;
     }
-    const externalProviderOptIn = window.confirm('Para generar este borrador se enviará contenido del expediente a Gemini, Groq o NVIDIA. ¿Autorizas ese envío solo para esta generación? El expediente seguirá marcado como privado.');
+    const externalProviderOptIn = await requestExternalProviderConsent();
     if (!externalProviderOptIn) {
-      notify('warning', 'Generación cancelada: no se autorizó el uso de proveedores externos.');
+      notify('warning', 'Generación no iniciada: elegiste no enviar el expediente a proveedores externos. No se envió ningún dato.');
       return;
     }
     genIsGeneratingRef.current = true;
@@ -1809,7 +1831,10 @@ export default function MachotesPage() {
           generationExtension: generationExtensionFromUi || { generationMode: 'standard' },
           draftDepth: draftDepthFromUi,
           pageTarget: pageTargetFromUi,
+          // Con ficha confirmada el servidor exige el contrato del escrito y separa notas y citas al anexo de revisión.
+          ...(caseDossierFromUi ? { caseDossier: caseDossierFromUi, requireCaseDossier: true, separateReviewAnnex: true } : {}),
           externalProviderOptIn,
+          authorizedExternalProviders: authorizedExternalProviders(),
           idempotencyKey: genId2,
         }),
       });
@@ -2242,6 +2267,7 @@ export default function MachotesPage() {
 
   return (
     <div data-active-tab={activeNavTab} className="machotes-shell h-[calc(100dvh-64px)] flex flex-col font-sans select-none overflow-hidden bg-[#f4f7f9]">
+      {externalProviderConsentDialog}
       <style>{`
         /* Machotes: la aplicación usa Vanilla CSS, no Tailwind. Esta capa hace explícitas
            las utilidades que esta pantalla necesita y fija el layout de referencia. */
@@ -3542,7 +3568,7 @@ export default function MachotesPage() {
 
                   ) : (
           /* TAB 1 / ESCRITOS EN MODO EDITOR: VISOR PAGINADO (toolbar consolidada DENTRO del editor) */
-          <div className="flex w-full min-h-0 min-w-0 overflow-hidden flex-col">
+          <div data-testid="document-editor-frame" className="flex w-full h-full flex-1 min-h-0 min-w-0 overflow-hidden flex-col">
             {(() => {
               const result = (universalDoc?.generationMetadata as { pageTargetResult?: PageTargetResult } | undefined)?.pageTargetResult;
               if (!result) return null;
@@ -3553,6 +3579,7 @@ export default function MachotesPage() {
                 </p>
               );
             })()}
+            <ReviewAnnexPanel annex={(universalDoc?.generationMetadata as { reviewAnnex?: ReviewAnnex } | undefined)?.reviewAnnex} />
             <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
               <WorkspaceDocumentEditor
                 document={universalDoc}

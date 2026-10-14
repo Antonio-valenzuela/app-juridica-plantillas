@@ -47,6 +47,8 @@ export type FamiliaDocumental =
   | 'PROPIEDAD_INTELECTUAL';
 
 export type RolProcesal =
+  | 'apelante'
+  | 'apelado'
   | 'demandado'
   | 'actor'
   | 'quejoso'
@@ -446,6 +448,19 @@ const RECURSO_STRUCTURE = [
   'ANTECEDENTES',
   'AGRAVIOS',
   'PETITORIOS',
+  'FIRMA',
+];
+
+/** Estructura FIJA de la contestación de agravios (parte apelada): solo estas secciones y en este orden. */
+export const CONTESTACION_AGRAVIOS_STRUCTURE = [
+  'RUBRO Y DESTINATARIO',
+  'PROEMIO',
+  'OPORTUNIDAD',
+  'SÍNTESIS DE LA SENTENCIA APELADA',
+  'CONTESTACIÓN A LOS AGRAVIOS',
+  'CONSTANCIAS INVOCADAS',
+  'PUNTOS PETITORIOS',
+  'LUGAR Y FECHA',
   'FIRMA',
 ];
 
@@ -2368,6 +2383,38 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
     reglas: ['Identifica la resolución impugnada, fecha de notificación y oportunidad procesal en que se interpone.'],
     reglasArgumentacion: ['Cada agravio debe expresar la parte de la resolución combatida, el precepto violado y el concepto de violación.'],
     reglasPrueba: ['Remite a las constancias de autos que demuestren la infracción legal cometida por el juzgador de origen.'],
+  }),
+
+  contestacion_agravios: def({
+    tipo: 'contestacion_agravios',
+    etiquetas: ['contestación de agravios', 'contestación a los agravios', 'contestación a la apelación', 'respuesta a la apelación'],
+    materia: 'CIVIL',
+    jurisdiccion: 'local civil',
+    via: 'segunda instancia civil',
+    procedimiento: 'CONTESTACION_AGRAVIOS',
+    subtipo: 'contestación de agravios (parte apelada)',
+    rolAutor: 'apelado',
+    rolContraparte: 'apelante',
+    destinatario: 'órgano jurisdiccional competente',
+    objetivoProcesal: 'Contestar uno por uno los agravios del apelante y solicitar que se confirme la sentencia apelada.',
+    estructura: CONTESTACION_AGRAVIOS_STRUCTURE,
+    voz: ['Habla la PARTE APELADA (a quien favoreció la sentencia) respondiendo los agravios del apelante.'],
+    vozPrompt: 'Actúa como abogado postulante de la PARTE APELADA. Contesta los agravios del apelante: defiende la sentencia apelada, nunca la combatas ni interpongas recurso.',
+    camposObligatorios: ['órgano jurisdiccional', 'expediente', 'parte apelada', 'parte apelante', 'sentencia apelada', 'agravios del apelante', 'contestación a cada agravio', 'petitorios'],
+    camposOpcionales: ['anexos', 'domicilio para notificaciones'],
+    reglas: [
+      'Responde un agravio por bloque, en su orden, y califícalo como infundado, inoperante o inatendible solo con apoyo en lo que la sentencia resolvió y en constancias del expediente.',
+      'No inventes agravios: si falta la apelación del contrario, pide el documento.',
+      'Termina solicitando que se confirme la sentencia apelada.',
+    ],
+    reglasArgumentacion: ['Cada respuesta identifica el agravio, la razón por la que no prospera y la parte de la sentencia o la constancia que la respalda.'],
+    reglasPrueba: ['Remite solo a constancias que obran en el expediente; no ofrezcas pruebas nuevas sin instrucción del abogado.'],
+    reglasFirma: ['La firma corresponde EXCLUSIVAMENTE a la parte apelada o a su apoderado; nunca al apelante.'],
+    prohibiciones: [
+      ...PROHIBICIONES_BASE,
+      'PROHIBIDO interponer recurso, expresar agravios propios o pedir que se revoque o modifique la sentencia: quien habla es la parte apelada.',
+      'PROHIBIDO incluir notas, riesgos o consejos al abogado dentro del escrito.',
+    ],
   }),
 
   revocacion_civil: specializedProceduralTemplate({
@@ -6462,7 +6509,13 @@ export function resolveTemplateByExplicitLabel(label?: string): DocumentTemplate
 }
 
 /** true si el tipo pertenece a la familia CONTESTACIÓN (esqueleto dedicado). */
+/** Contestación de agravios (parte apelada): contesta una apelación, no una demanda. */
+export function isAgraviosAnswerType(documentType?: string, documentTypeLabel?: string): boolean {
+  return documentType === 'contestacion_agravios' || /contestaci[oó]n\s+(?:de|a\s+los)\s+agravios/i.test(documentTypeLabel || '');
+}
+
 export function isContestacionType(documentType?: string, documentTypeLabel?: string): boolean {
+  if (isAgraviosAnswerType(documentType, documentTypeLabel)) return false;
   return /contestaci/i.test(documentType || '') || /contestaci/i.test(documentTypeLabel || '');
 }
 

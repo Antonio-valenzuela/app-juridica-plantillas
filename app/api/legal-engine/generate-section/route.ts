@@ -6,6 +6,7 @@ import { readDocumentExportReadiness } from '@/lib/legal-engine/documentLifecycl
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
+import { explicitAuthorizedProviders, explicitExternalProviderConsent } from '@/lib/ai/caseProviderConsent';
 import {
   getDraftRegenerationRoutingError,
   getUncertifiedDraftAcknowledgementError,
@@ -51,7 +52,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, ...acknowledgementError }, { status: 422 });
     }
 
-    const res = await generateSection(document as UniversalLegalDocument, sectionId, instruction);
+    // El consentimiento de envío externo vale por solicitud: nunca se hereda del documento que envía el
+    // navegador (un borrador generado con consentimiento conserva `externalProviderOptIn: true`).
+    const scopedDocument = {
+      ...(document as UniversalLegalDocument),
+      generationMetadata: {
+        ...((document as UniversalLegalDocument).generationMetadata || {}),
+        externalProviderOptIn: explicitExternalProviderConsent(body.externalProviderOptIn),
+        authorizedExternalProviders: explicitAuthorizedProviders(body.authorizedExternalProviders),
+      },
+    } as UniversalLegalDocument;
+    const res = await generateSection(scopedDocument, sectionId, instruction);
 
     if (res.aiUsed !== true) {
       return NextResponse.json(

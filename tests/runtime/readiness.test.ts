@@ -41,3 +41,19 @@ describe('runtime readiness', () => {
     expect(result.overall).toBe('READY');
   });
 });
+
+describe('almacenamiento de uploads en una instalación nueva', () => {
+  it('acepta una carpeta aún no creada si su ancestro existente es escribible, y rechaza una ruta imposible', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { isWritableOrCreatable } = await import('@/lib/runtime/readiness');
+    const base = await mkdtemp(path.join(os.tmpdir(), 'lex-readiness-'));
+    try {
+      expect(await isWritableOrCreatable(path.join(base, 'documents', 'templates'))).toBe(true);
+      expect(await isWritableOrCreatable(base)).toBe(true);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});

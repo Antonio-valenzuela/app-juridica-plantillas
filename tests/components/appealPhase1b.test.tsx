@@ -16,6 +16,7 @@ vi.mock('@/lib/catalog/legalCatalog', async importOriginal => {
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { CaseDocumentsReader } from '@/app/machotes/components/CaseDocumentsReader';
+import { confirmCaseDossierInUi } from '../helpers/confirmCaseDossier';
 import { extractAppealResolutionReview, selectPrimaryAppealResolution } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { appealResolutionSource } from '../fixtures/appealResolutionSource';
 afterEach(cleanup);
@@ -65,6 +66,7 @@ it('1.3a pressing Generate goes straight to the draft with the provisional data:
   const generate = vi.fn();
   const { container } = render(<CaseDocumentsReader {...props} onGenerateResponse={generate} />);
   choose(container, 'apelacion_civil');
+  confirmCaseDossierInUi();
   const generateButton = screen.getByRole('button', { name: /Generar apelación/ }) as HTMLButtonElement;
   expect(generateButton.disabled).toBe(false);
   fireEvent.click(generateButton);
@@ -83,6 +85,7 @@ it('1.3b the chosen type is kept: the request carries the lawyer\'s selection, n
   const generate = vi.fn();
   const { container } = render(<CaseDocumentsReader {...props} onGenerateResponse={generate} />);
   choose(container, 'apelacion_familiar');
+  confirmCaseDossierInUi();
   fireEvent.click(screen.getByRole('button', { name: /Generar apelación/ }));
   expect(generate.mock.calls[0][0].selectedDocumentType).toBe('apelacion_familiar');
 });
@@ -99,8 +102,10 @@ it('2 leaves no appeal residue on a response, and blocks the response on the rea
   choose(container, 'contestacion_demanda_civil');
   // Sin residuos del flujo de apelación.
   expect(screen.queryByLabelText('Resolución a impugnar')).toBeNull();
-  const field = screen.getByPlaceholderText(/Ej. Elabora recurso/);
+  fireEvent.click(screen.getByTestId("contestaciones-more-options"));
+  const field = screen.getByLabelText("Instrucción directa (opcional)");
   fireEvent.change(field, { target: { value: 'Contestar conforme a la instrucción expresa del abogado.' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Listo' }));
   // Contrato vigente: una resolución judicial NO es compatible con una
   // contestación de demanda. El bloqueo debe ser el de FUENTE, no uno de
   // apelación: ese es el requisito de aislamiento que este test protege.
@@ -112,6 +117,7 @@ it('2 leaves no appeal residue on a response, and blocks the response on the rea
   // Al volver a Apelación el flujo propio de apelación vuelve a estar disponible.
   choose(container, 'apelacion_civil');
   expect(screen.getByLabelText('Resolución a impugnar')).toBeTruthy();
+  confirmCaseDossierInUi();
   expect((screen.getByRole('button', { name: /Generar apelación/ }) as HTMLButtonElement).disabled).toBe(false);
 });
 it('2 a different PDF invalidates the lawyer\'s ratification: the request carries the NEW source revision as provisional', () => {
@@ -120,6 +126,7 @@ it('2 a different PDF invalidates the lawyer\'s ratification: the request carrie
   const changed = structuredClone(appealResolutionSource); changed.id = 'second-pdf';
   rerender(<CaseDocumentsReader {...props} sourceDocs={[changed]} onGenerateResponse={generate} />);
   expect(summary().getAllByText('Por confirmar').length).toBeGreaterThan(0);
+  confirmCaseDossierInUi();
   fireEvent.click(screen.getByRole('button', { name: /Generar apelación/ }));
   const sent = generate.mock.calls.at(-1)![0].appealConfirmation;
   const review = extractAppealResolutionReview([changed]);
@@ -129,7 +136,9 @@ it('2 a different PDF invalidates the lawyer\'s ratification: the request carrie
 it('2 does not send an appeal contract in a response request', () => {
   const generate = vi.fn(); const { container } = render(<CaseDocumentsReader {...props} onGenerateResponse={generate} />);
   choose(container, 'apelacion_civil'); choose(container, 'contestacion_demanda_civil');
-  fireEvent.change(screen.getByPlaceholderText(/Ej. Elabora recurso/), { target: { value: 'Contestar conforme a la instrucción expresa del abogado.' } });
+  fireEvent.click(screen.getByTestId("contestaciones-more-options"));
+  fireEvent.change(screen.getByLabelText("Instrucción directa (opcional)"), { target: { value: 'Contestar conforme a la instrucción expresa del abogado.' } });
+  fireEvent.click(screen.getByRole("button", { name: "Listo" }));
   // Aislamiento: el flujo de contestación NO puede arrastrar el contrato de
   // apelación. Con una resolución judicial la respuesta está bloqueada, así
   // que además no se emite ninguna petición.

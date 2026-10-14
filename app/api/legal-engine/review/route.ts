@@ -8,6 +8,7 @@ import type { UniversalLegalDocument } from '@/lib/legal-engine/types';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
+import { explicitAuthorizedProviders, explicitExternalProviderConsent } from '@/lib/ai/caseProviderConsent';
 import {
   getDraftRegenerationRoutingError,
   getUncertifiedDraftAcknowledgementError,
@@ -41,6 +42,12 @@ export async function POST(request: NextRequest) {
 
     const document = await loadWorkspaceGenerationArtifact(auth.context, documentId);
     if (!document) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
+    // El artefacto guardado conserva el consentimiento de su generación original; el de esta solicitud es independiente.
+    document.generationMetadata = {
+      ...(document.generationMetadata || {}),
+      externalProviderOptIn: explicitExternalProviderConsent(body.externalProviderOptIn),
+      authorizedExternalProviders: explicitAuthorizedProviders(body.authorizedExternalProviders),
+    } as typeof document.generationMetadata;
     const reviewRequest = buildReviewRequest(document);
     const validIds = new Set(reviewRequest.pendingItems.map((item) => item.id));
     const invalid = answers.find((answer: any) => typeof answer?.itemId !== 'string' || !validIds.has(answer.itemId) || typeof answer?.answer !== 'string' || !answer.answer.trim());

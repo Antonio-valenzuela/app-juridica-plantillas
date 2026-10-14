@@ -19,6 +19,8 @@ describe('contestaciones: toda sección obligatoria declarada existe en la salid
     const { titles, body } = await generateWithFixture(id);
     // Si una sección obligatoria desaparece del documento, esta aserción falla.
     expect(missingRequiredSections(identity.requiredSections, titles), `${id} perdió secciones`).toEqual([]);
+    // La contestación de agravios responde agravios, no narra hechos del litigio (su cobertura está en contestacionAgravios.test.ts).
+    if (id === 'contestacion_agravios') return;
     for (const token of FACT_TOKENS) expect(body, `${id} perdió ${token}`).toContain(token);
   }, 120_000);
 });

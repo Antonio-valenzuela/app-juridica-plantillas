@@ -19,8 +19,8 @@ describe('contrato de identidad de tipos de escritos', () => {
     expect(census.canonicalTypes + census.variants).toBe(census.visibleTypes);
   });
 
-  it('el contrato real es 265 generables + 12 bloqueados por estado de producto', () => {
-    expect(GABLE.length).toBe(265);
+  it('el contrato real es 266 generables + 12 bloqueados por estado de producto', () => {
+    expect(GABLE.length).toBe(266);
     expect(BLOCKED.length).toBe(12);
     expect(GABLE.length + BLOCKED.length).toBe(identities.length);
     for (const identity of GABLE) expect(identity.functionalStatus).toBe('PASS');

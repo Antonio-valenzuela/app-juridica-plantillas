@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { withOfficialRetry, type OfficialRetryOptions } from '../officialFetch';
 import { stableResearchId } from '../canonical';
 import { normalizeLegalAuthority } from '../legalAuthority';
 import type { AuthorityCandidate } from '../types';
@@ -12,6 +13,8 @@ const hash = (body: Uint8Array | string) => createHash('sha256').update(body).di
 const normalize = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 export interface JaliscoAdapterConfig {
+  /** Reintentos y ritmo de peticiones a la fuente oficial. */
+  retry?: OfficialRetryOptions;
   fetch?: OfficialFetch;
   clock?: () => Date;
   timeoutMs?: number;
@@ -44,7 +47,7 @@ function date(raw: string): string | null {
 
 /** Same search/retrieve contract as the federal adapters. Verification remains external. */
 export function createJaliscoAdapter(config: JaliscoAdapterConfig = {}): LegalResearchProvider {
-  const fetcher = config.fetch || fetch;
+  const fetcher = withOfficialRetry(config.fetch || fetch, config.retry);
   const clock = config.clock || (() => new Date());
   const candidates = new Map<string, AuthorityCandidate>();
   async function download(raw: string) {

@@ -111,6 +111,14 @@ export function classifyPageStart(pageText: string, ignoredHeaders: ReadonlySet<
   }
   const contestacion = head5.find((line) => /^(?:contestacion|se\s+contesta)\b.*\bdemanda\b/.test(line));
   if (contestacion) return { kind: 'CONTESTACION', evidence: contestacion, confidence: 0.9 };
+  // Escritos sin título (rubro «C. JUEZ… PRESENTE» y comparecencia): la fórmula del proemio decide.
+  if (partyWriting && /\bvengo\s+a\s+(?:dar\s+)?contesta(?:r|cion)\b[^.]{0,40}\bdemanda\b/.test(full)) {
+    return { kind: 'CONTESTACION', evidence: 'comparecencia que contesta la demanda', confidence: 0.85 };
+  }
+  const amparoRequest = /\b(?:solicit(?:o|ar)\s+el\s+amparo|demanda\s+de\s+amparo|juicio\s+de\s+amparo|amparo\s+y\s+proteccion)\b/.test(full);
+  if (partyWriting && initiation && pleadingStructure && !amparoRequest) {
+    return { kind: 'DEMANDA', evidence: 'comparecencia que inicia la acción (hechos y prestaciones)', confidence: 0.9 };
+  }
   const replica = head5.find((line) => /^replica\b/.test(line));
   if (replica) return { kind: 'REPLICA', evidence: replica, confidence: 0.85 };
   const duplica = head5.find((line) => /^duplica\b/.test(line));
@@ -122,8 +130,13 @@ export function classifyPageStart(pageText: string, ignoredHeaders: ReadonlySet<
 
   // Resoluciones: foro emisor en el encabezado + fórmula dispositiva. Una parte que
   // comparece ("por mi propio derecho…") nunca emite una resolución.
-  const forumInHead = head5.some((line) => FORUM_RE.test(line));
   const hasDate = DATE_RE.test(head);
+  // El juzgado suele repetirse como encabezado corriente en todas las fojas y por eso se filtra; en la foja
+  // que ABRE el acto sigue siendo el foro emisor. Solo cuenta si el contenido abre con fecha y «Visto…»: una
+  // foja de continuación no inicia un acto.
+  const opensResolution = lines.slice(0, 6).some((line) => /^(?:visto|vistos|vista|vistas|con\s+el\s+escrito\s+de\s+cuenta|se\s+(?:tiene|acuerda))\b/.test(line));
+  const forumInHead = head5.some((line) => FORUM_RE.test(line))
+    || (hasDate && opensResolution && headOf(pageText, 5).some((line) => FORUM_RE.test(line)));
   const formula = RESOLUTION_FORMULA_RE.test(head) || /(?:^|\n)\s*(?:primero|unico)[.:]/.test(full);
   if (!partyWriting && forumInHead && formula && (hasDate || /\b(?:sentencia|ejecutoria|laudo)\b/.test(lines.slice(0, 4).join(' ')))) {
     // Solo líneas de ENCABEZADO (cortas): una frase como «cita para oír sentencia definitiva»
@@ -134,6 +147,10 @@ export function classifyPageStart(pageText: string, ignoredHeaders: ReadonlySet<
     }
     if (/\b(?:ejecutoria|amparo\s+directo)\b/.test(titleLines) && /\btribunal\s+colegiado\b/.test(full)) {
       return { kind: 'SENTENCIA_AMPARO', evidence: 'ejecutoria de amparo', confidence: 0.9 };
+    }
+    // Sentencia de amparo indirecto: la dicta un Juzgado de Distrito dentro de un «juicio de amparo».
+    if (/\bsentencia\b/.test(titleLines) && /\b(?:juicio\s+de\s+amparo|amparo\s+indirecto|juzgado\s+\w+\s+de\s+distrito)\b/.test(full)) {
+      return { kind: 'SENTENCIA_AMPARO', evidence: 'sentencia de amparo indirecto', confidence: 0.85 };
     }
     if (/\blaudo\b/.test(titleLines)) return { kind: 'LAUDO', evidence: 'laudo', confidence: 0.9 };
     const definitive = /\bsentencia\s+definitiva\b/.test(titleLines)

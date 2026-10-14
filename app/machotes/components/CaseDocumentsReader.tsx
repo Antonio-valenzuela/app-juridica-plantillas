@@ -12,12 +12,18 @@ import {
   inferSourceMatterForDocuments,
   inferSourceOutputType,
 } from '@/lib/legal-engine/sourceOutputCompatibility';
+import { proposeActuaciones } from '@/lib/legal-engine/actuacionProposal';
+import { describeIncompatibleSource } from '@/lib/apiErrorMessage';
+import { ActuacionProposalCard } from './ActuacionProposalCard';
 
 import { ContestacionesExpedienteCard, type ExpedienteFichaData, type ExpedienteFieldStatus } from './ContestacionesExpedienteCard';
 import { ContestacionesAnalysisPanel } from './ContestacionesAnalysisPanel';
 import { ContestacionesConfigPanel } from './ContestacionesConfigPanel';
 import { ContestacionesChecklist } from './ContestacionesChecklist';
 import { AppealResolutionReviewPanel } from './AppealResolutionReviewPanel';
+import { CaseDossierPanel, type CaseDossierState } from './CaseDossierPanel';
+import type { CaseDossier } from '@/lib/legal-engine/caseDossier';
+import { getWritingContract } from '@/lib/legal-engine/writingContract';
 import { AppealReasoningAiReview } from './AppealReasoningCandidatesPanel';
 import { extractAppealReasoningCandidates } from '@/lib/legal-engine/case-extraction/appealReasoningCandidates';
 import { deriveProvisionalAppealConfirmation, extractAppealResolutionReview, isCivilFamilyAppeal, resolveAppealGeneration, selectPrimaryAppealResolution, validateAppealConfirmation, type AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
@@ -42,6 +48,8 @@ export interface CaseDocumentsReaderProps {
     /** Meta de extensión elegida (5/10/20/40/personalizada); el servidor la vuelve a validar. */
     pageTarget?: PageTarget;
     appealConfirmation?: AppealConfirmation;
+    /** Ficha del caso confirmada por el abogado (con la parte que representa). */
+    caseDossier?: CaseDossier;
     uncertifiedDraftAcknowledged?: boolean;
   }) => void;
   onOpenEditor?: () => void;
@@ -279,6 +287,8 @@ export function CaseDocumentsReader({
   const [selectedResponseType, setSelectedResponseType] = useState<string>(RESPONSE_DOCUMENT_TYPES[0]?.value || '');
   const [showUncertifiedDrafts, setShowUncertifiedDrafts] = useState(false);
   const userHasManuallyChangedDocTypeRef = useRef(false);
+  // Actuación que el abogado eligió o confirmó expresamente (no la preseleccionada por el sistema).
+  const [confirmedActuacion, setConfirmedActuacion] = useState<string | null>(null);
   const [generationMode, setGenerationMode] = useState<'automatic' | 'personal_template' | 'reference_document'>('automatic');
   // Extensión del escrito: se recuerda por expediente (y por sesión si aún no hay expediente).
   const pageTargetStorageKey = `lex:page-target:${String(caseFicha?.expediente || '').trim().toLowerCase().replace(/\s+/g, '') || 'sesion'}`;
@@ -298,6 +308,7 @@ export function CaseDocumentsReader({
     } catch { /* la elección sigue vigente en esta pantalla aunque no pueda persistirse */ }
   };
   const [selectedMachoteId, setSelectedMachoteId] = useState<string>('');
+  const [dossierState, setDossierState] = useState<CaseDossierState>({ problems: [] });
   const [appealConfirmation, setAppealConfirmation] = useState<AppealConfirmation>();
   const appealReview = useMemo(() => isCivilFamilyAppeal(selectedResponseType) ? extractAppealResolutionReview(sourceDocs) : undefined, [sourceDocs, selectedResponseType]);
   useEffect(() => { setAppealConfirmation(undefined); }, [selectedResponseType, appealReview?.sourceFingerprint]);
@@ -370,7 +381,14 @@ export function CaseDocumentsReader({
   ));
   const selectedOutputIsAppeal = /^(?:apelacion_|recurso_(?:revision|queja|reclamacion))/i.test(selectedResponseType);
 
-  const suggestedDocType = useMemo(() => {
+  // Propuesta por segmentación de actos: la naturaleza del acto controlante (no la primera mención de
+  // «demanda», «auto» o «sentencia») orienta las actuaciones posibles, todas generables y compatibles.
+  // La elección expresa del abogado sobrevive a un cambio de PDF (como el tipo de escrito elegido); la
+  // compatibilidad con la nueva fuente se vuelve a evaluar igualmente.
+  const actuacionProposal = useMemo(() => (sourceDocs && sourceDocs.length > 0 ? proposeActuaciones(sourceDocs) : null), [sourceDocs]);
+
+  // Heurística previa por materia: solo cuando no hay propuesta (sin documento).
+  const legacySuggestedDocType = useMemo(() => {
     if (inferredSourceType === 'SENTENCIA_AMPARO_DIRECTO') {
       return 'recurso_revision_amparo_directo';
     }
@@ -403,6 +421,7 @@ export function CaseDocumentsReader({
     }
     return undefined;
   }, [inferredSourceType, inferredMatter, isJudgmentSource]);
+  const suggestedDocType = actuacionProposal ? (actuacionProposal.recommended ?? undefined) : legacySuggestedDocType;
 
   const checkDocCompatibility = useCallback(
     (docType: string): { compatible: boolean; reason?: string; advisories?: Array<{ code: string; message: string }> } => {
@@ -422,7 +441,10 @@ export function CaseDocumentsReader({
       } catch (err: any) {
         return {
           compatible: false,
-          reason: err?.message || 'Este escrito pertenece a otra materia y no corresponde al expediente analizado.',
+          // El abogado ve la explicación en lenguaje llano, nunca el código interno ni los identificadores.
+          reason: err?.code === 'SOURCE_DOCUMENT_INCOMPATIBLE'
+            ? describeIncompatibleSource({ message: err.message, errorMetadata: err.metadata })
+            : err?.message || 'Este escrito pertenece a otra materia y no corresponde al expediente analizado.',
         };
       }
     },
@@ -454,9 +476,16 @@ export function CaseDocumentsReader({
     for (const item of getContestacionesDocumentOptions({ includeUncertifiedDrafts: showUncertifiedDrafts })) {
       map.set(item.value, { value: item.value, label: item.label });
     }
+    // Actuaciones propuestas para ESTE documento (p. ej. contestación de divorcio, reconvención, revocación,
+    // desahogo de vista): son tipos generables y compatibles con la fuente aunque no estén en la lista base.
+    for (const item of actuacionProposal?.candidates ?? []) {
+      if (!map.has(item.documentType)) map.set(item.documentType, { value: item.documentType, label: item.label });
+    }
+    const libre = map.get('redaccion_libre');
+    if (libre) { map.delete('redaccion_libre'); map.set('redaccion_libre', libre); }
 
     return Array.from(map.values());
-  }, [showUncertifiedDrafts]);
+  }, [showUncertifiedDrafts, actuacionProposal]);
 
   const selectedDocOption = useMemo(() => {
     return (
@@ -532,6 +561,9 @@ export function CaseDocumentsReader({
       : /^recurso/.test(selectedResponseType) ? 'Generar recurso' : 'Generar escrito';
   const requestedResponseType = selectedResponseType === 'redaccion_libre' ? suggestedDocType || 'escrito_libre' : selectedResponseType;
   const responseFunctionalStatus = getFunctionalDocumentStatus(requestedResponseType);
+  // Todo escrito con parte firmante pasa por la ficha del caso (solo si hay un documento fuente del que extraerla).
+  const showCaseDossier = Boolean(selectedDoc && sourceDocs.length > 0 && getWritingContract(requestedResponseType).needsRepresentation);
+  const dossierSourceKey = sourceDocs.map((source) => source.id).join('|');
   // ¿Puede generarse el borrador de apelación? Basta la resolución principal detectada o la ratificada.
   const appealResolutionConfirmed = Boolean(appealReview && resolveAppealGeneration(appealReview, effectiveAppealConfirmation).canGenerate);
   // Flujo activo: cada workflow evalúa ÚNICAMENTE sus propios requisitos.
@@ -541,7 +573,11 @@ export function CaseDocumentsReader({
   // ofrece cambiar a Apelación (afordance en la sección de fuente), pero el
   // usuario que eligió conscientemente contestación no queda atrapado. Para
   // Apelación sí es requisito implícito haber detectado la resolución.
-  const judgmentSourceNeedsAppeal = isJudgmentSource && !isAppealFlow;
+  // Solo una CONTESTACIÓN exige una demanda: otras actuaciones contra una resolución (amparo, revocación,
+  // promoción, desahogo…) no son una apelación y no deben bloquearse por ello; su compatibilidad la decide
+  // la matriz fuente→salida.
+  const judgmentSourceNeedsAppeal = isJudgmentSource && !isAppealFlow && /^contestacion_/.test(selectedResponseType);
+  const actuacionNeedsConfirmation = Boolean(actuacionProposal?.requiresConfirmation && selectedDoc && confirmedActuacion !== selectedResponseType);
   const effectiveCompatible = currentDocCompatibility.compatible;
 
   const generationBlockers: GenerationBlocker[] = [];
@@ -574,6 +610,14 @@ export function CaseDocumentsReader({
         label: 'No se pudo preparar la resolución a impugnar. Vuelve a cargar el documento.',
       });
     }
+    // La matriz fuente→salida también rige los recursos: una demanda no se impugna por apelación. Antes solo
+    // lo rechazaba el servidor tras pulsar Generar.
+    if (selectedDoc && !effectiveCompatible) {
+      generationBlockers.push({
+        code: 'SOURCE_DOCUMENT_INCOMPATIBLE', flow: 'appeal', actionable: true, step: 1,
+        label: currentDocCompatibility.reason || 'El documento cargado no corresponde a este recurso. Elige una de las actuaciones propuestas.',
+      });
+    }
   } else {
     // Requisitos EXCLUSIVOS de Contestación.
     // Una resolución judicial NO permite contestar una demanda: es una fuente
@@ -599,6 +643,21 @@ export function CaseDocumentsReader({
         label: contestacionReason,
       });
     }
+  }
+
+  // La ficha del caso es previa a redactar: el abogado la confirma y elige a quién representa (no se infiere).
+  if (showCaseDossier && !dossierState.dossier) {
+    generationBlockers.push({
+      code: 'CASE_DOSSIER_PENDING', flow: 'both', actionable: true, step: 1,
+      label: dossierState.problems[0] || 'Confirma la ficha del caso y elige a quién representas.',
+    });
+  }
+
+  if (actuacionNeedsConfirmation) {
+    generationBlockers.push({
+      code: 'ACTUACION_CONFIRMATION_PENDING', flow: 'both', actionable: true, step: 2,
+      label: 'Confirma la actuación: con este documento caben varias vías y la elección es del abogado.',
+    });
   }
 
   const generationBlockReason = generationBlockers.length ? Array.from(new Set(generationBlockers.map(b => b.label))).join(' ') : null;
@@ -636,6 +695,7 @@ export function CaseDocumentsReader({
       pageTarget,
       uncertifiedDraftAcknowledged: showUncertifiedDrafts && responseFunctionalStatus !== 'PASS',
       ...(appealReview ? { appealConfirmation: effectiveAppealConfirmation } : {}),
+      ...(showCaseDossier && dossierState.dossier ? { caseDossier: dossierState.dossier } : {}),
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
     });
@@ -648,7 +708,11 @@ export function CaseDocumentsReader({
       return;
     }
 
-    const target = isAppealFlow
+    const target = firstBlocker?.code === 'CASE_DOSSIER_PENDING'
+      ? document.querySelector<HTMLElement>('[data-testid="case-dossier-panel"]')
+      : firstBlocker?.code === 'ACTUACION_CONFIRMATION_PENDING'
+      ? document.querySelector<HTMLElement>('[data-testid="actuacion-proposal"]')
+      : isAppealFlow
       ? document.querySelector<HTMLElement>('[aria-label="Resolución a impugnar"]')
       : firstBlocker?.code === 'SOURCE_DOCUMENT_INCOMPATIBLE'
         ? document.querySelector<HTMLElement>('[data-testid="source-incompatible-notice"]')
@@ -969,6 +1033,7 @@ export function CaseDocumentsReader({
               setAppealConfirmation(undefined);
               userHasManuallyChangedDocTypeRef.current = true;
               setSelectedResponseType(val);
+              setConfirmedActuacion(val);
             }}
             documentTypeOptions={documentTypeOptions}
             generationMode={generationMode}
@@ -985,6 +1050,21 @@ export function CaseDocumentsReader({
             onShowUncertifiedDraftsChange={setShowUncertifiedDrafts}
             onUploadTemplate={onUploadTemplate}
           />
+          {selectedDoc && actuacionProposal && (
+            <ActuacionProposalCard
+              proposal={actuacionProposal}
+              selectedDocumentType={selectedResponseType}
+              confirmed={confirmedActuacion === selectedResponseType}
+              disabled={isGenerating}
+              onSelect={(value) => {
+                setAppealConfirmation(undefined);
+                userHasManuallyChangedDocTypeRef.current = true;
+                setSelectedResponseType(value);
+                setConfirmedActuacion(value);
+              }}
+              onConfirm={() => setConfirmedActuacion(selectedResponseType)}
+            />
+          )}
           <ContestacionesChecklist
             appealMode={Boolean(appealReview)}
             hasDocument={Boolean(selectedDoc)}
@@ -1000,6 +1080,7 @@ export function CaseDocumentsReader({
             onOpenEditor={selectedDoc ? onOpenEditor : undefined}
             actionLabel={generateActionLabel}
           />
+          {showCaseDossier && <CaseDossierPanel key={`${requestedResponseType}:${dossierSourceKey}`} sources={sourceDocs} documentType={requestedResponseType} onChange={setDossierState} disabled={isGenerating} />}
           {appealReview && <AppealResolutionReviewPanel key={`${selectedResponseType}:${appealReview.sourceFingerprint}`} review={appealReview} detectedExpediente={caseFicha?.expediente} onChange={setAppealConfirmation} disabled={isGenerating} />}
           {!selectedDoc && (
             <section className="lex-card lex-empty-state" aria-label="Sin documento">
@@ -1029,20 +1110,20 @@ export function CaseDocumentsReader({
           {judgmentSourceNeedsAppeal && (
             <section role="alert" data-testid="source-incompatible-notice" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
               <p className="font-bold">Este documento parece ser una resolución judicial, no una demanda.</p>
-              <p className="mt-1">Para elaborar una contestación carga la demanda. Si deseas impugnar esta resolución, cambia a Apelación.</p>
-              <button
-                type="button"
-                className="mt-2 rounded-lg border border-amber-400 bg-white px-3 py-1.5 font-semibold"
-                onClick={() => {
-                  setShowUncertifiedDrafts(true);
-                  if (suggestedDocType && /^(?:apelacion_|recurso_(?:revision|queja|reclamacion))/i.test(suggestedDocType)) {
+              <p className="mt-1">Para elaborar una contestación carga la demanda. Si deseas impugnar esta resolución, cambia a Apelación u otra de las actuaciones propuestas.</p>
+              {suggestedDocType && !/^contestacion_/.test(suggestedDocType) && (
+                <button
+                  type="button"
+                  className="mt-2 rounded-lg border border-amber-400 bg-white px-3 py-1.5 font-semibold"
+                  onClick={() => {
                     userHasManuallyChangedDocTypeRef.current = true;
                     setSelectedResponseType(suggestedDocType);
-                  }
-                }}
-              >
-                Cambiar a Apelación
-              </button>
+                    setConfirmedActuacion(suggestedDocType);
+                  }}
+                >
+                  Cambiar a {actuacionProposal?.candidates.find((item) => item.documentType === suggestedDocType)?.label || 'la actuación propuesta'}
+                </button>
+              )}
             </section>
           )}
 

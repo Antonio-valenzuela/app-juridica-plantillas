@@ -167,7 +167,7 @@ export default function AppShell({
           <LexIcon name="menu" size={19} />
         </button>
         <div className="lex-header-right">
-          <div className={`lex-build-status ${providerIndicator.tone === 'danger' ? 'is-error' : providerIndicator.tone === 'warning' ? 'is-warning' : ''}`}>
+          <div className={`lex-build-status ${providerIndicator.tone === 'danger' ? 'is-error' : providerIndicator.tone === 'warning' ? 'is-warning' : ''}`} title={providerIndicator.detail}>
             <span className="lex-status-dot" />
             <span>{providerIndicator.label}</span>
           </div>
