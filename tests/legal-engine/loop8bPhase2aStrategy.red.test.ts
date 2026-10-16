@@ -74,7 +74,21 @@ describe('LOOP 8B FASE 2A — strategy, template y catálogo civil', () => {
     expect(skeleton).toHaveLength(11);
     expect(skeleton.every((section) => section._templateId === TARGET_ID)).toBe(true);
     expect(skeleton.map((section) => section.id)).toEqual([...CIVIL_DEMAND_REQUIRED_SECTION_IDS]);
-    expect(skeleton.map((section) => section.title)).toEqual([...CIVIL_DEMAND_REQUIRED_SECTION_IDS]);
+    // El ID es contrato; el TÍTULO visible es el rótulo legible, nunca un `via_accion` crudo.
+    expect(skeleton.map((section) => section.title)).toEqual([
+      'AUTORIDAD DESTINATARIA',
+      'COMPARECENCIA',
+      'PERSONALIDAD',
+      'IDENTIFICACIÓN DE PARTES',
+      'VÍA DE LA ACCIÓN O PROCEDIMIENTO',
+      'PRESTACIONES',
+      'HECHOS',
+      'FUNDAMENTOS DE DERECHO',
+      'PRUEBAS',
+      'PETITORIOS',
+      'FIRMA',
+    ]);
+    expect(skeleton.every((section) => !/^[a-z0-9]+(_[a-z0-9]+)+$/.test(section.title))).toBe(true);
   });
 
   it('normaliza el alias de entrada al único output canonical', () => {
@@ -96,7 +110,9 @@ describe('LOOP 8B FASE 2A — strategy, template y catálogo civil', () => {
     expect(resolveTemplateByExplicitLabel(ALIAS_ID)?.tipo).toBe(TARGET_ID);
   });
 
-  it('cambia solo el target civil a IMPLEMENTED y conserva los demás catalog-only', () => {
+  // Estado vigente: las demás demandas civiles ya son IMPLEMENTED y se resuelven por la plantilla derivada de su
+  // familia (strategy/template con su propio ID); el target civil conserva su plantilla directa.
+  it('el target civil conserva su plantilla directa y las demás demandas civiles se resuelven por familia derivada', () => {
     expect(getCatalogDocument(TARGET_ID)).toMatchObject({
       kind: 'DOCUMENT_TYPE',
       status: 'IMPLEMENTED',
@@ -105,9 +121,9 @@ describe('LOOP 8B FASE 2A — strategy, template y catálogo civil', () => {
     });
     expect(getCatalogDocument('demanda_oral_civil')).toMatchObject({
       kind: 'DOCUMENT_TYPE',
-      status: 'CATALOG_ONLY',
-      strategyId: null,
-      templateId: null,
+      status: 'IMPLEMENTED',
+      strategyId: 'demanda_oral_civil',
+      templateId: 'demanda_oral_civil',
     });
   });
 });

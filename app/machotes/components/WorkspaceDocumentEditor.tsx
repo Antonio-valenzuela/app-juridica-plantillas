@@ -8,7 +8,7 @@ import { normalizeUnresolvedFieldMarkers, extractUnresolvedFieldMarkers } from '
 import { readDocumentExportReadiness, markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import { buildWorkspacePageModel } from '@/lib/legal-engine/generationUi';
 import type { ExportMode } from '@/lib/legal-engine/exportModes';
-import { canExportDocumentFinal } from '@/lib/catalog/legalCatalog';
+import { canExportDocumentFinal, getFunctionalDocumentStatus } from '@/lib/catalog/legalCatalog';
 import { LexIcon } from '@/components/layout/LexIcon';
 
 interface WorkspaceDocumentEditorProps {
@@ -897,7 +897,9 @@ export function WorkspaceDocumentEditor({
                     ) : (
                       <div className="px-3.5 py-2 text-[11px] leading-snug text-slate-500">
                         {document?.documentType && !canExportDocumentFinal(document.documentType)
-                          ? 'Exportación FINAL no disponible: tipo en desarrollo (sin certificar).'
+                          ? (getFunctionalDocumentStatus(document.documentType) === 'PASS'
+                            ? 'Exportación FINAL no disponible: la revisión jurídica de este tipo de escrito sigue pendiente. Puedes descargar un borrador.'
+                            : 'Exportación FINAL no disponible: tipo en desarrollo (sin certificar). Puedes descargar un borrador.')
                           : 'Disponible cuando se resuelvan los pendientes de revisión.'}
                       </div>
                     )}

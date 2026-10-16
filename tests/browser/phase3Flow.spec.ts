@@ -12,7 +12,7 @@ import { acceptExternalConsentOnce } from '../helpers/externalConsent';
  */
 const SHOTS = 'audit/fase3-capturas';
 const TECHNICAL_NOISE = [/pending-upload/i, /Resoluciones detectadas/, /Conflicto OCR/i, /resoluciones encontradas/i, /Detectada automáticamente/, /NEEDS_USER_INPUT/, /SOURCE_DOCUMENT/, /CONFIRMED\b/, /\{\s*"/, /\bundefined\b/, /\[object Object\]/, /e2e-/i];
-const HELP = 'La extensión es un máximo, no una meta: si los hechos, la evidencia y las reglas aplicables no dan para tanto, el escrito será más corto. El sistema no añade contenido para llenar páginas.';
+const HELP = 'La extensión es un objetivo de generación: el sistema planifica las secciones, mide el PDF y amplía con análisis respaldado por el expediente hasta alcanzarla. Si los hechos, la evidencia y las fuentes verificables no lo permiten sin repetir ni inventar, el resultado se marca «por debajo del objetivo» con el motivo. Alcanzar las páginas no valida jurídicamente el escrito.';
 
 function draftDocument(extra: Record<string, unknown> = {}) {
   return {
@@ -25,7 +25,7 @@ function draftDocument(extra: Record<string, unknown> = {}) {
     ],
     generationMetadata: {
       readiness: 'READY', qualityGate: true, validation: true, aiProvider: 'simulado',
-      pageTargetResult: { requestedPages: 20, preset: 'DETALLADO', actualPages: 3, outcome: 'WITHIN_MAX', measuredWith: 'PDF_RENDERER' },
+      pageTargetResult: { requestedPages: 20, preset: 'DETALLADO', actualPages: 3, outcome: 'BELOW_TARGET', measuredWith: 'PDF_RENDERER' },
     },
     createdAt: '2026-10-12T12:00:00.000Z', updatedAt: '2026-10-12T12:00:00.000Z', ...extra,
   };
@@ -149,7 +149,7 @@ test.describe('c. selector de extensión', () => {
     await expect(selector).toBeVisible();
     await expect(page.locator('details.lex-disclosure[open]')).toHaveCount(0);
     await expect(selector).toContainText(HELP);
-    await expect(page.getByRole('radiogroup', { name: 'Extensión máxima del escrito' })).toBeVisible();
+    await expect(page.getByRole('radiogroup', { name: 'Extensión objetivo del escrito' })).toBeVisible();
     await expect(page.getByRole('radio', { name: /Detallado/ })).toBeChecked();
     // Teclado: foco en la opción activa y flechas para cambiar.
     await page.getByRole('radio', { name: /Detallado/ }).focus();
@@ -166,7 +166,7 @@ test.describe('c. selector de extensión', () => {
     await openWithPdf(page);
 
     await pageTargetLabel(page, 'Personalizado').click();
-    const custom = page.getByLabel('Máximo de páginas');
+    const custom = page.getByLabel('Objetivo de páginas');
     await expect(custom).toBeVisible();
     for (const invalid of ['1', '100', '2.5']) {
       await custom.fill(invalid);
@@ -184,7 +184,7 @@ test.describe('c. selector de extensión', () => {
     await page.locator('input[type="file"]').first().setInputFiles({ name: 'auto-familiar-44.pdf', mimeType: 'application/pdf', buffer: autoFamiliarPdf(44) });
     await expect(page.getByTestId('page-target-selector')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('radio', { name: /Personalizado/ })).toBeChecked();
-    await expect(page.getByLabel('Máximo de páginas')).toHaveValue('33');
+    await expect(page.getByLabel('Objetivo de páginas')).toHaveValue('33');
 
     // El parámetro viaja al servidor tal como se eligió.
     await confirmProposedActuacion(page);
@@ -245,7 +245,7 @@ test.describe('f. edición, guardado, reapertura y recuperación del borrador', 
     void acceptExternalConsentOnce(page);
     await page.getByRole('button', { name: /Generar apelación/ }).click();
     await expect(page.getByText(/BORRADOR PARA REVISIÓN DEL ABOGADO/i)).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('page-target-result')).toContainText('Máximo: 20 páginas · Resultado: 3 páginas');
+    await expect(page.getByTestId('page-target-result')).toContainText('Objetivo: 20 páginas · Resultado: 3 páginas (por debajo del objetivo)');
     await expect(page.getByTestId('page-target-result')).not.toContainText('No se alcanzó');
     // El documento generado se puede recorrer: el lienzo tiene su propio scroll y llega al final.
     const canvas = page.locator('.legal-document-canvas').first();

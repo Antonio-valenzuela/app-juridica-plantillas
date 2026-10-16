@@ -343,6 +343,8 @@ it('propagates Coverage and canonical issue IDs through the document plan', () =
     etiquetas: [document.documentTypeLabel],
     materia: document.matter,
     jurisdiccion: document.jurisdiction,
+    // DocumentTemplate exige «estructura»: el plan deriva de ella las secciones donde se propagan los problemas jurídicos.
+    estructura: ['HECHOS', 'EXCEPCIONES Y DEFENSAS'],
     procedimiento: 'contestación',
     rolAutor: 'demandado',
     objetivoProcesal: 'contestar',

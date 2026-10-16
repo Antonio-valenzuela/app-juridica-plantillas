@@ -25,7 +25,7 @@ beforeEach(async () => {
   vi.stubEnv('LEX_RUNTIME_MODE', 'DESKTOP_LOCAL'); vi.stubEnv('LEX_DESKTOP_BIND_ADDRESS', '127.0.0.1');
   vi.stubEnv('LEX_DESKTOP_PORT', '3200'); vi.stubEnv('LEX_DESKTOP_CAPABILITY', capability);
   vi.stubEnv('LEX_DESKTOP_EXPIRES_AT', String(Date.now() + 60000));
-  db.organization.findUnique.mockRejectedValue(new Error('TLS connection unavailable'));
+  db.organization.findUnique.mockRejectedValue(new Error('SQLITE_CANTOPEN: unable to open database file'));
 });
 afterEach(async () => { clearCachedLawyerContext(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 const request = (path: string, headers: Record<string,string> = {}) => new NextRequest(`http://127.0.0.1:3200${path}`, { headers });

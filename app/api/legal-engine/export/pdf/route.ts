@@ -11,7 +11,7 @@ import { generateRequestId } from '@/lib/logger';
 import { resolveExportMode } from '@/lib/legal-engine/exportModes';
 import { isLocalSameOriginDraftExportRequest, UNSAVED_DRAFT_EXPORT_HEADER } from '@/lib/security/localDraftExport';
 import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
-import { canExportDocumentFinal, getFunctionalDocumentStatus } from '@/lib/catalog/legalCatalog';
+import { authorizeFinalExport, finalExportBlockedBody } from '@/lib/legal-engine/finalExportAuthorization';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -64,13 +64,15 @@ export async function POST(req: NextRequest) {
     // documento que evalúe (exportación efímera); cuando el documento está
     // guardado, el guard de exportación del documento es la autoridad y decide
     // con pendingFields, autoridades, provenance, coverage y qualityGate.
-    if (exportMode === 'FINAL' && inputDocument.documentType) {
-      const technicallyCertified = getFunctionalDocumentStatus(inputDocument.documentType) === 'PASS';
-      if (!technicallyCertified || unsavedDraftRequested) {
-        if (!canExportDocumentFinal(inputDocument.documentType)) {
-          return NextResponse.json({ ok: false, errorCode: 'UNCERTIFIED_TYPE_FINAL_BLOCKED', message: 'La exportación FINAL está bloqueada para tipos en desarrollo (sin certificar). Puedes exportar este documento como DRAFT para revisión.' }, { status: 422 });
-        }
-      }
+    // FINAL nunca es automático ni depende de flags del cliente: la autorización
+    // (PASS técnico + aprobación jurídica del catálogo) se decide aquí, en el
+    // servidor, para documentos guardados y no guardados. Los tipos sin
+    // certificar se rechazan de inmediato; el resto se vuelve a exigir tras el
+    // guard documental para conservar los hallazgos del documento.
+    const finalAuthorization = exportMode === 'FINAL' ? authorizeFinalExport(inputDocument.documentType) : null;
+    if (finalAuthorization && !finalAuthorization.ok && inputDocument.documentType
+      && (unsavedDraftRequested || finalAuthorization.reason !== 'HUMAN_REVIEW_PENDING')) {
+      return NextResponse.json(finalExportBlockedBody(finalAuthorization), { status: finalAuthorization.status });
     }
     // Local persistence has a separate authenticated DRAFT contract. It does
     // not fabricate a WEB principal or authorize FINAL.
@@ -127,6 +129,11 @@ export async function POST(req: NextRequest) {
         }, { status: 422 });
       }
       throw error;
+    }
+
+    // El documento superó el guard, pero PASS no sustituye la aprobación jurídica.
+    if (finalAuthorization && !finalAuthorization.ok) {
+      return NextResponse.json(finalExportBlockedBody(finalAuthorization), { status: finalAuthorization.status });
     }
 
     // No hay fallback a HTML/Chromium: si falla el exporter binario, se devuelve

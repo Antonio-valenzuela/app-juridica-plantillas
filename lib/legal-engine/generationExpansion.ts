@@ -575,6 +575,7 @@ export function buildExpansionPrompt(
   section: DocumentNode,
   caseAnalysis: CaseAnalysis | undefined,
   contract: GenerationExtensionContract,
+  pass = 1,
 ): string {
   const context = sourceContext(document, caseAnalysis);
   const existingText = section.content.map((block) => block.text).join('\n\n');
@@ -587,7 +588,7 @@ export function buildExpansionPrompt(
     'conclusión y efecto procesal',
   ];
   return [
-    'Eres redactor jurídico mexicano especializado en contestaciones extensas y source-grounded.',
+    `Eres redactor jurídico mexicano; redactas ${document.documentTypeLabel || document.documentType} con base estricta en las fuentes del expediente.`,
     'Genera una ampliación sustantiva para una sección existente. No rellenes espacio.',
     'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
     'Cuando no exista postura fáctica confirmada por el abogado:',
@@ -603,7 +604,10 @@ export function buildExpansionPrompt(
     `HECHOS VINCULADOS: ${context.factIds.join(', ') || 'Ninguno identificado'}`,
     context.facts.length ? `DETALLE DE HECHOS:\n${context.facts.join('\n')}` : 'DETALLE DE HECHOS: No hay detalle estructurado adicional.',
     context.authorities.length ? `AUTORIDADES IDENTIFICADAS:\n${context.authorities.join('\n')}` : 'AUTORIDADES IDENTIFICADAS: No se proporcionaron autoridades verificadas.',
-    `PUNTOS DE PROFUNDIZACIÓN POSIBLES: ${pending.join(' | ')}`,
+    // Cada pasada se enfoca en una función distinta para que la ampliación aporte análisis nuevo, no paráfrasis.
+    `ENFOQUE DE ESTA AMPLIACIÓN (pasada ${pass}): ${pending[(pass - 1) % pending.length]}; desarróllalo solo si el texto existente no lo agota.`,
+    `OTROS PUNTOS DE PROFUNDIZACIÓN POSIBLES: ${pending.join(' | ')}`,
+    `META DEL ESCRITO: ${contract.targetPages} páginas. Es un objetivo de profundidad, no autoriza relleno: si la sección ya está agotada responde únicamente [SECCIÓN_COMPLETA].`,
     'TEXTO EXISTENTE DE LA SECCIÓN (solo para evitar repetición):',
     existingText.slice(-14000),
     '',
@@ -678,7 +682,9 @@ export async function expandDocumentToPageTarget(
     return { metrics, expansionPasses, calls, warnings };
   }
 
-  if (document.generationMetadata.draftDepth) {
+  // Primero la ampliación anclada a cobertura pendiente (hechos, pruebas y autoridades verificadas no usados);
+  // aplica a toda meta de páginas, en cualquier tipo de escrito del catálogo.
+  if (document.generationMetadata.draftDepth || (document.generationMetadata as { pageTarget?: unknown }).pageTarget) {
     const supportedResult = await expandWithSupportedCoverage(document, caseAnalysis, contract, options, metrics);
     metrics = supportedResult.metrics;
     expansionPasses += supportedResult.expansionPasses;
@@ -701,6 +707,7 @@ export async function expandDocumentToPageTarget(
 
   }
 
+  let lastPass = { providerFailures: 0, duplicates: 0, exhausted: 0, attempts: 0 };
   const candidates = document.sections
     .filter((section) => !['header', 'footer', 'page-header', 'page-footer', 'signature', 'closing', 'petition', 'preamble'].includes(section.type) && !/petitori|proemio|firma|cierre|comparec/i.test(`${section.title} ${section.type}`))
     .sort((left, right) => sectionPriority(right) - sectionPriority(left) || left.order - right.order);
@@ -712,17 +719,30 @@ export async function expandDocumentToPageTarget(
   ) {
     expansionPasses += 1;
     let addedThisPass = false;
+    lastPass = { providerFailures: 0, duplicates: 0, exhausted: 0, attempts: 0 };
     for (const section of candidates) {
       if (metrics.actualPages >= contract.minPages || calls >= contract.maxCallsPerDocument) break;
       const existingText = section.content.map((block) => block.text).join('\n\n');
-      const response = await invokeProvider({
+      lastPass.attempts += 1;
+      let response: AIProviderResult;
+      try {
+      response = await invokeProvider({
         systemPrompt: 'Redacción jurídica extensa, profesional y estrictamente fundada en el expediente. No inventes datos ni repitas contenido.',
-        userMessage: buildExpansionPrompt(document, section, caseAnalysis, contract),
+        userMessage: buildExpansionPrompt(document, section, caseAnalysis, contract, expansionPasses),
         mode: 'fast',
         maxTokens: Math.min(contract.maxGeneratedTokens, 1800),
         maxProviderRetries: 1,
         ...caseProviderFlags(document),
       });
+      } catch (error) {
+        // Un error del proveedor no aborta el documento ni se presenta como meta cumplida.
+        calls += 1;
+        contract.metrics.llmCalls += 1;
+        contract.metrics.expansionCalls += 1;
+        lastPass.providerFailures += 1;
+        warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:${error instanceof Error ? error.name : 'ERROR'}`);
+        continue;
+      }
       calls += 1;
       contract.metrics.llmCalls += 1;
       contract.metrics.expansionCalls += 1;
@@ -744,6 +764,7 @@ export async function expandDocumentToPageTarget(
           reason: 'PROVIDER_OUTPUT_TRUNCATED_WITHOUT_COMPLETE_SENTENCE',
           lossStage: 'provider-validation',
         });
+        lastPass.providerFailures += 1;
         warnings.push(`EXTENSION_OUTPUT_TRUNCATED:${section.id}`);
         continue;
       }
@@ -767,6 +788,7 @@ export async function expandDocumentToPageTarget(
           reason: response.fallbackReason || response.errorCode || 'PROVIDER_OUTPUT_NOT_USABLE',
           lossStage: 'provider-validation',
         });
+        lastPass.providerFailures += 1;
         warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:LOCAL_FALLBACK`);
         // A local/non-legal fallback is not admissible as extension content,
         // but it must not abort the whole document. Continue with the next
@@ -781,6 +803,7 @@ export async function expandDocumentToPageTarget(
           reason: response.errorCode || response.fallbackReason || 'PROVIDER_OUTPUT_NOT_USABLE',
           lossStage: 'provider-validation',
         });
+        lastPass.providerFailures += 1;
         warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:${response.errorCode || response.fallbackReason || 'NO_LEGAL_CONTENT'}`);
         continue;
       }
@@ -792,6 +815,7 @@ export async function expandDocumentToPageTarget(
           reason: 'COMPLETION_SENTINEL_WITHOUT_NEW_CONTENT',
           lossStage: 'provider-validation',
         });
+        lastPass.exhausted += 1;
         continue;
       }
       const admission = evaluateGeneratedLegalAdmission({ text: generated, sectionType: section.type, document, analysis: caseAnalysis, legalIssueIds: section.content.flatMap(block => block.legalIssueIds || []) });
@@ -814,6 +838,7 @@ export async function expandDocumentToPageTarget(
       });
       if (deduplicated.isDuplicate || !deduplicated.text) {
         contract.metrics.rejectedDuplicateChunks += 1;
+        lastPass.duplicates += 1;
         warnings.push(`EXTENSION_DUPLICATE_REJECTED:${section.id}`);
         continue;
       }
@@ -835,8 +860,16 @@ export async function expandDocumentToPageTarget(
   if (contract.extensionTargetUnmet) {
     warnings.push(`EXTENSION_TARGET_UNMET:${metrics.actualPages}/${contract.minPages}`);
   }
+  // Motivo explícito cuando no se alcanzó: el abogado sabe si faltó material, si el proveedor falló o si
+  // las propuestas repetían texto. Ninguno se registra como meta cumplida.
+  const budgetExhausted = calls >= contract.maxCallsPerDocument || expansionPasses >= contract.maxExpansionPasses;
   const contentStopReason: ExtendedExpansionResult['contentStopReason'] =
-    metrics.actualPages >= contract.minPages ? 'TARGET_REACHED' : 'RESOURCE_LIMIT';
+    metrics.actualPages >= contract.minPages ? 'TARGET_REACHED'
+      : budgetExhausted && lastPass.attempts > 0 && lastPass.providerFailures < lastPass.attempts ? 'RESOURCE_LIMIT'
+        : lastPass.attempts > 0 && lastPass.providerFailures === lastPass.attempts ? 'PROVIDER_UNAVAILABLE'
+          : lastPass.duplicates > 0 && lastPass.duplicates + lastPass.exhausted + lastPass.providerFailures >= lastPass.attempts && lastPass.exhausted === 0 ? 'REPETITION_BLOCKED'
+            : lastPass.providerFailures > 0 && lastPass.exhausted === 0 ? 'PROVIDER_UNAVAILABLE'
+              : 'CONTENT_LIMIT_REACHED';
   return { metrics, expansionPasses, calls, warnings: Array.from(new Set(warnings)), contentStopReason };
 }
 

@@ -633,7 +633,7 @@ export type {
 
 export function createEmptyDocument(initial: Partial<UniversalLegalDocument> = {}): UniversalLegalDocument {
   const document: UniversalLegalDocument = {
-    id: crypto.randomUUID(),
+    id: initial.id || crypto.randomUUID(),
     title: initial.title || 'Nuevo Documento',
     documentType: initial.documentType || 'escrito_libre',
     documentTypeLabel: initial.documentTypeLabel || 'Escrito Libre',

@@ -127,6 +127,10 @@ function computeDraftSignature(doc: UniversalLegalDocument): string {
     .join('\u001E');
 }
 
+// Etiqueta legible de un tipo: la lista legacy no incluye todos los tipos del catálogo; un identificador crudo («demanda_ordinaria_civil»)
+// no se reconoce como demanda en el análisis de la instrucción y bloquea la generación.
+const documentTypeLabelFor = (value: string) => DOCUMENT_TYPES.find((d) => d.value === value)?.label || getCatalogDocument(value)?.label || value;
+
 export default function MachotesPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -723,7 +727,7 @@ export default function MachotesPage() {
     } else if (mode === 'initial_writings') {
       const effMatterIW = initialForm.materia === 'otro' ? (initialForm.materiaCustom || 'Otro') : (MATTERS.find((m) => m.value === initialForm.materia)?.label || initialForm.materia || 'Amparo');
       const effJurisIW = initialForm.jurisdiccion === 'otra' ? (initialForm.jurisdiccionCustom || 'Federal') : (JURISDICTIONS.find((j) => j.value === initialForm.jurisdiccion)?.label || 'Federal');
-      const effTipoIW = initialForm.tipoEscrito === 'otro' ? (initialForm.tipoEscritoCustom || 'Escrito libre') : (DOCUMENT_TYPES.find((d) => d.value === initialForm.tipoEscrito)?.label || initialForm.tipoEscrito || 'Demanda de Amparo Indirecto');
+      const effTipoIW = initialForm.tipoEscrito === 'otro' ? (initialForm.tipoEscritoCustom || 'Escrito libre') : (documentTypeLabelFor(initialForm.tipoEscrito) || 'Demanda de Amparo Indirecto');
       const shouldCreateInitialDoc = !universalDoc || universalDoc.documentType !== (initialForm.tipoEscrito || 'demanda_amparo_indirecto') || (universalDoc.matter || '').toLowerCase() !== effMatterIW.toLowerCase();
       if (shouldCreateInitialDoc) {
         // Limpiar la sesión si cambió el expediente o la materia.
@@ -2151,6 +2155,10 @@ export default function MachotesPage() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         if (res.status === 422) {
+          if (err.errorCode === 'UNCERTIFIED_TYPE_FINAL_BLOCKED' && typeof err.message === 'string') {
+            notify('warning', err.message);
+            return;
+          }
           notify('warning', `El documento requiere revisión antes de exportarse: ${formatExportIssues(err.details) || formatExportIssues(err.error) || formatExportIssues(err.friendlyMessage)}`);
           return;
         }
@@ -2206,6 +2214,10 @@ export default function MachotesPage() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         if (res.status === 422) {
+          if (err.errorCode === 'UNCERTIFIED_TYPE_FINAL_BLOCKED' && typeof err.message === 'string') {
+            notify('warning', err.message);
+            return;
+          }
           notify('warning', `El documento requiere revisión antes de exportarse: ${formatExportIssues(err.details) || formatExportIssues(err.error) || formatExportIssues(err.friendlyMessage)}`);
           return;
         }
@@ -2967,7 +2979,7 @@ export default function MachotesPage() {
                             onClick={async () => {
                               const effMatter = initialForm.materia === 'otro' ? (initialForm.materiaCustom || 'Otro') : (MATTERS.find((m) => m.value === initialForm.materia)?.label || initialForm.materia);
                               const effJuris = initialForm.jurisdiccion === 'otra' ? (initialForm.jurisdiccionCustom || 'Otra') : (JURISDICTIONS.find((j) => j.value === initialForm.jurisdiccion)?.label || initialForm.jurisdiccion);
-                              const effTipo = initialForm.tipoEscrito === 'otro' ? (initialForm.tipoEscritoCustom || 'Escrito libre') : (DOCUMENT_TYPES.find((d) => d.value === initialForm.tipoEscrito)?.label || initialForm.tipoEscrito);
+                              const effTipo = initialForm.tipoEscrito === 'otro' ? (initialForm.tipoEscritoCustom || 'Escrito libre') : documentTypeLabelFor(initialForm.tipoEscrito);
                               const expedienteVal = initialForm.expediente?.trim() || '';
                               const promptParts = [
                                 `Redactar ${effTipo || 'escrito jurídico'}.`,
@@ -3401,7 +3413,7 @@ export default function MachotesPage() {
                         onClick={async () => {
                           const effMatterU = universalForm.materia === 'otro' ? (universalForm.materiaCustom || 'Otro') : (MATTERS.find((m) => m.value === universalForm.materia)?.label || universalForm.materia);
                           const effJurisU = universalForm.jurisdiccion === 'otra' ? (universalForm.jurisdiccionCustom || 'Otra') : (JURISDICTIONS.find((j) => j.value === universalForm.jurisdiccion)?.label || universalForm.jurisdiccion);
-                          const effTipoU = universalForm.tipoEscrito === 'otro' ? (universalForm.tipoEscritoCustom || 'Escrito libre') : (DOCUMENT_TYPES.find((d) => d.value === universalForm.tipoEscrito)?.label || universalForm.tipoEscrito);
+                          const effTipoU = universalForm.tipoEscrito === 'otro' ? (universalForm.tipoEscritoCustom || 'Escrito libre') : documentTypeLabelFor(universalForm.tipoEscrito);
                           const contextBits: string[] = [];
                           if (effMatterU) contextBits.push(`Materia: ${effMatterU}`);
                           if (effJurisU) contextBits.push(`Jurisdicción: ${effJurisU}`);
@@ -3569,17 +3581,20 @@ export default function MachotesPage() {
                   ) : (
           /* TAB 1 / ESCRITOS EN MODO EDITOR: VISOR PAGINADO (toolbar consolidada DENTRO del editor) */
           <div data-testid="document-editor-frame" className="flex w-full h-full flex-1 min-h-0 min-w-0 overflow-hidden flex-col">
-            {(() => {
-              const result = (universalDoc?.generationMetadata as { pageTargetResult?: PageTargetResult } | undefined)?.pageTargetResult;
-              if (!result) return null;
-              return (
-                <p data-testid="page-target-result" role="status" className="lex-help" style={{ margin: '0 0 4px', padding: '4px 12px' }}>
-                  <strong>{describePageTargetResult(result)}</strong>
-                  {result.notice ? ` — ${result.notice}` : ''}
-                </p>
-              );
-            })()}
-            <ReviewAnnexPanel annex={(universalDoc?.generationMetadata as { reviewAnnex?: ReviewAnnex } | undefined)?.reviewAnnex} />
+            {/* Una sola fila fina sobre el documento (resultado de extensión y anexo): deja el alto al visor. */}
+            <div className="lex-editor-meta">
+              {(() => {
+                const result = (universalDoc?.generationMetadata as { pageTargetResult?: PageTargetResult } | undefined)?.pageTargetResult;
+                if (!result) return null;
+                return (
+                  <p data-testid="page-target-result" role="status" className="lex-editor-meta-text">
+                    <strong>{describePageTargetResult(result)}</strong>
+                    {result.notice ? ` — ${result.notice}` : ''}
+                  </p>
+                );
+              })()}
+              <ReviewAnnexPanel annex={(universalDoc?.generationMetadata as { reviewAnnex?: ReviewAnnex } | undefined)?.reviewAnnex} />
+            </div>
             <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
               <WorkspaceDocumentEditor
                 document={universalDoc}

@@ -50,7 +50,7 @@ export function prepareWritingContract(args: {
   flags: WritingContractInputFlags;
   suppliedSources: UploadedSourceDocument[];
   /** Extensión máxima elegida (páginas), si la hay. */
-  maxPages?: number;
+  targetPages?: number;
 }): PreparedWritingContract | undefined {
   const { documentType, flags, suppliedSources } = args;
   if (!documentType) return undefined;
@@ -77,7 +77,7 @@ export function prepareWritingContract(args: {
     if (problems.length) throw new WritingContractError('CASE_DOSSIER_REQUIRED', problems.map((problem) => problem.message).join(' '), problems);
   }
 
-  return { contract, dossier, prompt: buildWritingContractPrompt(contract, dossier ? dossierSummaryText(dossier) : undefined, args.maxPages) };
+  return { contract, dossier, prompt: buildWritingContractPrompt(contract, dossier ? dossierSummaryText(dossier, { documentType }) : undefined, args.targetPages) };
 }
 
 /** Vuelca la ficha confirmada en el documento (órgano, expediente, partes) y registra el contrato. */
@@ -95,7 +95,7 @@ export function applyDossierToDocument(doc: UniversalLegalDocument, prepared: Pr
 export function supportTextOf(doc: UniversalLegalDocument, dossier?: CaseDossier): string {
   const sources = (doc.sourceDocuments || []).map((source) => source.pages?.length ? source.pages.map((page) => page.text).join('\n') : (source.extractedText || source.content || ''));
   const verified = ((doc.generationMetadata.verifiedAuthorities || []) as Array<{ identity?: { canonicalCitation?: string } }>).map((authority) => authority.identity?.canonicalCitation || '');
-  return [...sources, ...verified, dossier ? dossierSummaryText(dossier) : ''].join('\n');
+  return [...sources, ...verified, dossier ? dossierSummaryText(dossier, { documentType: doc.documentType }) : ''].join('\n');
 }
 
 export interface EnforceOptions {

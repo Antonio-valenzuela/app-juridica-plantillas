@@ -7,8 +7,13 @@
  * Esto los conserva con su procedencia real:
  *
  *  - afirmación de una parte        → "Afirma <actor>: …"  (nunca hecho probado)
- *  - consta en una fuente concreta  → "Consta en la fuente …: …"
+ *  - consta en una fuente concreta  → "Consta en el expediente[, página N]: …"
  *  - sin procedencia verificable    → "Referido en el expediente, por confirmar: …"
+ *
+ * La muletilla de procedencia ROTA entre variantes equivalentes para que una
+ * lista larga de hechos no repita mecánicamente la misma frase. La primera
+ * mención de cada clase conserva la forma canónica («Consta en el expediente»),
+ * de modo que la salida sigue siendo determinista y estable por documento.
  *
  * No inventa hechos ni cambia el modo de generación de la sección: la semilla
  * sigue siendo `AI_REQUIRED`, de modo que con proveedor la IA la desarrolla.
@@ -29,25 +34,46 @@ function factText(fact: AnalyzedFact): string {
   return (fact.sourceFact || fact.text || '').replace(/\s+/g, ' ').trim();
 }
 
-function provenanceLabel(fact: AnalyzedFact): string {
-  const reliability = fact.confidence < LOW_CONFIDENCE ? ' (por verificar)' : '';
+const SOURCE_PROVENANCE_VARIANTS = [
+  'Consta en el expediente',
+  'Obra en el expediente',
+  'Está documentado en el expediente',
+  'Se acredita en el expediente',
+];
+
+const PENDING_PROVENANCE_VARIANTS = [
+  'Referido en el expediente, por confirmar',
+  'Mencionado en el expediente, por confirmar',
+  'Aludido en el expediente, por confirmar',
+  'Señalado en el expediente, por confirmar',
+];
+
+const UNVERIFIED_SUFFIX =
+  ' (por verificar)';
+
+function provenanceLabel(fact: AnalyzedFact, counters: { source: number; pending: number }): string {
+  const reliability = fact.confidence < LOW_CONFIDENCE ? UNVERIFIED_SUFFIX : '';
   if (fact.actor || fact.contestedStatus === 'CONTESTED') {
     return `Afirma ${fact.actor || 'una de las partes'}${reliability}`;
   }
   const doc = fact.sourceReference?.documentId || fact.documentId;
   const page = fact.sourceReference?.page ?? fact.page;
   if (doc || (fact.supportingSources && fact.supportingSources.length > 0)) {
-    return `Consta en la fuente${doc ? ` ${doc}` : ''}${page ? `, página ${page}` : ''}${reliability}`;
+    // El identificador del documento es interno de la aplicación («pending-upload-…»): nunca va en el escrito.
+    const phrase = SOURCE_PROVENANCE_VARIANTS[counters.source++ % SOURCE_PROVENANCE_VARIANTS.length];
+    return `${phrase}${page ? `, página ${page}` : ''}${reliability}`;
   }
-  return `Referido en el expediente, por confirmar${reliability}`;
+  const phrase = PENDING_PROVENANCE_VARIANTS[counters.pending++ % PENDING_PROVENANCE_VARIANTS.length];
+  return `${phrase}${reliability}`;
 }
 
 /** Texto determinista de hechos; vacío si no hay hechos utilizables. */
 export function renderFactsSeed(facts: readonly AnalyzedFact[] | undefined): string {
   const usable = (facts || []).filter(fact => factText(fact).length > 0).slice(0, MAX_FACTS);
   if (!usable.length) return '';
+  const counters = { source: 0, pending: 0 };
   return usable
-    .map((fact, index) => `${index + 1}. ${provenanceLabel(fact)}: ${factText(fact).replace(/[.;]\s*$/, '')}.`)
+    .map((fact, index) => `${index + 1}. ${provenanceLabel(fact, counters)}: ${factText(fact).replace(/[.;]\s*$/, '')}.`)
     .join('\n');
 }
 

@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.stubEnv('DEMO_MODE_ENABLED', 'false');
   vi.stubEnv('LEGAL_CASES_USER_EMAIL', 'configured-test@example.invalid');
   vi.stubEnv('LEGAL_CASES_ORG_SLUG', 'configured-test');
-  database.organization.findUnique.mockRejectedValue(new Error('Error opening a TLS connection: No hay credenciales disponibles en el paquete de seguridad (os error -2146893042)'));
+  database.organization.findUnique.mockRejectedValue(new Error('SQLITE_CANTOPEN: unable to open database file'));
 });
 afterEach(() => { clearCachedLawyerContext(); vi.unstubAllEnvs(); });
 

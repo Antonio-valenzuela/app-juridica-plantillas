@@ -150,11 +150,15 @@ describe('LOOP 7 — registry jurídico jerárquico', () => {
   });
 
   it('no ofrece familias legacy sin plantilla/ruta como tipos generables en Universal', () => {
+    // Política vigente: functionalStatus se CALCULA (PASS solo con evidencia por ID); Universal ofrece únicamente
+    // tipos (o alias) cuyo destino canónico es IMPLEMENTED + PASS. Las familias nunca son generables.
     const options = getUniversalDocumentTypes();
-    expect(options).toHaveLength(0);
-    expect(CANONICAL_DOCUMENT_TYPES.filter((document) => document.functionalStatus === 'PASS')).toHaveLength(0);
+    expect(options.length).toBeGreaterThan(0);
+    expect(CANONICAL_DOCUMENT_TYPES.filter((document) => document.functionalStatus === 'PASS').every((document) => document.status === 'IMPLEMENTED' && document.implemented)).toBe(true);
     for (const option of options) {
       const entry = getCatalogDocument(option.value);
+      const target = entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId) : entry;
+      expect(target?.kind === 'DOCUMENT_TYPE' ? target.functionalStatus : null, option.value).toBe('PASS');
       expect(entry?.kind).not.toBe('FAMILY');
       expect(entry?.kind === 'DOCUMENT_TYPE' ? entry.status : entry?.kind === 'LEGACY_ALIAS' ? getCatalogDocument(entry.targetId)?.status : null).toBe('IMPLEMENTED');
       const route = resolveDocumentRouting({ selectedDocumentType: option.value });
@@ -201,8 +205,11 @@ describe('LOOP 7 — registry jurídico jerárquico', () => {
 
     expect(navigatorModule.getCatalogResultAction).toBeDefined();
     expect(navigatorModule.getCatalogResultAction?.({ id: 'civil_demandas', kind: 'FAMILY', status: 'NOT_APPLICABLE' })).toBe('NAVIGATE');
-    expect(navigatorModule.getCatalogResultAction?.({ id: 'contestacion_demanda_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('DISABLED');
-    expect(navigatorModule.getCatalogResultAction?.({ id: 'demanda_ordinaria_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('DISABLED');
+    // Un tipo IMPLEMENTED con evidencia funcional PASS es seleccionable; uno que no se puede generar queda bloqueado.
+    expect(navigatorModule.getCatalogResultAction?.({ id: 'contestacion_demanda_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('SELECT');
+    expect(navigatorModule.getCatalogResultAction?.({ id: 'demanda_ordinaria_civil', kind: 'DOCUMENT_TYPE', status: 'IMPLEMENTED' })).toBe('SELECT');
+    expect(navigatorModule.getCatalogResultAction?.({ id: 'contestacion_impedimento', kind: 'DOCUMENT_TYPE', status: 'REQUIRES_OFFICIAL_FORM' })).toBe('DISABLED');
+    expect(navigatorModule.getCatalogResultAction?.({ id: 'conclusiones_civil', kind: 'DOCUMENT_TYPE', status: 'ASSISTED_DRAFT' })).toBe('DISABLED');
   });
 
   it('mantiene contratos estructurales y IDs canónicos seguros', () => {

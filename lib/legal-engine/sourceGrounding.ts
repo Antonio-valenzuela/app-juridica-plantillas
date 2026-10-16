@@ -249,7 +249,7 @@ function documentFamily(caseText: string): SourceDocumentFamily {
     && /\b(?:sentencia|laudo|resuelve|considerando|resultando)\b/i.test(caseText)
     && /\b(?:visto|resuelve|magistrado|tribunal\s+colegiado)\b/i.test(caseText)) return 'SENTENCIA';
   if (partyWriting && /\b(?:solicit(?:o|ar)\s+el\s+amparo|amparo\s+y\s+protecci[oó]n\s+de\s+la\s+justicia\s+federal)\b/i.test(caseText)) return 'AMPARO';
-  if (/\b(?:vengo\s+a\s+)?(?:demandar|entablar\s+formal\s+demanda|interponer\s+juicio)\b/i.test(caseText)) return 'DEMANDA';
+  if (/\b(?:vengo\s+a\s+)?(?:demandar|entablar\s+(?:formal\s+)?demanda|(?:presento|formulo)\s+(?:formal\s+)?demanda|interponer\s+juicio)\b/i.test(caseText)) return 'DEMANDA';
   if (/\bcontestaci[oó]n\s+(?:de\s+la\s+)?demanda\b/i.test(caseText)) return 'CONTESTACION';
   if (/\b(?:interpongo|interponer)\s+recurso\b|\bagravio(?:s)?\b/i.test(caseText)) return 'RECURSO';
   // Un auto o acuerdo DEL JUZGADO dentro del juicio de amparo («Vista la demanda de amparo… se niega la

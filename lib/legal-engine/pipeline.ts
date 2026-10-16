@@ -44,6 +44,8 @@ import { normalizeMarkdownFormatting, normalizeTitleText } from './markdownNorma
 import { CONTESTACION_SECTION_INSTRUCTIONS, REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS, resolveContestacionRoles, buildContestacionSignatureBlock, getRevisionAmparoDirectoSectionText, formatIndividualAgravio, renderFactResponseProjection, renderClaimResponseProjection } from './contestacionStructure';
 import { DocumentRoutingError, getDocumentTemplate, buildReferenceOnlyDirective, isAgraviosAnswerType, isContestacionType, isDemandContestacionType, isContestacionRevisionAmparoDirectoType } from './documentTemplates';
 import { getWritingContract } from './writingContract';
+import { sanitizeSourceDocument } from './sourceNoise';
+import { firstIssuingAuthority } from './partyExtraction';
 import { resolveDocumentRouting, type DocumentRoutingResolution } from './documentRouting';
 import { buildDocumentPlan } from './documentPlan';
 import { isOptInSection } from './optInSections';
@@ -380,7 +382,7 @@ import { validateDocumentEvidence } from './documentEvidence';
 import { validateDocumentAuthorities } from './documentAuthority';
 import { markUnverifiedAuthorityReferences } from './authorityReferenceAudit';
 import { enforceOutputHygiene } from './generatedOutputValidator';
-import { MAX_REDUNDANCY_RATIO, evaluatePageTarget, pageTargetToGenerationExtension, parsePageTarget, tryParsePageTarget, type PageTarget, type PageTargetResult } from './pageTarget';
+import { MAX_REDUNDANCY_RATIO, evaluatePageTarget, pageTargetCheckId, pageTargetToGenerationExtension, parsePageTarget, tryParsePageTarget, type PageTarget, type PageTargetResult } from './pageTarget';
 import { unreadableSourcePages } from './extractionCoverage';
 import { applyDossierToDocument, enforceWritingContract, finalizeReviewAnnex, prepareWritingContract, type PreparedWritingContract } from './writingContractStage';
 import { emptyReviewAnnex, reviewAnnexHasItems, separateReviewMaterial } from './reviewAnnex';
@@ -1918,7 +1920,7 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
     : isTramiteGeneral
     ? (tramiteCtx?.juzgadoOTribunal?.value || '[DATO PENDIENTE: Juzgado o Tribunal de conocimiento]')
     : '[DATO PENDIENTE: Autoridad destinataria]';
-  const autoridadName = doc.parties.autoridadDestinataria || doc.parties.autoridadResponsable || doc.parties.demandado || caseAnalysis?.parties?.autoridadResponsable || (caseAnalysis?.authorities && caseAnalysis.authorities[0]) || formatCaseContextField(doc.caseContext, 'autoridadResponsable', defaultAutoridad);
+  const autoridadName = doc.parties.autoridadDestinataria || doc.parties.autoridadResponsable || doc.parties.demandado || caseAnalysis?.parties?.autoridadResponsable || firstIssuingAuthority(caseAnalysis?.authorities) || formatCaseContextField(doc.caseContext, 'autoridadResponsable', defaultAutoridad);
   const rawExpNum = tramiteCtx?.numeroExpediente?.value || doc.caseRefs.expediente || caseAnalysis?.caseNumbers?.principal;
   const expedienteNum = (rawExpNum && !/\[\s*DATO\s+PENDIENTE/i.test(rawExpNum)) ? rawExpNum.trim() : 'EN TURNO (Por Asignar)';
   const titleUpper = block.title.toUpperCase();
@@ -1992,7 +1994,7 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
         || (demandCourt && genericTemplateDestination ? courtesy(demandCourt) : undefined)
         || templateDestination
         || doc.parties?.autoridadDestinataria
-        || doc.parties?.autoridadResponsable || caseAnalysis?.parties?.autoridadResponsable || (caseAnalysis?.authorities && caseAnalysis.authorities[0]) || defaultAutoridad;
+        || doc.parties?.autoridadResponsable || caseAnalysis?.parties?.autoridadResponsable || firstIssuingAuthority(caseAnalysis?.authorities) || defaultAutoridad;
       const filingThrough = doc.proceduralIdentity?.organoPresentacion;
       return `${String(destinationAuthority).toUpperCase()}${filingThrough ? `\nPOR CONDUCTO DE: ${filingThrough}` : ''}\nPRESENTE.\n\nEXPEDIENTE: ${expedienteNum}`;
     }
@@ -3814,8 +3816,10 @@ export async function runGenerationPipeline(
   }
 
   const rawSources = confirmedAppeal?.selected ? selectAppealSources(suppliedSources, confirmedAppeal.selected) : suppliedSources;
+  // Sellos de firma electrónica, volcados hexadecimales y marcas de página del PDF no son del documento: se
+  // limpian antes de analizar, citar o fundamentar nada (si no, se «citan» como constancias y parten las frases).
   const sources: UploadedSourceDocument[] = rawSources.map((source) =>
-    markDocumentAsSource({ ...source }, source.id)
+    markDocumentAsSource({ ...sanitizeSourceDocument(source) }, source.id)
   );
   const lawyerProfile = input.lawyerProfile || DEFAULT_LAWYER_PROFILE;
   // Contrato del tipo: ficha confirmada, representación elegida y documentos fuente obligatorios. Si falta algo,
@@ -3825,7 +3829,7 @@ export async function runGenerationPipeline(
       || (input.taxonomy?.documentType && input.taxonomy.documentType !== 'otro' ? input.taxonomy.documentType.trim() : ''),
     flags: { caseDossier: input.caseDossier, requireCaseDossier: input.requireCaseDossier, separateReviewAnnex: input.separateReviewAnnex },
     suppliedSources,
-    maxPages: input.pageTarget === undefined ? undefined : tryParsePageTarget(input.pageTarget)?.pages,
+    targetPages: input.pageTarget === undefined ? undefined : tryParsePageTarget(input.pageTarget)?.pages,
   });
   const userPrompt = input.userInstruction || input.prompt || '';
   const isReferenceDrivenRequest = input.workflow?.flow === 'DOCUMENT_ANALYSIS';
@@ -4996,8 +5000,10 @@ export async function runGenerationPipeline(
       });
     }
 
-    // Extensión como MÁXIMO: no hay etapa de ampliación. El escrito mide lo que el material sostiene; nunca se
-    // amplía ni se regeneran secciones para llenar páginas.
+    // Extensión como META: tras la redacción por secciones se mide el PDF renderizado y se amplían las secciones
+    // pertinentes con análisis respaldado (hechos, pruebas y autoridades verificadas) hasta alcanzarla. La
+    // ampliación pasa por admisión jurídica por proposición y deduplicación; si el material no alcanza, se
+    // detiene con un motivo explícito (BELOW_TARGET), nunca rellena.
     if (generationExtension.generationMode === 'extended-legal' && !generationExtension.lengthIsCeiling) {
       jobUpdate((input as any).jobId, { phase: 'extend', stage: 'Extensión jurídica' });
       const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
@@ -5251,13 +5257,36 @@ export async function runGenerationPipeline(
       if (hygiene.actions.length > 0) traceContext?.addWarning(`OUTPUT_HYGIENE:${hygiene.actions.length}`);
     }
 
+    // La higiene y los ajustes posteriores pueden retirar texto ya medido: si la meta quedó por debajo y la
+    // ampliación se había detenido por alcanzarla, se reintenta una vez con el mismo contrato y se vuelve a limpiar.
+    if (pageTarget && generationExtension.generationMode === 'extended-legal' && !generationExtension.lengthIsCeiling
+      && [undefined, 'TARGET_REACHED'].includes(doc.generationMetadata.draftContentStopReason as string | undefined)) {
+      try {
+        const remeasured = await measureRenderedDocumentPages(doc);
+        if (remeasured.actualPages < generationExtension.minPages) {
+          jobUpdate((input as any).jobId, { phase: 'extend', stage: 'Extensión jurídica (ajuste tras depuración)' });
+          const retry = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
+          doc.generationMetadata.draftContentStopReason = retry.contentStopReason;
+          finalExpansionBudgetState = {
+            hasAvailableContinuationBudget: retry.continuationBudgetAvailable === true,
+            hasAvailableCallBudget: retry.callBudgetAvailable === true,
+          };
+          const hygiene = enforceOutputHygiene(doc);
+          if (hygiene.actions.length > 0) traceContext?.addWarning(`OUTPUT_HYGIENE_AFTER_EXPANSION:${hygiene.actions.length}`);
+        }
+      } catch (retryError) {
+        traceContext?.addWarning(`EXTENSION_RETRY_FAILED:${retryError instanceof Error ? retryError.message : String(retryError)}`);
+      }
+    }
+
     if (generationExtension.generationMode === 'extended-legal') {
       try {
         const finalPageMetrics = await measureRenderedDocumentPages(doc);
         generationExtension.actualPages = finalPageMetrics.actualPages;
         generationExtension.wordCount = finalPageMetrics.wordCount;
         generationExtension.characterCount = finalPageMetrics.characterCount;
-        // Con extensión como máximo, «no cumplida» significa SUPERAR el máximo; ser más corto no es una falla.
+        // Meta (selector de páginas): «no cumplida» = el PDF quedó por debajo. `lengthIsCeiling` solo se conserva para
+        // contratos heredados que lo pidan explícitamente.
         generationExtension.extensionTargetUnmet = generationExtension.lengthIsCeiling
           ? finalPageMetrics.actualPages > generationExtension.maxPages
           : finalPageMetrics.actualPages < generationExtension.minPages;
@@ -5303,9 +5332,9 @@ export async function runGenerationPipeline(
           const paragraphs = doc.sections.flatMap((section) => (section.content || []).flatMap((block) =>
             splitParagraphs(block.text || '').map((text, index) => ({ id: `${section.id}/${block.id}#${index}`, text }))));
           const redundancy = redundancyRatio(paragraphs, 0.85);
-          const result = evaluatePageTarget(pageTarget, finalPageMetrics.actualPages, redundancy.ratio);
+          const result = evaluatePageTarget(pageTarget, finalPageMetrics.actualPages, redundancy.ratio, doc.generationMetadata.draftContentStopReason);
           (doc.generationMetadata as any).pageTargetResult = result;
-          if (result.notice) doc.validation.warnings.push({ checkId: 'PAGE_TARGET_EXCEEDED', message: result.notice } as ValidationIssue);
+          if (result.notice) doc.validation.warnings.push({ checkId: pageTargetCheckId(result), message: result.notice } as ValidationIssue);
           if (redundancy.ratio > MAX_REDUNDANCY_RATIO) {
             doc.validation.warnings.push({
               checkId: 'REDUNDANCY_THRESHOLD_EXCEEDED',
@@ -5364,7 +5393,7 @@ export async function runGenerationPipeline(
     // resultado medido para que no se pierdan.
     const recordedPageTarget = (doc.generationMetadata as any).pageTargetResult as PageTargetResult | undefined;
     if (recordedPageTarget?.notice) {
-      doc.validation.warnings.push({ checkId: 'PAGE_TARGET_EXCEEDED', message: recordedPageTarget.notice } as ValidationIssue);
+      doc.validation.warnings.push({ checkId: pageTargetCheckId(recordedPageTarget), message: recordedPageTarget.notice } as ValidationIssue);
     }
     if ((recordedPageTarget?.redundancyRatio ?? 0) > MAX_REDUNDANCY_RATIO) {
       doc.validation.warnings.push({
@@ -5601,6 +5630,26 @@ export async function runGenerationPipeline(
     } else {
       // Compatibilidad con consumidores legacy fuera del alcance de esta fase.
       doc.status = 'generated';
+    }
+
+    // Las etapas de validación y consolidación posteriores pueden alterar el texto ya medido: el resultado de la
+    // meta se recalcula sobre el documento que realmente se entrega al editor y a la exportación.
+    if (pageTarget && (doc.generationMetadata as any).pageTargetResult) {
+      try {
+        const delivered = await measureRenderedDocumentPages(doc);
+        const recorded = (doc.generationMetadata as any).pageTargetResult as PageTargetResult;
+        if (delivered.actualPages !== recorded.actualPages) {
+          const updated = evaluatePageTarget(pageTarget, delivered.actualPages, recorded.redundancyRatio, doc.generationMetadata.draftContentStopReason);
+          (doc.generationMetadata as any).pageTargetResult = updated;
+          generationExtension.actualPages = delivered.actualPages;
+          generationExtension.extensionTargetUnmet = delivered.actualPages < generationExtension.minPages;
+          (doc.generationMetadata as any).generationExtension = generationExtension;
+          doc.validation.warnings = doc.validation.warnings.filter((warning) => !/^PAGE_TARGET_(UNMET|EXCEEDED)$/.test(String(warning.checkId)));
+          if (updated.notice) doc.validation.warnings.push({ checkId: pageTargetCheckId(updated), message: updated.notice } as ValidationIssue);
+        }
+      } catch (measurementError) {
+        traceContext?.addWarning(`PAGE_TARGET_FINAL_MEASUREMENT_FAILED:${measurementError instanceof Error ? measurementError.message : String(measurementError)}`);
+      }
     }
 
     if (traceContext?.enabled) {

@@ -20,6 +20,7 @@ import {
   extractPartyField,
   extractProemioCompareciente,
   initiatesAction,
+  normalizeCourtName,
 } from './partyExtraction';
 import { classifyMatter, matterLabelFor } from './matterClassification';
 import { extractContestacionParties } from './partyEvidence';
@@ -46,15 +47,31 @@ function firstMatch(text: string, patterns: RegExp[]): string {
   return '';
 }
 
+/** Quita las líneas de citas de tesis y precedentes (registro digital, rubro de la cita, «Amparo directo N/AAAA. …»). */
+export function stripCitedPrecedents(text: string): string {
+  return (text || '')
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:registro\s+digital|instancia|[eé]poca|d[eé]cima\s+[eé]poca|novena\s+[eé]poca|materias?\(?s?\)?|tesis(?:\s+de\s+jurisprudencia)?\s*:|fuente\s*:|tipo\s*:|contradicci[oó]n\s+de\s+tesis|amparo\s+(?:directo|indirecto)(?:\s+en\s+revisi[oó]n)?\s+\d|amparo\s+en\s+revisi[oó]n\s+\d|recurso\s+de\s+(?:queja|reclamaci[oó]n)\s+\d|esta\s+tesis\s+se\s+public[oó])/i.test(line))
+    .join('\n')
+    .replace(/\b\d{1,2}a?\.?\s*\/?\s*[JL]\.?\s*\d{1,4}\/\d{4}(?:\s*\(\d{1,2}a\.\))?/g, ' ')
+    .replace(/\b[IVX]{1,5}\.\d{1,2}[ºo°]?\.[A-Z]{1,3}\.\d{1,4}\s*[A-Z]?\b/g, ' ');
+}
+
 export function detectCaseFicha(texts: string[]): CaseFicha {
   const full = texts.join('\n\n');
 
-  const expediente =
-    firstMatch(full, [
-      /(?:expediente|juicio|toca|amparo\s+directo|amparo\s+indirecto|proceso)\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i,
-    ]) || firstMatch(full, [/\b(\d{1,6}\/\d{4})\b/i]);
-
   const startsAction = initiatesAction(full);
+
+  // El número del caso no se toma de la jurisprudencia o las tesis que el escrito cita («Amparo directo 3296/2004»,
+  // «1a./J. 18/2005»): son precedentes ajenos. Y una demanda que inicia la acción todavía no tiene expediente: solo se
+  // acepta el número con rótulo explícito («Expediente: …»), no un «N/AAAA» suelto del texto.
+  const ownText = stripCitedPrecedents(full);
+  const expediente = startsAction
+    // Demanda: solo «Expediente: N/AAAA»; «juicio/amparo directo N/AAAA» dentro de la exposición suele ser una cita.
+    ? firstMatch(ownText, [/\b(?:expediente|exp\.)\s*(?:n[uú]m(?:ero)?\.?|no\.?)?\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i])
+    : firstMatch(ownText, [
+      /(?:expediente|juicio|toca|amparo\s+directo|amparo\s+indirecto|proceso)\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i,
+    ]) || firstMatch(ownText, [/\b(\d{1,6}\/\d{4})\b/i]);
 
   const actor =
     extractPartyField(full, [
@@ -83,11 +100,12 @@ export function detectCaseFicha(texts: string[]): CaseFicha {
       /(?:abogado\s+(?:patrono|defensor)|apoderado\s+legal|autorizado|representante\s+legal)\s*[:\-]\s*([^;,\n]{2,90})/i,
     ]) || '';
 
-  const autoridad =
+  const autoridad = normalizeCourtName(
     extractAuthorityLabeled(full) ||
     extractAddressedCourt(full) ||
     extractInstitutionalAuthority(full) ||
-    '';
+    '',
+  );
 
   const fechasMatch = full.match(/(\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+\d{4})|\b(\d{1,2}\/\d{1,2}\/\d{4})\b/gi);
   const fechas = fechasMatch ? Array.from(new Set(fechasMatch.map((f) => f.replace(/^,?\s*/, '')))).slice(0, 3).join(' · ') : '';

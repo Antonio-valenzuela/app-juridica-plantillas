@@ -5,6 +5,7 @@ import { CANONICAL_DOCUMENT_TYPES, LEGAL_CATALOG_REGISTRY, getCatalogDocument, g
 import { DOCUMENT_TYPES } from '@/lib/legal-taxonomy/documentTypes';
 import { DocumentTemplates } from '@/lib/legal-engine/documentTemplates';
 import { resolveDocumentRouting } from '@/lib/legal-engine/documentRouting';
+import { resolveTemplateProvenance, TEMPLATE_SOURCE } from './templateProvenance.mjs';
 
 const root = process.cwd();
 const testRoot = path.join(root, 'tests');
@@ -82,7 +83,10 @@ export function buildWritingCoverageMatrix() {
     const humanReview = canonicalIdentifier?.kind === 'DOCUMENT_TYPE'
       ? canonicalIdentifier.humanReview
       : canonicalIdentifier?.kind === 'FAMILY' ? 'NOT_REQUIRED' : 'PENDING';
-    const template = DocumentTemplates[canonicalId] || DocumentTemplates[id];
+    // Plantilla resuelta por el resolver real (directa o derivada por familia); ver templateProvenance.mjs.
+    const canonicalResolution = resolveTemplateProvenance(canonicalId);
+    const templateResolution = canonicalResolution.template ? canonicalResolution : resolveTemplateProvenance(id);
+    const template = templateResolution.template;
     const route = resolveExplicitRoute(id, aliasTarget);
     const matchingTests = [
       ...exactTestReferences(id),
@@ -105,7 +109,7 @@ export function buildWritingCoverageMatrix() {
     const structuralChecks = [];
     if (!catalog || identifier?.kind !== 'DOCUMENT_TYPE') structuralChecks.push('no existe contrato canónico de tipo documental');
     if (!catalog?.sourceCompatibility) structuralChecks.push('falta compatibilidad declarada de fuente');
-    if (!template) structuralChecks.push('no existe DocumentTemplate');
+    if (!template) structuralChecks.push('no existe DocumentTemplate (ni directo ni derivado por familia)');
     if (template && template.tipo !== canonicalId) structuralChecks.push('template.tipo no coincide con el ID canónico');
     if (!template?.estructura?.length) structuralChecks.push('no hay secciones declaradas');
     if (!template?.camposObligatorios?.length) structuralChecks.push('no hay campos obligatorios declarados');
@@ -117,10 +121,10 @@ export function buildWritingCoverageMatrix() {
     const declaredUsable = Boolean(catalog?.status === 'IMPLEMENTED' || surfaces.length > 0);
     const status = functionalStatus === 'BLOCKED_EXTERNAL' ? 'BLOCKED_EXTERNAL' : fullAcceptanceEvidence && structuralChecks.length === 0 ? 'PASS' : 'FAIL';
     const statusReason = status === 'PASS'
-      ? 'Acreditación completa del contrato de 36 puntos.'
+      ? 'Evidencia determinista por ID (writing-type-evidence); no es certificación jurídica ni prueba E2E con proveedor.'
       : [
         structuralChecks.length ? structuralChecks.join('; ') : null,
-        catalog?.functionalStatusReason || (!fullAcceptanceEvidence ? 'sin evidencia E2E por tipo que demuestre el contrato funcional completo de 36 puntos' : null),
+        catalog?.functionalStatusReason || (!fullAcceptanceEvidence ? 'sin evidencia determinista por ID que demuestre el contrato funcional completo' : null),
       ].filter(Boolean).join('; ');
 
     const catalogVisible = identifier?.uiVisibility === 'VISIBLE';
@@ -160,6 +164,7 @@ export function buildWritingCoverageMatrix() {
       aliasTarget: aliasTarget || null,
       catalogStatus: catalog?.status || identifier?.status || 'NOT_IN_CANONICAL_REGISTRY',
       templateExists: Boolean(template),
+      templateSource: templateResolution.source,
       sourceCompatibility: catalog?.sourceCompatibility || null,
       builtInTemplateId: template?.tipo || null,
       customTemplateInventory: 'NOT_ENUMERATED_IN_STATIC_AUDIT',
@@ -193,6 +198,11 @@ export function buildWritingCoverageMatrix() {
     catalogStats: stats,
     legacySelectableIds: DOCUMENT_TYPES.length,
     documentTemplateCount: Object.keys(DocumentTemplates).length,
+    templateSourceCounts: {
+      [TEMPLATE_SOURCE.DIRECT]: rows.filter((row) => row.templateSource === TEMPLATE_SOURCE.DIRECT).length,
+      [TEMPLATE_SOURCE.FAMILY_DERIVED]: rows.filter((row) => row.templateSource === TEMPLATE_SOURCE.FAMILY_DERIVED).length,
+      [TEMPLATE_SOURCE.NONE]: rows.filter((row) => row.templateSource === TEMPLATE_SOURCE.NONE).length,
+    },
     explicitResponseOptions: responseOptions.filter((option) => option.value !== 'redaccion_libre').length,
     responseModeOptions: responseOptions.length,
     declaredContestacionesOptions: declaredResponseTypes.length,
@@ -258,7 +268,7 @@ export function renderWritingCoverageMarkdown(matrix) {
     `- IDs legacy seleccionables: ${matrix.summary.legacySelectableIds}`,
     `- Plantillas: ${matrix.summary.documentTemplateCount}`,
     `- IMPLEMENTED canónicos al inicio (excluye alias): ${matrix.summary.currentImplementedCount}`,
-    `- PASS demostrado con contrato E2E por tipo: ${matrix.summary.pass}`,
+    `- PASS con evidencia determinista por ID (writing-type-evidence): ${matrix.summary.pass}`,
     `- FAIL (incluye no demostrado; ver motivo por fila): ${matrix.summary.fail}`,
     `- BLOCKED_EXTERNAL: ${matrix.summary.blockedExternal}`,
     `- Opciones Contestaciones declaradas por capacidad: ${matrix.summary.declaredContestacionesOptions}; hoy seleccionables con PASS: ${matrix.summary.currentlySelectableContestacionesOptions}; modo libre: ${matrix.summary.responseModeOptions}`,
@@ -267,7 +277,7 @@ export function renderWritingCoverageMarkdown(matrix) {
     `- Candidatos que antes coincidían por nombre y ya no se agregan automáticamente: ${matrix.summary.priorResponseNameMatchCandidatesNoLongerSelected}`,
     '- Tabla ID por selector, machote/plantilla, source compatibility, pipeline, functionalStatus y humanReview: ver `SELECTOR_TRACEABILITY.md` y `selector-traceability.json`.',
     '',
-    '> PASS requiere evidencia del contrato completo de 36 puntos. Una plantilla, un alias o una referencia a un ID dentro de un test no son prueba E2E. FAIL significa que el criterio no está demostrado o tiene una carencia estructural; no implica por sí solo un defecto reproducido.',
+    '> PASS = evidencia determinista por ID (writing-type-evidence); no certifica el contenido jurídico (humanReview sigue en PENDING). Una plantilla, un alias o una referencia a un ID dentro de un test no son prueba E2E. FAIL significa que el criterio no está demostrado o tiene una carencia estructural; no implica por sí solo un defecto reproducido.',
     '',
     '## Hallazgos de catálogo y selección',
     '',
@@ -307,7 +317,7 @@ export function renderSelectorTraceabilityMarkdown(matrix) {
     '',
     `- Branch: \`${matrix.branch}\``,
     `- Rows: ${matrix.rows.length}; currently selectable Contestaciones/Initial/Universal: ${matrix.summary.currentlySelectableContestacionesOptions}/${matrix.summary.currentlySelectableInitialWritingOptions}/${matrix.summary.currentlySelectableUniversalOptions}.`,
-    `- Template presence remains structural only; PASS requires evidence for the full 36-point acceptance contract.`,
+    `- Template presence remains structural only; PASS means per-ID deterministic evidence (writing-type-evidence), not legal certification.`,
     '',
     '| ID | Label | Matter / family | Catalog / IMPLEMENTED | Contestaciones declared / selectable | Initial declared / selectable | Universal selectable | Catalog navigator visible / selectable | Preset/template | Source compatibility | Pipeline | functionalStatus | humanReview |',
     '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
@@ -315,7 +325,7 @@ export function renderSelectorTraceabilityMarkdown(matrix) {
       const source = row.sourceCompatibility
         ? `${row.sourceCompatibility.sourceRequired ? 'required' : 'optional'}; accepts=${(row.sourceCompatibility.acceptedSourceTypes || []).join(',') || (row.sourceCompatibility.acceptsAnySource ? 'any' : 'none')}`
         : 'MISSING';
-      const preset = `${row.customTemplateInventory}; built-in=${row.builtInTemplateId || 'none'}; ${row.presetCompatibility.matchRule}`;
+      const preset = `${row.customTemplateInventory}; built-in=${row.builtInTemplateId || 'none'} [${row.templateSource}]; ${row.presetCompatibility.matchRule}`;
       return `| ${row.id} | ${row.label.replaceAll('|', '\\|')} | ${row.matter} / ${row.family} | ${row.catalogStatus} / ${row.implementedFlag} | ${row.contestacionesCapabilityDeclared} / ${row.selectableInContestaciones} | ${row.initialWritingLegacyDeclared} / ${row.selectableInInitialWritings} | ${row.selectableInUniversal} | ${row.catalogNavigatorVisible} / ${row.selectableInCatalogNavigator} | ${preset.replaceAll('|', '\\|')} | ${source.replaceAll('|', '\\|')} | ${row.pipelineSupported ? `SUPPORTED (${row.routedId})` : `NO (${row.statusReason})`} | ${row.functionalStatus} | ${row.humanReview} |`;
     }),
     '',

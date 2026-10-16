@@ -61,7 +61,7 @@ export function ContestacionesConfigPanel({
   const usesTemplate = generationMode === 'personal_template';
   const [optionsOpen, setOptionsOpen] = React.useState(false);
   const moreOptionsButtonRef = React.useRef<HTMLButtonElement>(null);
-  const depthLabel = `máx. ${pageTarget.pages} pp.`;
+  const depthLabel = `obj. ${pageTarget.pages} pp.`;
 
   return (
     <section data-testid="contestaciones-config-panel" className="lex-card">

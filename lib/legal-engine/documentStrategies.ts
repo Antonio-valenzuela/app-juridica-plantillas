@@ -58,6 +58,32 @@ export const COMMERCIAL_ENFORCEMENT_REQUIRED_SECTION_IDS = [
 
 export type CommercialEnforcementRequiredSectionId = (typeof COMMERCIAL_ENFORCEMENT_REQUIRED_SECTION_IDS)[number];
 
+/**
+ * Rótulo legible de las secciones cuyos IDs son contrato (demanda civil y
+ * mercantil). El ID nunca deja de viajar en `section.id`/`estructura`: solo el
+ * TÍTULO visible deja de ser el identificador interno (`via_accion`).
+ */
+export const STRATEGY_SECTION_TITLES: Record<string, string> = {
+  destinatario: 'AUTORIDAD DESTINATARIA',
+  comparecencia: 'COMPARECENCIA',
+  personalidad: 'PERSONALIDAD',
+  identificacion_partes: 'IDENTIFICACIÓN DE PARTES',
+  via_accion: 'VÍA DE LA ACCIÓN O PROCEDIMIENTO',
+  documento_base: 'DOCUMENTO BASE DE LA ACCIÓN',
+  obligaciones_y_cantidades: 'OBLIGACIONES Y CANTIDADES',
+  prestaciones: 'PRESTACIONES',
+  hechos: 'HECHOS',
+  derecho: 'FUNDAMENTOS DE DERECHO',
+  pruebas: 'PRUEBAS',
+  petitorios: 'PETITORIOS',
+  firma: 'FIRMA',
+};
+
+/** Título visible de una sección cuando su ID es un identificador interno del contrato. */
+export function sectionDisplayTitle(sectionId: string): string {
+  return STRATEGY_SECTION_TITLES[sectionId] || sectionId;
+}
+
 export const COMMERCIAL_ENFORCEMENT_REQUIRED_FIELD_IDS = [
   'creditor',
   'debtor',

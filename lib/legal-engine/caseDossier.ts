@@ -1,9 +1,12 @@
 import type { UploadedSourceDocument } from './types';
 import { detectCaseFicha } from './caseFichaDetection';
-import { extractAddressedCourt } from './partyExtraction';
+import { extractAddressedCourt, extractCourtFromProse, extractInstitutionalAuthority, extractResponsibleAuthorityLabeled, normalizeCourtName, pickCourtDesignation } from './partyExtraction';
+import { detectUnnamedRoles, extractIssuingCourt, PROCEDURE_ROLES, PROCEDURE_ROLE_LABEL, type DetectedRole, type ProcedureRole } from './dossierRoles';
+import { presentsThroughIssuingCourt } from './documentTemplates';
 import { extractAppealResolutionReview, selectPrimaryAppealResolution } from './case-extraction/appealResolutionReview';
 import { proceduralActsOf } from './proceduralActs';
 import type { SignerRole, WritingContract } from './writingContract';
+import { validateRepresentedName } from './representedName';
 
 /**
  * Ficha del caso: lo que el sistema extrajo del expediente subido y el abogado CONFIRMA antes de redactar.
@@ -48,6 +51,14 @@ export interface CaseDossier {
   /** A quién representa el abogado: lo elige él, no se infiere. */
   representedSide?: ProcessSide;
   representedName?: string;
+  /** Rol procesal de la parte que representa el abogado: lo elige él, nunca se infiere. */
+  representedRole?: ProcedureRole;
+  /** Órgano que dictó la resolución fuente (sentencia, acuerdo, ejecutoria), si consta en prosa. */
+  issuingCourt?: string;
+  /** Autoridad responsable citada en la fuente (p. ej. en la transcripción de la demanda de amparo). */
+  sourceAuthority?: string;
+  /** Partes mencionadas en la fuente cuyo nombre no se puede leer (testado o ausente). */
+  detectedRoles?: DetectedRole[];
   confirmed: boolean;
   confirmedAt?: string;
   sourceFingerprint: string;
@@ -80,16 +91,72 @@ function titleCase(value: string): string {
     .map((word, index) => (index > 0 && SMALL_WORDS.has(word) ? word : word.charAt(0).toLocaleUpperCase('es-MX') + word.slice(1))).join(' ');
 }
 
-/** Lugar de la resolución: «ZAPOPAN, JALISCO A 12 DOCE DE AGOSTO…» / «Guadalajara, Jalisco, a veinte de…». */
+/**
+ * Entidades federativas (el lugar de presentación solo se acepta si la segunda parte es una de ellas: así
+ * «La denominada, BBVA Bancomer, a…» no pasa por lugar). Las más largas van primero.
+ */
+const STATES: ReadonlyArray<readonly [string, string]> = [
+  ['Baja\\s+California\\s+Sur', 'Baja California Sur'], ['Baja\\s+California', 'Baja California'], ['Aguascalientes', 'Aguascalientes'],
+  ['Campeche', 'Campeche'], ['Chiapas', 'Chiapas'], ['Chihuahua', 'Chihuahua'],
+  ['Ciudad\\s+de\\s+M[eé]xico', 'Ciudad de México'], ['CDMX', 'Ciudad de México'], ['Coahuila(?:\\s+de\\s+Zaragoza)?', 'Coahuila'], ['Colima', 'Colima'],
+  ['Durango', 'Durango'], ['Estado\\s+de\\s+M[eé]xico', 'Estado de México'], ['Edo\\.?\\s+de\\s+M[eé]x(?:ico|\\.)?', 'Estado de México'],
+  ['Guanajuato', 'Guanajuato'], ['Guerrero', 'Guerrero'], ['Hidalgo', 'Hidalgo'], ['Jalisco', 'Jalisco'], ['Jal\\.', 'Jalisco'],
+  ['Michoac[aá]n', 'Michoacán'], ['Morelos', 'Morelos'], ['Nayarit', 'Nayarit'], ['Nuevo\\s+Le[oó]n', 'Nuevo León'], ['Oaxaca', 'Oaxaca'],
+  ['Puebla', 'Puebla'], ['Quer[eé]taro', 'Querétaro'], ['Quintana\\s+Roo', 'Quintana Roo'], ['San\\s+Luis\\s+Potos[ií]', 'San Luis Potosí'],
+  ['Sinaloa', 'Sinaloa'], ['Sonora', 'Sonora'], ['Tabasco', 'Tabasco'], ['Tamaulipas', 'Tamaulipas'], ['Tlaxcala', 'Tlaxcala'],
+  ['Veracruz', 'Veracruz'], ['Yucat[aá]n', 'Yucatán'], ['Zacatecas', 'Zacatecas'],
+];
+const STATE_ALTERNATION = STATES.map(([source]) => source).join('|');
+const PLACE_DATE_RE = new RegExp(String.raw`(.{1,80}?),\s*(${STATE_ALTERNATION})(?![A-Za-zÁÉÍÓÚÑáéíóúñ])\.?\s*[,;]?\s*(?:(?:a|el|en)\s+)?(?:\d{1,2}\b|[A-Za-zÁÉÍÓÚÑáéíóúñ]+\s+(?:de|del)\s)`, 'i');
+const LEAD_IN_RE = /^[\s|“”"'_:;!+—–-]*(?:[a-zA-Z]{1,2}\s+)?(?:lugar\s+y\s+fecha\s*[:.\-]*\s*)?(?:en\s+)?(?:la\s+)?(?:(?:ciudad|villa|municipio)\s+de\s+)?$/i;
+// «Ciudad de México, a 2 de enero…»: la ciudad es a la vez la entidad.
+const CITY_IS_STATE_RE = /^[\s|“”"'_:;!+—–-]*(?:lugar\s+y\s+fecha\s*[:.\-]*\s*)?(?:en\s+(?:la\s+)?ciudad\s+de\s+)?(?:Ciudad\s+de\s+M[eé]xico|CDMX)\s*[.,;]?\s*(?:(?:a|el|en)\s+)?(?:\d{1,2}\b|[A-Za-zÁÉÍÓÚÑáéíóúñ]+\s+(?:de|del)\s)/i;
+const CITY_CONNECTORS = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y']);
+const NOT_A_CITY = /^(?:fecha|lugar|expediente|juzgado|tribunal|sala|denominada|denominado|domicilio|calle|colonia|banco|ciudad|municipio|estado|presente|primero|segundo|tercero)$/i;
+
+function canonicalState(raw: string): string {
+  const folded = raw.trim();
+  return STATES.find(([source]) => new RegExp(`^(?:${source})$`, 'i').test(folded))?.[1] || titleCase(folded);
+}
+
+/** Última población nombrada en el segmento («…, ZAPOPAN» → «Zapopan»; «e ZAPOPAN» → «Zapopan»). */
+function cityFromSegment(segment: string): string {
+  const tokens = segment.replace(/^[\s|“”"'_:;!+—–-]+/, '').split(/\s+/).filter(Boolean);
+  const taken: string[] = [];
+  for (let i = tokens.length - 1; i >= 0 && taken.length < 4; i--) {
+    const token = tokens[i].replace(/[.;:]+$/, '');
+    const capitalized = /^[A-ZÁÉÍÓÚÑ]/.test(token);
+    const connector = CITY_CONNECTORS.has(token.toLowerCase());
+    if (!capitalized && !connector) break;
+    if (capitalized && NOT_A_CITY.test(token)) break;
+    taken.unshift(token);
+  }
+  while (taken.length && CITY_CONNECTORS.has(taken[0].toLowerCase())) taken.shift();
+  while (taken.length && CITY_CONNECTORS.has(taken[taken.length - 1].toLowerCase())) taken.pop();
+  return taken.join(' ');
+}
+
+/**
+ * Lugar donde se dicta o presenta el escrito: «ZAPOPAN, JALISCO A 12 DOCE DE AGOSTO…» / «En la ciudad de
+ * Guadalajara, Jalisco, a veinte de…». Solo mira el encabezado y el cierre (donde se asientan lugar y fecha), la
+ * línea debe EMPEZAR con el lugar, y se exige una entidad federativa real: un domicilio («…EN ZAPOPAN
+ * JALISCO.»), una tesis transcrita o un nombre de empresa en el cuerpo no cuentan.
+ */
 export function extractCity(text: string): string {
-  const head = text.split(/\r?\n/).slice(0, 40);
-  for (const raw of head) {
-    const line = raw.replace(/^[\s|“”"'_:;!+—–-]+/, '').replace(/^(?:[a-zA-Z]{1,2}\s+)(?=[A-ZÁÉÍÓÚÑ]{3,})/, '');
-    const match = line.match(/([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,3}),\s*([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+){0,2}),?\s+(?:a|A)\s+(?:\d{1,2}\b|[A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+)?\s+(?:de|DE)\s)/);
-    if (!match) continue;
-    const city = match[1].trim();
-    if (/\b(?:fecha|lugar|expediente|juzgado|tribunal|sala)\b/i.test(city)) continue;
-    return `${titleCase(city)}, ${titleCase(match[2].trim())}`;
+  const lines = text.split(/\r?\n/);
+  const order = [...lines.slice(0, 40), ...lines.slice(-40)];
+  for (const raw of order) {
+    const cdmx = raw.match(CITY_IS_STATE_RE);
+    if (cdmx) return 'Ciudad de México';
+    const match = raw.match(PLACE_DATE_RE);
+    if (!match || (match.index ?? 0) > 5 || match[1].length > 45) continue;
+    const head = match[1];
+    const city = cityFromSegment(head.split(/[,;:|]/).pop() || '');
+    if (!city || city.length < 3) continue;
+    // Antes del lugar solo cabe una fórmula de apertura («Lugar y fecha:», «En la ciudad de»): nada más.
+    const rest = head.replace(new RegExp(`${city.split(' ').map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+')}[.;:]*\\s*$`), '');
+    if (rest === head || !LEAD_IN_RE.test(rest)) continue;
+    return `${titleCase(city)}, ${canonicalState(match[2])}`;
   }
   return '';
 }
@@ -210,9 +277,15 @@ export function buildCaseDossier(sources: UploadedSourceDocument[]): CaseDossier
 
   const appellantSide = appellantSideOf(briefs.map((brief) => brief.text), parties);
 
-  const court = primary?.court && !primary.court.startsWith('[')
-    ? primary.court
-    : ficha.autoridad || extractAddressedCourt(full) || '';
+  // Órgano al que se dirige el escrito: el de la resolución, o el del encabezado del propio documento. Debe ser
+  // de verdad un órgano jurisdiccional (nunca una frase suelta) y sin «PRESENTE» ni puntuación final.
+  const court = pickCourtDesignation([
+    primary?.court && !primary.court.startsWith('[') ? primary.court : undefined,
+    extractAddressedCourt(full),
+    ficha.autoridad,
+    extractInstitutionalAuthority(full),
+    extractCourtFromProse(full),
+  ]);
   const resolutionText = primary
     ? sources.flatMap((source) => (source.pages || []).filter((page) => page.page >= primary.startPage && page.page <= primary.endPage).map((page) => page.text)).join('\n')
     : full;
@@ -223,6 +296,11 @@ export function buildCaseDossier(sources: UploadedSourceDocument[]): CaseDossier
     ...(primary?.notification ? [{ date: primary.notification.date, description: `Notificación por boletín ${primary.notification.bulletin}` }] : []),
     ...extractNotifications(resolutionText),
   ].filter((item, index, all) => all.findIndex((other) => other.date.toLowerCase() === item.date.toLowerCase()) === index);
+
+  // Datos de procedencia del órgano y roles sin nombre legible: solo se guardan si constan en la fuente.
+  const issuingCourt = extractIssuingCourt(full);
+  const sourceAuthority = normalizeCourtName(extractResponsibleAuthorityLabeled(full) || '');
+  const detectedRoles = detectUnnamedRoles(full);
 
   const dossier: CaseDossier = {
     version: 1,
@@ -235,6 +313,9 @@ export function buildCaseDossier(sources: UploadedSourceDocument[]): CaseDossier
     agravios: dedupedAgravios,
     resolutivos: primary ? extractResolutivos(resolutionText) : [],
     ...(appellantSide ? { appellantSide } : {}),
+    ...(issuingCourt ? { issuingCourt } : {}),
+    ...(sourceAuthority ? { sourceAuthority } : {}),
+    ...(detectedRoles.length ? { detectedRoles } : {}),
     confirmed: false,
     sourceFingerprint: fingerprintOf(sources),
     missing: [],
@@ -270,7 +351,7 @@ function dossierMissing(dossier: CaseDossier): string[] {
 /* ── confirmación y validación ────────────────────────────────────────────── */
 
 export interface DossierProblem {
-  code: 'DOSSIER_NOT_CONFIRMED' | 'REPRESENTATION_NOT_CHOSEN' | 'REPRESENTATION_ROLE_MISMATCH' | 'REQUIRED_INPUT_MISSING';
+  code: 'DOSSIER_NOT_CONFIRMED' | 'REPRESENTATION_NOT_CHOSEN' | 'REPRESENTATION_NAME_INVALID' | 'REPRESENTATION_ROLE_MISMATCH' | 'REQUIRED_INPUT_MISSING';
   message: string;
   inputId?: string;
 }
@@ -316,6 +397,8 @@ export function validateDossierForContract(
   if (contract.needsRepresentation && (!dossier.representedName?.trim() || !dossier.representedSide)) {
     problems.push({ code: 'REPRESENTATION_NOT_CHOSEN', message: 'Indica a quién representas: el sistema no lo infiere.' });
   } else if (contract.needsRepresentation) {
+    const nameCheck = validateRepresentedName(dossier.representedName!);
+    if (!nameCheck.ok) problems.push({ code: 'REPRESENTATION_NAME_INVALID', message: nameCheck.message });
     const side = dossier.representedSide!;
     const expected = expectedSide(contract.signerRole, dossier.appellantSide);
     if (expected && side !== 'otro' && side !== expected) {
@@ -340,7 +423,7 @@ export function expectedSide(role: SignerRole, appellantSide?: ProcessSide): Pro
 /** Marca la ficha como confirmada por el abogado con la representación elegida. */
 export function confirmDossier(
   dossier: CaseDossier,
-  choice: { representedName: string; representedSide: ProcessSide; edits?: Partial<Pick<CaseDossier, 'court' | 'city' | 'expediente'>> },
+  choice: { representedName: string; representedSide: ProcessSide; representedRole?: ProcedureRole; edits?: Partial<Pick<CaseDossier, 'court' | 'city' | 'expediente'>> },
   now = new Date(),
 ): CaseDossier {
   const next: CaseDossier = {
@@ -348,6 +431,7 @@ export function confirmDossier(
     ...(choice.edits || {}),
     representedName: choice.representedName.trim(),
     representedSide: choice.representedSide,
+    ...(choice.representedRole ? { representedRole: choice.representedRole } : {}),
     confirmed: true,
     confirmedAt: now.toISOString(),
   };
@@ -356,12 +440,16 @@ export function confirmDossier(
 }
 
 /** Resumen de la ficha para el redactor: solo datos confirmados, sin contenido del expediente. */
-export function dossierSummaryText(dossier: CaseDossier): string {
+export function dossierSummaryText(dossier: CaseDossier, options: { documentType?: string } = {}): string {
+  // La procedencia del órgano solo se etiqueta en los escritos que se presentan por conducto del órgano que dictó la resolución.
+  const separated = presentsThroughIssuingCourt(options.documentType);
   const lines = [
     `- Órgano jurisdiccional: ${dossier.court || '(no consta)'}`,
+    ...(separated && dossier.issuingCourt ? [`- Órgano que dictó la resolución fuente: ${dossier.issuingCourt}`] : []),
+    ...(separated && dossier.sourceAuthority ? [`- Autoridad responsable citada: ${dossier.sourceAuthority}`] : []),
     `- Lugar: ${dossier.city || '(no consta)'}`,
     `- Expediente: ${dossier.expediente || '(no consta)'}`,
-    ...(dossier.representedName ? [`- Representa a: ${dossier.representedName}`] : []),
+    ...(dossier.representedName ? [`- Representa a: ${dossier.representedName}${dossier.representedRole ? ` (${PROCEDURE_ROLE_LABEL[dossier.representedRole]})` : ''}`] : []),
     ...dossier.parties.map((party) => `- Parte: ${party.name} (${party.role === 'actor' ? 'actora en el juicio de origen' : party.role === 'demandado' ? 'demandada en el juicio de origen' : 'otra'})`),
     ...(dossier.appellantSide ? [`- Apela la parte ${dossier.appellantSide === 'actor' ? 'actora' : 'demandada'} del juicio de origen`] : []),
     ...(dossier.resolution ? [`- Resolución: ${dossier.resolution.kind === 'AUTO' ? 'auto' : 'sentencia definitiva'}${dossier.resolution.date ? ` de ${dossier.resolution.date}` : ''}`] : []),
@@ -386,6 +474,7 @@ export { NUMERIC_DATE as DATE_IN_TEXT };
 const clean = (value: unknown, max = 500): string => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 const side = (value: unknown): ProcessSide | undefined => (value === 'actor' || value === 'demandado' || value === 'otro' ? value : undefined);
 const asArray = (value: unknown, max: number): unknown[] => (Array.isArray(value) ? value.slice(0, max) : []);
+const procedureRole = (value: unknown): ProcedureRole | undefined => (PROCEDURE_ROLES as readonly unknown[]).includes(value) ? value as ProcedureRole : undefined;
 
 /** Reconstruye una ficha recibida del cliente con tipos y longitudes acotados; null si no tiene la forma esperada. */
 export function parseCaseDossier(input: unknown): CaseDossier | null {
@@ -393,6 +482,9 @@ export function parseCaseDossier(input: unknown): CaseDossier | null {
   const raw = input as Record<string, unknown>;
   const fingerprint = clean(raw.sourceFingerprint, 80);
   if (!fingerprint) return null;
+  // La interfaz no es la única vía de entrada: el nombre de la parte representada se valida también aquí.
+  const representedName = clean(raw.representedName, 200);
+  if (representedName && !validateRepresentedName(representedName).ok) return null;
   const parties = asArray(raw.parties, 30).flatMap((item): DossierParty[] => {
     const party = item as Record<string, unknown>;
     const name = clean(party?.name, 200);
@@ -404,6 +496,13 @@ export function parseCaseDossier(input: unknown): CaseDossier | null {
     return typeof agravio?.number === 'number' && body ? [{ number: agravio.number, text: body, ...(typeof agravio.page === 'number' ? { page: agravio.page } : {}) }] : [];
   });
   const resolution = raw.resolution && typeof raw.resolution === 'object' ? raw.resolution as Record<string, unknown> : undefined;
+  const detectedRoles = asArray(raw.detectedRoles, 8).flatMap((item): DetectedRole[] => {
+    const entry = item as Record<string, unknown>;
+    const role = procedureRole(entry?.role);
+    const label = clean(entry?.label, 120);
+    const nameStatus = entry?.nameStatus === 'ABSENT' ? 'ABSENT' : entry?.nameStatus === 'REDACTED' ? 'REDACTED' : undefined;
+    return role && label && nameStatus ? [{ role, nameStatus, label }] : [];
+  });
   const dossier: CaseDossier = {
     version: 1,
     court: clean(raw.court),
@@ -426,7 +525,11 @@ export function parseCaseDossier(input: unknown): CaseDossier | null {
     resolutivos: asArray(raw.resolutivos, 30).map((item) => clean(item, 4000)).filter(Boolean),
     ...(side(raw.appellantSide) ? { appellantSide: side(raw.appellantSide) } : {}),
     ...(side(raw.representedSide) ? { representedSide: side(raw.representedSide) } : {}),
-    ...(clean(raw.representedName, 200) ? { representedName: clean(raw.representedName, 200) } : {}),
+    ...(representedName ? { representedName } : {}),
+    ...(procedureRole(raw.representedRole) ? { representedRole: procedureRole(raw.representedRole) } : {}),
+    ...(clean(raw.issuingCourt) ? { issuingCourt: clean(raw.issuingCourt) } : {}),
+    ...(clean(raw.sourceAuthority) ? { sourceAuthority: clean(raw.sourceAuthority) } : {}),
+    ...(detectedRoles.length ? { detectedRoles } : {}),
     confirmed: raw.confirmed === true,
     ...(clean(raw.confirmedAt, 40) ? { confirmedAt: clean(raw.confirmedAt, 40) } : {}),
     sourceFingerprint: fingerprint,

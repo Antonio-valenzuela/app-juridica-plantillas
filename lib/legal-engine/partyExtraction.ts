@@ -91,7 +91,7 @@ const JURISDICTIONAL_DESIGNATION_RE = new RegExp(
  */
 const DEICTIC_START_RE = /^(?:ESTE|ESTA|ESE|ESA|ESTOS|ESTAS|DICH[OA]S?|AQUEL(?:LA)?|MI|MIS|NUESTR[OA]S?|SU|SUS)(?:\s|$)/i;
 const GENERIC_ROLE_RE =
-  /^(?:(?:EL|LA|LOS|LAS)\s+)?(?:PARTE\s+)?(?:ACTOR(?:A|ES)?|DEMANDAD[OA]S?|QUEJOS[OA]S?|PROMOVENTES?|RECURRENTES?|TERCER[OA]S?(?:\s+INTERESAD[OA]S?)?|OCURSANTES?|SUSCRIT[OA]S?|COMPARECIENTES?|APODERAD[OA]S?|MANDANTES?|PODERDANTES?|REPRESENTAD[OA]S?|CONTRAPARTE|AUTORIDAD(?:ES)?\s+RESPONSABLES?)\.?$/i;
+  /^(?:(?:EL|LA|LOS|LAS)\s+)?(?:PARTE\s+)?(?:ACTOR(?:A|ES)?|DEMANDAD[OA]S?|QUEJOS[OA]S?|PROMOVENTES?|RECURRENTES?|TERCER[OA]S?(?:\s+INTERESAD[OA]S?)?|OCURSANTES?|SUSCRIT[OA]S?|COMPARECIENTES?|APODERAD[OA]S?|MANDANTES?|PODERDANTES?|REPRESENTAD[OA]S?|CONTRAPARTE|AUTORIDAD(?:ES)?\s+RESPONSABLES?|PERSONA\s+(?:MORAL|F[IÍ]SICA)|EMPRESA|SOCIEDAD|INSTITUCI[OÓ]N)(?:\s+(?:YA\s+)?(?:DESCRIT[OA]|MENCIONAD[OA]|SE[ÑN]ALAD[OA]|REFERID[OA]|CITAD[OA]|DENOMINAD[OA])\b.*)?\.?$/i;
 
 /** Los extractores recorren TODAS las apariciones: sin bandera `g`, `exec` repetiría siempre la primera. */
 function withGlobal(flags: string): string {
@@ -100,6 +100,60 @@ function withGlobal(flags: string): string {
 
 /** Fórmulas de cortesía o cierre del escrito ("P R E S E N T E", "PROTESTO LO NECESARIO"). */
 const FORMULA_RE = /^(?:P\s*R\s*E\s*S\s*E\s*N\s*T\s*E|PROTESTO|ATENTAMENTE|BAJO\s+PROTESTA)\b/i;
+
+/**
+ * Denominación del órgano como debe aparecer en el escrito: sin la fórmula de cortesía «PRESENTE» que la sigue
+ * en el mismo renglón ni la puntuación final.
+ */
+export function normalizeCourtName(raw: string | undefined | null): string {
+  return String(raw || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[\s,.;:–—-]*P\s*R\s*E\s*S\s*E\s*N\s*T\s*E[\s.,;:]*$/i, '')
+    .replace(/[\s,.;:–—-]+$/, '')
+    .trim();
+}
+
+/**
+ * «MAGISTRADO PONENTE», «SECRETARIA», «MINISTRO PRESIDENTE»…: la etiqueta de un funcionario, no el órgano. Sin un
+ * sustantivo de órgano (tribunal, juzgado, sala, pleno, junta…) no es a quién se dirige el escrito. «JUEZ TERCERO DE
+ * LO CIVIL» sí lo es: el juez designa al juzgado.
+ */
+export function isOfficialLabelOnly(raw: string): boolean {
+  const name = normalizeCourtName(raw);
+  if (/\b(?:TRIBUNAL|JUZGADO|SALA|PLENO|JUNTA|CENTRO|[OÓ]RGANO|CORTE|COLEGIADO)\b/i.test(name)) return false;
+  return /^(?:(?:EL|LA|LOS|LAS|C\.|CC\.|H\.)\s+)*(?:MAGISTRAD[OA]S?|MINISTR[OA]S?|SECRETARI[OA]S?|ACTUARI[OA]S?|NOTIFICADOR[A]?)\b/i.test(name);
+}
+
+/**
+ * `CaseAnalysis.authorities` mezcla autoridades con las normas y tesis citadas en la fuente («Ley Orgánica del Poder
+ * Judicial de la Federación abrogada»). Para nombrar al órgano solo sirve una denominación de órgano.
+ */
+export function firstIssuingAuthority(list: ReadonlyArray<string> | undefined): string | undefined {
+  return (list || []).find((item) => /\b(?:tribunal|juzgado|sala|pleno|junta|corte|juez|jueza|magistrad[oa]s?|centro|[oó]rgano)\b/i.test(item)
+    && !/^(?:art[ií]culos?|ley|c[oó]digo|reglamento|constituci[oó]n|tesis|jurisprudencia|acuerdo)\b/i.test(item.trim()));
+}
+
+/**
+ * Órgano que emitió la resolución cuando solo aparece en prosa («Acuerdo del Segundo Tribunal Colegiado en Materia de
+ * Trabajo del Tercer Circuito, correspondiente a la sesión…»), sin MAYÚSCULAS ni encabezado dirigido.
+ */
+export function extractCourtFromProse(corpus: string): string | undefined {
+  const head = (corpus || '').slice(0, 6000);
+  const match = head.match(/(?:[Aa]cuerdo|[Ss]entencia|[Rr]esoluci[oó]n|[Ee]jecutoria|[Aa]uto)\s+(?:del?|emitid[oa]\s+por\s+el)\s+((?:[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+)?(?:Tribunal\s+Colegiado|Pleno|Sala|Juzgado)[^,.;\n]{3,120})/);
+  const name = match ? normalizeCourtName(match[1]) : '';
+  // «Segundo Tribunal Colegiado…»: el ordinal precede al sustantivo del órgano.
+  const core = name.replace(/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+(?=(?:Tribunal|Pleno|Sala|Juzgado))/, '');
+  return name && isJurisdictionalDesignation(core) ? name : undefined;
+}
+
+/** Primer candidato que sea de verdad un órgano jurisdiccional (nunca una frase suelta), ya normalizado. */
+export function pickCourtDesignation(candidates: Array<string | undefined | null>): string {
+  for (const candidate of candidates) {
+    const name = normalizeCourtName(candidate);
+    if (name && name.length <= 220 && isJurisdictionalDesignation(name) && !isOfficialLabelOnly(name)) return name;
+  }
+  return '';
+}
 
 /** True si el texto designa al órgano jurisdiccional o a uno de sus funcionarios. */
 export function isJurisdictionalDesignation(raw: string | undefined | null): boolean {
@@ -156,12 +210,22 @@ const SENTENCE_FUNCTION_WORDS = new Set([
  * recurso, el compareciente es otra parte y no debe rotularse como actor.
  */
 export function initiatesAction(corpus: string): boolean {
-  return /\b(?:vengo\s+a\s+(?:demandar|promover|solicitar\s+el\s+amparo)|promuevo\s+(?:juicio|demanda|formal\s+demanda)|interpongo\s+(?:formal\s+)?(?:demanda|juicio)|demando\s+(?:en\s+la\s+v[ií]a|a\b|de\b|en\s+contra)|solicito\s+(?:el\s+amparo|la\s+protecci[oó]n\s+de\s+la\s+justicia\s+federal)|entablo\s+formal\s+demanda)/i.test(corpus || '');
+  const text = corpus || '';
+  if (/\b(?:vengo\s+a\s+(?:demandar|promover|solicitar\s+el\s+amparo)|venimos\s+a\s+(?:demandar|promover)|promuevo\s+(?:juicio|demanda|formal\s+demanda)|promovemos\s+(?:juicio|demanda|formal\s+demanda)|interpongo\s+(?:formal\s+)?(?:demanda|juicio)|interponemos\s+(?:formal\s+)?(?:demanda|juicio)|demando\s+(?:en\s+la\s+v[ií]a|a\b|de\b|en\s+contra)|demandamos\s+(?:en\s+la\s+v[ií]a|a\b|de\b|en\s+contra)|solicito\s+(?:el\s+amparo|la\s+protecci[oó]n\s+de\s+la\s+justicia\s+federal)|entablo\s+(?:formal\s+)?demanda|(?:comparezco|comparecemos|ocurro|ocurrimos)\s+a\s+(?:entablar|demandar|promover)|entablar\s+(?:formal\s+)?demanda|(?:presento|presentamos|formulo|formulamos)\s+(?:formal\s+)?demanda)/i.test(text)) return true;
+  // Demanda sin verbo de apertura reconocible: exposición con PRESTACIONES y HECHOS y ninguna señal de contestar.
+  const answers = /\b(?:dar|doy|damos|producir)\s+contestaci[oó]n\b|\bcontest(?:o|amos)\s+(?:la|a\s+la)\s+demanda\b|\bopongo\s+(?:las\s+)?excepciones\b/i.test(text);
+  const heading = (word: string) => new RegExp(String.raw`(?:^|\n)[ \t]*${word.split('').join(String.raw`\s*`)}\s*[:.\-]*[ \t]*(?:\n|$)`, 'i');
+  return !answers && heading('PRESTACIONES').test(text) && heading('HECHOS').test(text);
 }
 
 // Persona moral: «CRÉDITOS SINTÉTICOS, S.A. DE C.V., por conducto de su apoderado…». El sufijo societario
 // no forma parte del nombre capturado (como en REPRESENTATION_RE).
-const PROEMIO_RE = /(?:^|\n)[ \t]*(?:C\.[ \t]+|CIUDADAN[OA][ \t]+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ. \t]{3,80}?)(?:,\s*(?:S\.?\s*A\.?(?:\s*DE\s*C\.?\s*V\.?)?|S\.?\s*C\.?|S\.?\s*DE\s*R\.?\s*L\.?(?:\s*DE\s*C\.?\s*V\.?)?|A\.?\s*C\.?|S\.?\s*A\.?\s*P\.?\s*I\.?(?:\s*DE\s*C\.?\s*V\.?)?))?,\s*(?:mexican[oa]|mayor\s+de\s+edad|solter[oa]|casad[oa]|por\s+mi\s+propio\s+derecho|por\s+propio\s+derecho|en\s+mi\s+car[aá]cter|en\s+nombre\s+y\s+representaci[oó]n|se[ñn]alando\s+como\s+domicilio|por\s+conducto\s+de\s+su\s+(?:apoderad[oa]|representante))/g;
+// Los escritos vienen igual en minúsculas que en MAYÚSCULAS: los marcadores del proemio no distinguen mayúsculas
+// (el nombre sí: debe empezar y seguir en mayúsculas para no confundirse con prosa).
+const ciPhrase = (phrase: string) => phrase.split(' ').map((word) => word.replace(/[a-záéíóúñ]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`)).join(String.raw`\s+`);
+const PROEMIO_MARKER = ['mexicanos', 'mexicanas', 'mexicano', 'mexicana', 'mayores de edad', 'mayor de edad', 'solteros', 'solteras', 'soltero', 'soltera', 'casados', 'casadas', 'casado', 'casada', 'por mi propio derecho', 'por propio derecho', 'por nuestro propio derecho', 'por nuestros propios derechos', 'en mi carácter', 'en mi caracter', 'en nombre y representación', 'en nombre y representacion', 'señalando como domicilio', 'senalando como domicilio', 'por conducto de su apoderado', 'por conducto de su apoderada', 'por conducto de su representante']
+  .map(ciPhrase).join('|');
+const PROEMIO_RE = new RegExp(String.raw`(?:^|\n)[ \t]*(?:CC?\.[ \t]+|CIUDADAN[OA]S?[ \t]+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ. \t]{3,120}?)(?:,\s*(?:S\.?\s*A\.?(?:\s*DE\s*C\.?\s*V\.?)?|S\.?\s*C\.?|S\.?\s*DE\s*R\.?\s*L\.?(?:\s*DE\s*C\.?\s*V\.?)?|A\.?\s*C\.?|S\.?\s*A\.?\s*P\.?\s*I\.?(?:\s*DE\s*C\.?\s*V\.?)?))?,\s*(?:${PROEMIO_MARKER})`, 'g');
 
 /**
  * Nombre de quien comparece en el proemio ("JUAN PÉREZ, por mi propio derecho…").
@@ -187,7 +251,7 @@ export function extractProemioCompareciente(corpus: string): string | undefined 
 
 const REPRESENTATION_RE = /en\s+(?:mi|su)\s+car[aá]cter\s+de\s+(?:apoderad[oa]|representante|mandatari[oa])(?:\s+(?:legal|general|jur[ií]dic[oa]))?(?:\s+para\s+pleitos\s+y\s+cobranzas)?\s+de\s+(?:la\s+(?:persona\s+)?moral\s+(?:denominada\s+)?)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.&\s]{3,90}?)(?:,\s*(?:S\.?\s*A\.?|S\.?\s*C\.?|S\.?\s*de\s*R\.?\s*L\.?)[^,]*)?(?:,|\s+personalidad|\s+parte|\s+ante|\s+con\s+domicilio|\n)/;
 
-const ACTION_TARGET_RE = /(?:vengo\s+a\s+demandar(?:\s+formalmente)?(?:\s+en\s+la\s+v[íi]a[^,\n]+?)?\s+(?:en\s+contra\s+de(?:l)?|a)|demando\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|se\s+demanda\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|demandar\s+(?:la\s+nulidad[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a))\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.,\s]{3,80}?)(?:\s+y\/o|\s*,\s*|\s+con\s+domicilio|\s+qui[eé]n|\s*\n)/gi;
+const ACTION_TARGET_RE = /(?:entablar\s+(?:formal\s+)?demanda(?:\s+en\s+la\s+v[íi]a[^,\n]+?)?\s+(?:en\s+contra\s+de(?:l)?|contra|a)|vengo\s+a\s+demandar(?:\s+formalmente)?(?:\s+en\s+la\s+v[íi]a[^,\n]+?)?\s+(?:en\s+contra\s+de(?:l)?|a)|demando\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|se\s+demanda\s+(?:en\s+la\s+v[íi]a[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a)|demandar\s+(?:la\s+nulidad[^,\n]+?\s+)?(?:en\s+contra\s+de(?:l)?|a))\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ.,\s]{3,80}?)(?:\s+y\/o|\s*,\s*|\s+con\s+domicilio|\s+qui[eé]n|\s*\n)/gi;
 
 /**
  * «vengo a demandar a JUAN PÉREZ el pago de…»: sin coma, la captura se lleva el objeto de la acción.
@@ -211,7 +275,7 @@ export function extractActionTarget(corpus: string): string | undefined {
   while ((match = re.exec(corpus || '')) !== null && guard < 50) {
     guard++;
     // "en contra de la SECRETARÍA…": el artículo en minúscula no forma parte del nombre.
-    const candidate = trimClaimObject(trimToSentence(match[1].trim().replace(/^de(?:l)?\s+/i, '').replace(/^(?:la|el|los|las)\s+(?=[A-ZÁÉÍÓÚÑ])/, '')));
+    const candidate = trimClaimObject(trimToSentence(match[1].trim().replace(/^de(?:l)?\s+/i, '').replace(/^(?:la|el|los|las|LA|EL|LOS|LAS)\s+(?=[A-ZÁÉÍÓÚÑ])/, '')));
     if (isValidProceduralPartyName(candidate)) return candidate;
     if (re.lastIndex === match.index) re.lastIndex++;
   }
@@ -227,7 +291,7 @@ export function extractAddressedCourt(corpus: string): string | undefined {
   const lines = (corpus || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 20);
   for (let index = 0; index < lines.length; index++) {
     const match = lines[index].match(/^(?:(?:C\.|CC\.|H\.|CIUDADAN[OA])\s*)?((?:JUEZ(?:A)?|JUZGADO|TRIBUNAL|SALA|MAGISTRAD[OA]|JUNTA|PRESIDENT[EA]\s+DE\s+LA\s+JUNTA)\b[^\n]{3,140})$/i);
-    if (!match || !isInstitutionalCaps(match[1])) continue;
+    if (!match || !isInstitutionalCaps(match[1]) || isOfficialLabelOnly(match[1])) continue;
     let name = match[1].replace(/\s+/g, ' ').replace(/[.,;:]+$/, '').trim();
     // Continuación envuelta del nombre ("DEL PRIMER PARTIDO JUDICIAL"). El OCR parte la
     // denominación en cualquier palabra: se une mientras la línea actual termine en un
@@ -346,7 +410,10 @@ export function extractInstitutionalAuthority(corpus: string): string | undefine
       // absorber las líneas de continuación del nombre envuelto.
       const acc = absorbNameFromTail(m[0], corpus.slice(m.index + m[0].length));
       const candidate = trimToSentence(acc);
-      if (isInstitutionalCaps(candidate) && isValidPartyName(candidate)) return candidate;
+      // «Ley Orgánica del Poder Judicial de la Federación» nombra un ordenamiento, no a la autoridad.
+      const before = corpus.slice(Math.max(0, m.index - 48), m.index);
+      const namesALaw = /(?:\bley|\bc[oó]digo|\breglamento|\bconstituci[oó]n|\bdecreto|\bacuerdo\s+general)\s+(?:org[aá]nic[ao]\s+)?(?:(?:de|del|de\s+la|de\s+los)\s+)?(?:[a-záéíóúñ]+\s+){0,2}$/i.test(before);
+      if (!namesALaw && isInstitutionalCaps(candidate) && isValidPartyName(candidate)) return candidate;
       if (re.lastIndex === m.index) re.lastIndex++;
     }
   }
@@ -406,8 +473,8 @@ const AUTHORITY_LABEL_PATTERNS: RegExp[] = [
  * complementaria, en frontera de oración o cuando la línea siguiente ya no
  * continúa el nombre en mayúsculas. Nunca absorbe fechas ni oraciones ajenas.
  */
-export function extractAuthorityLabeled(corpus: string): string | undefined {
-  for (const labelPattern of AUTHORITY_LABEL_PATTERNS) {
+export function extractAuthorityLabeled(corpus: string, labelPatterns: readonly RegExp[] = AUTHORITY_LABEL_PATTERNS): string | undefined {
+  for (const labelPattern of labelPatterns) {
     const re = new RegExp(labelPattern.source, 'gi');
     let m: RegExpExecArray | null;
     let guard = 0;
@@ -420,6 +487,11 @@ export function extractAuthorityLabeled(corpus: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** Solo la autoridad RESPONSABLE citada («autoridad(es) responsable(s)…»), sin los demás rótulos de órgano. */
+export function extractResponsibleAuthorityLabeled(corpus: string): string | undefined {
+  return extractAuthorityLabeled(corpus, AUTHORITY_LABEL_PATTERNS.slice(0, 1));
 }
 
 /**

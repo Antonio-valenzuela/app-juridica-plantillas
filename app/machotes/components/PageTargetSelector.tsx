@@ -61,7 +61,7 @@ export function PageTargetSelector({ value, onChange, disabled = false }: PageTa
 
   return (
     <div data-testid="page-target-selector">
-      <p className="lex-field-label" id={`${groupId}-label`}>Extensión máxima del escrito</p>
+      <p className="lex-field-label" id={`${groupId}-label`}>Extensión objetivo del escrito</p>
       <div
         role="radiogroup"
         aria-labelledby={`${groupId}-label`}
@@ -82,7 +82,7 @@ export function PageTargetSelector({ value, onChange, disabled = false }: PageTa
             <span aria-hidden="true">{preset.label}<small> {preset.pages}</small></span>
           </label>
         ))}
-        <label className={customActive ? 'is-active' : undefined} title="Máximo de páginas a elección">
+        <label className={customActive ? 'is-active' : undefined} title="Objetivo de páginas a elección">
           <input
             type="radio"
             name={`${groupId}-pages`}
@@ -90,7 +90,7 @@ export function PageTargetSelector({ value, onChange, disabled = false }: PageTa
             checked={customActive}
             disabled={disabled}
             onChange={chooseCustom}
-            aria-label="Personalizado, máximo de páginas a elección"
+            aria-label="Personalizado, objetivo de páginas a elección"
           />
           <span aria-hidden="true">Personalizado</span>
         </label>
@@ -98,7 +98,7 @@ export function PageTargetSelector({ value, onChange, disabled = false }: PageTa
 
       {customActive && (
         <div className="lex-page-target-custom">
-          <label htmlFor={`${groupId}-custom`} className="lex-field-label">Máximo de páginas</label>
+          <label htmlFor={`${groupId}-custom`} className="lex-field-label">Objetivo de páginas</label>
           <input
             id={`${groupId}-custom`}
             type="number"

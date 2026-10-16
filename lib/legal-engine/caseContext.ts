@@ -1,4 +1,5 @@
 import type { CaseAnalysis } from './caseAnalysis';
+import { firstIssuingAuthority } from './partyExtraction';
 import type { DocumentParties, ProvenanceKind, UploadedSourceDocument } from './types';
 import {
   inferSourceOutputType,
@@ -1088,7 +1089,7 @@ export function buildCaseContext(
     amparoIndirecto: extractedField('amparoIndirecto', 'Número de amparo indirecto', analysis.caseNumbers?.amparoIndirecto),
     toca: extractedField('toca', 'Número de toca', analysis.caseNumbers?.toca),
     juzgado: extractedField('juzgado', 'Juzgado competente', undefined),
-    tribunal: extractedField('tribunal', 'Tribunal competente', analysis.authorities?.[0]),
+    tribunal: extractedField('tribunal', 'Tribunal competente', firstIssuingAuthority(analysis.authorities)),
   };
   const facts = (analysis.facts || []).map((item) => ({
     key: `fact_${item.id}`,

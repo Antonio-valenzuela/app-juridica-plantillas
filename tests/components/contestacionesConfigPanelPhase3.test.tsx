@@ -24,9 +24,10 @@ describe('selector de extensión de la contestación', () => {
     const html = render();
     for (const label of ['Breve', 'Intermedio', 'Detallado', 'Extenso', 'Personalizado']) expect(html).toContain(label);
     expect(html).toContain(PAGE_TARGET_HELP_TEXT);
-    // Contrato cambiado (2026-10-14): la extensión es un máximo, no una meta.
-    expect(html).toContain('no añade contenido para llenar páginas');
-    expect(html).toContain('Extensión máxima del escrito');
+    // Contrato cambiado (2026-10-16): la extensión es un objetivo de generación, sin relleno ni invención.
+    expect(html).toContain('objetivo de generación');
+    expect(html).toContain('sin repetir ni inventar');
+    expect(html).toContain('Extensión objetivo del escrito');
     expect(html).toMatch(/checked=""[^>]*value="DETALLADO"|value="DETALLADO"[^>]*checked=""/);
     expect(html).not.toMatch(/checked=""[^>]*value="EXTENSO"|value="EXTENSO"[^>]*checked=""/);
     expect(html).not.toContain('name="draftDepth"');

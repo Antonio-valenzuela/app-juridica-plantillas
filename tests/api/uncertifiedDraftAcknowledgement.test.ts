@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { CANONICAL_DOCUMENT_TYPES } from '@/lib/catalog/legalCatalog';
 
 const mocks = vi.hoisted(() => ({ runGenerationPipeline: vi.fn() }));
 
@@ -23,6 +24,19 @@ vi.mock('@/lib/legal-engine/pipeline', () => ({
 }));
 
 import { POST } from '@/app/api/legal-engine/generate/route';
+
+// Política vigente: functionalStatus se calcula con evidencia por ID y hoy todo tipo IMPLEMENTED es PASS. Para probar la
+// compuerta de acknowledgement de un tipo IMPLEMENTED + FAIL (p. ej. si su evidencia retrocede), se simula esa regresión
+// SOLO durante la prueba sobre un tipo derivado, sin tocar el catálogo en disco.
+const FAIL_FIXTURE_TYPE = 'contestacion_proveedor';
+let restoreCatalogStatus: () => void = () => undefined;
+beforeEach(() => {
+  const entry = CANONICAL_DOCUMENT_TYPES.find((item) => item.id === FAIL_FIXTURE_TYPE)!;
+  const previous = entry.functionalStatus;
+  (entry as { functionalStatus: string }).functionalStatus = 'FAIL';
+  restoreCatalogStatus = () => { (entry as { functionalStatus: string }).functionalStatus = previous; };
+});
+afterEach(() => restoreCatalogStatus());
 
 beforeEach(() => {
   mocks.runGenerationPipeline.mockReset();

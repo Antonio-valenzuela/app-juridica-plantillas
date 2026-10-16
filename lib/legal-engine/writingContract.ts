@@ -201,14 +201,14 @@ export function getWritingContract(documentType: string): WritingContract {
 }
 
 /** Instrucciones de voz y de contenido que se anteponen a cada solicitud al redactor. */
-export function buildWritingContractPrompt(contract: WritingContract, dossierSummary?: string, maxPages?: number): string {
+export function buildWritingContractPrompt(contract: WritingContract, dossierSummary?: string, targetPages?: number): string {
   return [
     'REGLAS OBLIGATORIAS DEL ESCRITO',
     `- Quien firma y habla es la ${contract.signerLabel}${contract.counterpartLabel !== 'parte' ? `; la contraparte (${contract.counterpartLabel}) nunca es quien habla ni se defiende su postura` : ''}.`,
     '- Usa únicamente los datos de la FICHA DEL CASO para nombres, órgano jurisdiccional, lugar, fechas y número de expediente. No inventes ninguno.',
     '- Cada sección contiene solo su contenido: no escribas encabezados, firmas, «lugar y fecha», ni el escrito completo dentro de una sección.',
     '- Escribe solo lo que el expediente sostiene. No rellenes ni repitas: si el material no alcanza, el texto es más corto.',
-    ...(maxPages ? [`- La extensión máxima del escrito completo es de ${maxPages} páginas. Es un máximo, no una meta: no lo alcances a la fuerza.`] : []),
+    ...(targetPages ? [`- La extensión objetivo del escrito completo es de ${targetPages} páginas: cada sección debe desarrollar a fondo su función (análisis de hechos, valoración de pruebas, regla aplicable y su aplicación concreta, refutación y efecto procesal) con material del expediente. La extensión nunca autoriza repetir, parafrasear en bucle ni inventar hechos o fundamentos.`] : []),
     '- No escribas notas, riesgos ni consejos al abogado dentro del escrito (nada de «podría argumentarse», «la parte debe asegurar», «la presente ampliación»).',
     '- No cites artículos, tesis, jurisprudencia ni órganos jurisdiccionales que no aparezcan en las fuentes provistas. Si falta fundamento, no lo cites.',
     ...(dossierSummary ? ['', 'FICHA DEL CASO (única fuente de datos permitida):', dossierSummary] : []),

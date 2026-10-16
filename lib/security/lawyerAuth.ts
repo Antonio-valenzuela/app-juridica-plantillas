@@ -19,7 +19,7 @@ export interface LawyerAccessContext {
  */
 
 // Caché de la identidad ya resuelta contra la BD: tolera parpadeos breves de la
-// conexión (p. ej. cold-start de Postgres serverless) sin fabricar identidad falsa.
+// base local (p. ej. archivo SQLite bloqueado momentáneamente) sin fabricar identidad falsa.
 let cachedLawyerContext: LawyerAccessContext | null = null;
 let localFallbackCachedAt = 0;
 const LOCAL_FALLBACK_TTL_MS = 30_000;
@@ -61,9 +61,9 @@ export function clearCachedLawyerContext(): void {
 
 /**
  * El flujo local de la edición de Windows puede extraer fuentes y ejecutar
- * jobs efímeros aunque el workspace remoto esté sin cuota. Este escape está
- * limitado a desarrollo y a endpoints concretos; no habilita persistencia
- * remota ni se activa en producción.
+ * jobs efímeros aunque la base SQLite local no responda (bloqueada, sin
+ * permisos). Este escape está limitado a desarrollo y a endpoints concretos;
+ * no crea identidad persistente ni se activa en producción.
  */
 function allowsLocalWorkspaceFallback(request: Request): boolean {
   if (process.env.NODE_ENV === 'production' || !isDemoModeEnabled()) return false;

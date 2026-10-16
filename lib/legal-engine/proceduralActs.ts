@@ -104,7 +104,9 @@ export function classifyPageStart(pageText: string, ignoredHeaders: ReadonlySet<
 
   // Escritos de parte: se reconocen por su encabezado y fórmula de comparecencia/promoción.
   const demandaHeading = head5.find((line) => /^(?:demanda|escrito\s+inicial)\b/.test(line));
-  const initiation = /\b(?:vengo\s+a\s+(?:demandar|promover|ejercer)|promuevo\s+(?:demanda|juicio)|interpongo\s+(?:demanda|accion)|demando)\b/.test(full);
+  // Fórmulas con que se inicia una demanda: «vengo a demandar», «comparezco a entablar formal demanda»,
+  // «ocurro a demandar», «presento/formulo demanda», «entablo demanda», «promuevo juicio»…
+  const initiation = /\b(?:(?:vengo|comparezco|ocurro|acudo)\s+(?:a|ante\s+usted\s+a)\s+(?:entablar|demandar|promover|ejercer|formular|presentar)\b|(?:promuevo|presento|formulo|entablo|interpongo)\s+(?:formal\s+)?(?:demanda|juicio|accion)|entablar\s+(?:formal\s+)?demanda|demando)\b/.test(full);
   const pleadingStructure = /\b(?:hechos|puntos\s+petitorios|prestaciones|pretensiones)\b/.test(full);
   if (demandaHeading && (initiation || pleadingStructure)) {
     return { kind: 'DEMANDA', evidence: demandaHeading, confidence: initiation ? 0.95 : 0.85 };
@@ -115,7 +117,9 @@ export function classifyPageStart(pageText: string, ignoredHeaders: ReadonlySet<
   if (partyWriting && /\bvengo\s+a\s+(?:dar\s+)?contesta(?:r|cion)\b[^.]{0,40}\bdemanda\b/.test(full)) {
     return { kind: 'CONTESTACION', evidence: 'comparecencia que contesta la demanda', confidence: 0.85 };
   }
-  const amparoRequest = /\b(?:solicit(?:o|ar)\s+el\s+amparo|demanda\s+de\s+amparo|juicio\s+de\s+amparo|amparo\s+y\s+proteccion)\b/.test(full);
+  // Solo el proemio dice qué acción se ejerce: una demanda civil que CITA jurisprudencia de amparo («al resolver el juicio
+  // de amparo directo 210/1997…») no es una demanda de amparo.
+  const amparoRequest = /\b(?:solicit(?:o|ar)\s+el\s+amparo|demanda\s+de\s+amparo|juicio\s+de\s+amparo|amparo\s+y\s+proteccion)\b/.test(full.slice(0, 2500));
   if (partyWriting && initiation && pleadingStructure && !amparoRequest) {
     return { kind: 'DEMANDA', evidence: 'comparecencia que inicia la acción (hechos y prestaciones)', confidence: 0.9 };
   }

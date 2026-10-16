@@ -20,13 +20,26 @@ const derivedTypes = [
 ] as const;
 
 describe('opt-in para DRAFT de tipos implementados no acreditados', () => {
-  it('rechaza FAIL con template derivado si no se confirmó el opt-in', () => {
-    expect(canGenerateDocumentDraft('contestacion_proveedor')).toBe(false);
+  // Política vigente: functionalStatus se calcula con evidencia por ID. Los tipos derivados por familia ya tienen
+  // evidencia (PASS) y se generan sin opt-in; los FAIL actuales no son generables (formulario oficial / borrador
+  // asistido), así que el opt-in nunca los habilita. El camino de opt-in para un FAIL implementado se conserva en
+  // canGenerateDocumentDraft y se cubre con los guards de estado.
+  it('un tipo derivado con evidencia (PASS) se genera sin opt-in y el opt-in no cambia el resultado', () => {
+    for (const id of derivedTypes) {
+      expect(CANONICAL_DOCUMENT_TYPES.find((entry) => entry.id === id)?.functionalStatus, id).toBe('PASS');
+      expect(canGenerateDocumentDraft(id), id).toBe(true);
+      expect(canGenerateDocumentDraft(id, true), id).toBe(true);
+    }
   });
 
-  it('permite FAIL con template derivado únicamente para DRAFT y con opt-in', () => {
-    expect(canGenerateDocumentDraft('contestacion_proveedor', true)).toBe(true);
-    expect(canExportDocumentFinal('contestacion_proveedor')).toBe(false);
+  it('rechaza todo tipo FAIL sin opt-in y también con opt-in cuando no es generable', () => {
+    const failing = CANONICAL_DOCUMENT_TYPES.filter((entry) => entry.functionalStatus === 'FAIL');
+    expect(failing.length).toBeGreaterThan(0);
+    for (const entry of failing) {
+      expect(canGenerateDocumentDraft(entry.id), entry.id).toBe(false);
+      expect(canGenerateDocumentDraft(entry.id, true), entry.id).toBe(false);
+      expect(canExportDocumentFinal(entry.id), entry.id).toBe(false);
+    }
   });
 
   it('mantiene DRAFT habilitado para PASS sin acknowledgement', () => {
@@ -49,8 +62,7 @@ describe('opt-in para DRAFT de tipos implementados no acreditados', () => {
     expect(() => resolveDocumentRouting({ selectedDocumentType: officialForm! })).toThrow(/DOCUMENT_TYPE_NOT_IMPLEMENTED/);
   });
 
-  it('mantiene rechazo de una fuente incompatible para un tipo FAIL', () => {
-    expect(CANONICAL_DOCUMENT_TYPES.find((entry) => entry.id === 'contestacion_proveedor')?.functionalStatus).toBe('FAIL');
+  it('mantiene rechazo de una fuente incompatible aunque el tipo tenga evidencia PASS', () => {
     const source = createSourceDocument({
       id: 'synthetic-amparo-source',
       filename: 'resolucion.pdf',
@@ -64,8 +76,9 @@ describe('opt-in para DRAFT de tipos implementados no acreditados', () => {
     })).toThrow(/SOURCE_DOCUMENT_INCOMPATIBLE/);
   });
 
-  it('conserva el rechazo de FINAL para un tipo FAIL aunque haya opt-in DRAFT', () => {
+  it('conserva el rechazo de FINAL para un tipo PASS mientras su revisión humana siga PENDING', () => {
     expect(canGenerateDocumentDraft('contestacion_proveedor', true)).toBe(true);
+    expect(CANONICAL_DOCUMENT_TYPES.find((entry) => entry.id === 'contestacion_proveedor')?.humanReview).toBe('PENDING');
     expect(canExportDocumentFinal('contestacion_proveedor')).toBe(false);
   });
 

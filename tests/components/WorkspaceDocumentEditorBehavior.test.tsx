@@ -29,12 +29,23 @@ it('export popup escapes the scrollable toolbar so it is not clipped', () => {
   expect(button.closest('[data-testid="editor-toolbar"]')).toBeNull();
 });
 it('never offers FINAL exports for a type that is not functionally certified', () => {
-  const uncertified = { ...original, documentType: 'contestacion_demanda_civil' };
+  // conclusiones_civil no es generable (borrador asistido): sin evidencia funcional (FAIL).
+  const uncertified = { ...original, documentType: 'conclusiones_civil' };
   render(<WorkspaceDocumentEditor document={uncertified} onUpdateDocument={vi.fn()} onExportDocx={vi.fn()} onExportPdf={vi.fn()} />);
   fireEvent.click(screen.getByTitle('Elegir exportación de borrador o final'));
   expect(screen.queryByRole('button', { name: '📄 DOCX final' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '🖨️ PDF final' })).not.toBeInTheDocument();
   expect(screen.getByText(/Exportación FINAL no disponible: tipo en desarrollo/i)).toBeInTheDocument();
+});
+it('never offers FINAL exports for a type with functional evidence while its legal review is pending', () => {
+  // contestacion_demanda_civil tiene evidencia técnica (PASS) pero humanReview sigue PENDING: FINAL bloqueado y se explica por qué.
+  const reviewPending = { ...original, documentType: 'contestacion_demanda_civil' };
+  render(<WorkspaceDocumentEditor document={reviewPending} onUpdateDocument={vi.fn()} onExportDocx={vi.fn()} onExportPdf={vi.fn()} />);
+  fireEvent.click(screen.getByTitle('Elegir exportación de borrador o final'));
+  expect(screen.queryByRole('button', { name: '📄 DOCX final' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '🖨️ PDF final' })).not.toBeInTheDocument();
+  expect(screen.getByText(/Exportación FINAL no disponible: la revisión jurídica de este tipo de escrito sigue pendiente/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '📄 DOCX borrador' })).toBeInTheDocument();
 });
 it('upload is explicitly unavailable when no upload command is connected', () => {
   render(<Harness />);

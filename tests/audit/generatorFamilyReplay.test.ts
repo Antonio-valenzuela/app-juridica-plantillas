@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CANONICAL_DOCUMENT_TYPES } from '@/lib/catalog/legalCatalog';
-import { DocumentTemplates } from '@/lib/legal-engine/documentTemplates';
+import { getDocumentTemplate } from '@/lib/legal-engine/documentTemplates';
 import { createSourceDocument } from '@/lib/legal-engine/context';
 import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
@@ -33,7 +33,7 @@ function kindFor(id: string): FamilyVerificationDefinition['kind'] {
 
 describe('V5 registry-driven family replay — evidence, not automatic accreditation', () => {
   it.each(targets)('$id routes, assembles and exports its current reviewed draft without external calls', async type => {
-    const template = DocumentTemplates[type.id];
+    const template = getDocumentTemplate(type.id);
     const sourceType = type.sourceCompatibility!.acceptedSourceTypes[0] || 'DEMANDA_CIVIL';
     const isAppeal = ['apelacion_civil', 'apelacion_familiar'].includes(type.id);
     const sourceText = type.id === 'contestacion_revision_extraordinaria_amparo_directo'

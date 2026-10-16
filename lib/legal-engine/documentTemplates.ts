@@ -6530,6 +6530,11 @@ export function isContestacionRevisionAmparoDirectoType(documentType?: string, d
     || documentTypeLabel === 'contestacion_revision_extraordinaria_amparo_directo';
 }
 
+/** ¿La plantilla declara que el escrito se presenta por conducto del órgano que dictó la resolución recurrida? */
+export function presentsThroughIssuingCourt(documentType?: string): boolean {
+  return Boolean(documentType) && DocumentTemplates[documentType as string]?.presentacionPor === 'ORGANO_RESOLUCION_RECURRIDA';
+}
+
 /** FASE 3 — Taxonomía real DERIVADA del catálogo (sin duplicar datos). */
 export interface TaxonomiaFamilia {
   familia: FamiliaDocumental;

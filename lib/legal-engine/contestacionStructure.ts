@@ -3,6 +3,9 @@ import { CaseAnalysis, ArgumentAxis } from './caseAnalysis';
 import { UniversalLegalDocument, type ContentBlock } from './types';
 import { formatCaseContextField } from './caseContext';
 import type { RichCaseAnalysis } from './case-extraction/types';
+import type { CaseDossier } from './caseDossier';
+import { firstIssuingAuthority } from './partyExtraction';
+import { closingText, signatureText } from './contestacionAgraviosStructure';
 
 /**
  * contestacionStructure.ts
@@ -75,7 +78,7 @@ export function resolveContestacionRoles(
     doc.parties?.autoridadDestinataria ||
     doc.parties?.autoridadResponsable ||
     caseAnalysis?.parties?.autoridadResponsable ||
-    (caseAnalysis?.authorities && caseAnalysis.authorities[0]) ||
+    firstIssuingAuthority(caseAnalysis?.authorities) ||
     'H. TRIBUNAL COMPETENTE EN TURNO';
 
   const rawExpediente =
@@ -600,7 +603,16 @@ export const REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS: Record<string, string
     'Cierra con protesta, lugar y fecha pendientes si no constan, y la firma de la parte promovente o recurrente confirmada. Nunca firmes por la autoridad emisora.',
 };
 
+/** Ficha del caso confirmada por el abogado, si la hay: única fuente de la parte que firma y del órgano. */
+function confirmedDossier(doc: UniversalLegalDocument): CaseDossier | undefined {
+  const dossier = (doc.generationMetadata as { caseDossier?: CaseDossier } | undefined)?.caseDossier;
+  return dossier?.confirmed ? dossier : undefined;
+}
+
 function revisionParty(doc: UniversalLegalDocument): string {
+  // A quién representa el abogado lo eligió él; nunca se toma al azar un nombre del expediente (ponente, secretario…).
+  const represented = confirmedDossier(doc)?.representedName?.trim();
+  if (represented) return represented;
   return formatCaseContextField(
     doc.caseContext,
     'promovente',
@@ -620,9 +632,19 @@ function safeRequestedEffects(caseAnalysis?: CaseAnalysis): string[] {
     .filter((effect) => !/^revocar o dejar insubsistente .* conforme a derecho\.?$/i.test(effect))));
 }
 
-function buildSafePetitions(caseAnalysis?: CaseAnalysis): string {
+function buildSafePetitions(caseAnalysis?: CaseAnalysis, isRecurso = false): string {
   const effects = safeRequestedEffects(caseAnalysis);
-  if (!effects.length) return '[REQUIERE CONFIRMACIÓN DEL ABOGADO: efecto procesal solicitado]';
+  if (!effects.length) {
+    // Fórmulas procesales del recurso que no afirman nada del caso; el efecto que se pide (revocar, modificar…) lo
+    // define el abogado y queda en el anexo de revisión.
+    return isRecurso
+      ? [
+          'PRIMERO. Tener por interpuesto el presente recurso de revisión en amparo directo.',
+          'SEGUNDO. Remitir los autos a la Suprema Corte de Justicia de la Nación para su resolución.',
+          '[REQUIERE CONFIRMACIÓN DEL ABOGADO: efecto procesal solicitado]',
+        ].join('\n')
+      : '[REQUIERE CONFIRMACIÓN DEL ABOGADO: efecto procesal solicitado]';
+  }
   return effects.map((effect, index) => `${ORDINALS[index] || `${index + 1}.`} ${effect}`).join('\n');
 }
 
@@ -764,7 +786,14 @@ export function buildRevisionAmparoDirectoSkeleton(
 ): DocumentNode[] {
   const caseNumber = revisionCaseNumber(doc, caseAnalysis);
   const party = revisionParty(doc);
-  const authority = doc.parties.autoridadResponsable || caseAnalysis?.authorities?.[0] || 'Órgano jurisdiccional competente';
+  const dossier = confirmedDossier(doc);
+  const authority = dossier?.court || doc.parties.autoridadResponsable || firstIssuingAuthority(caseAnalysis?.authorities) || 'Órgano jurisdiccional competente';
+  // El mismo esqueleto sirve a dos escritos distintos: no se mezclan sus nombres.
+  const isRecurso = doc.documentType === 'recurso_revision_amparo_directo' || doc.documentTypeLabel === 'recurso_revision_amparo_directo';
+  const escritoLabel = isRecurso
+    ? 'recurso de revisión en amparo directo'
+    : 'contestación / revisión extraordinaria frente a sentencia de amparo directo';
+  const authorityLabel = isRecurso ? 'ÓRGANO QUE DICTÓ LA SENTENCIA RECURRIDA' : 'AUTORIDAD O ÓRGANO IDENTIFICADO';
   const resolution = caseAnalysis?.rulings?.length
     ? caseAnalysis.rulings.map((ruling) => [ruling.body, ruling.date, ruling.rulingText].filter(Boolean).join(' — ')).join('\n')
     : caseAnalysis?.challengedActs?.length
@@ -776,15 +805,15 @@ export function buildRevisionAmparoDirectoSkeleton(
   const grounds = buildVerifiedLegalGroundsText(doc, caseAnalysis);
 
   return [
-    mkSection(templateId, 'sec-crad-asunto', 'header', 'IDENTIFICACIÓN DEL ASUNTO', 1, `TIPO DE ESCRITO: contestación / revisión extraordinaria frente a sentencia de amparo directo\nEXPEDIENTE O AMPARO DIRECTO: ${caseNumber}\nAUTORIDAD O ÓRGANO IDENTIFICADO: ${authority}`),
+    mkSection(templateId, 'sec-crad-asunto', 'header', 'IDENTIFICACIÓN DEL ASUNTO', 1, `TIPO DE ESCRITO: ${escritoLabel}\nEXPEDIENTE O AMPARO DIRECTO: ${caseNumber}\n${authorityLabel}: ${authority}`),
     mkSection(templateId, 'sec-crad-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2, `${party}\nPERSONALIDAD: [REQUIERE CONFIRMACIÓN DEL ABOGADO: carácter con el que comparece, representación, domicilio y autorizados]`),
     mkSection(templateId, 'sec-crad-sentencia', 'background', 'SENTENCIA DE AMPARO DIRECTO IMPUGNADA', 3, `EXPEDIENTE: ${caseNumber}\n${resolution}`),
     mkSection(templateId, 'sec-crad-antecedentes', 'background', 'ANTECEDENTES PROCESALES', 4, antecedents),
     mkSection(templateId, 'sec-crad-cuestion', 'legal_grounds', 'CUESTIÓN CONSTITUCIONAL Y/O PLANTEAMIENTO EXTRAORDINARIO', 5, sourceBackedIssueText(caseAnalysis)),
     mkSection(templateId, 'sec-crad-agravios', 'argument', 'AGRAVIOS / ARGUMENTOS', 6, sourceBackedArguments(caseAnalysis)),
     mkSection(templateId, 'sec-crad-fundamentos', 'legal_grounds', 'FUNDAMENTOS SUSTENTADOS', 7, grounds),
-    mkSection(templateId, 'sec-crad-petitorios', 'petition', 'PETITORIOS', 8, buildSafePetitions(caseAnalysis)),
-    mkSection(templateId, 'sec-crad-cierre', 'signature', 'CIERRE Y FIRMA', 9, `PROTESTO LO NECESARIO.\nCiudad de México, a la fecha de su presentación.\n\n_________________________________________\n${party}`),
+    mkSection(templateId, 'sec-crad-petitorios', 'petition', 'PETITORIOS', 8, buildSafePetitions(caseAnalysis, isRecurso)),
+    mkSection(templateId, 'sec-crad-cierre', 'signature', 'CIERRE Y FIRMA', 9, `${closingText(dossier?.city)}\n\n${signatureText(party, isRecurso ? 'Parte recurrente' : 'Promovente')}`),
   ];
 }
 

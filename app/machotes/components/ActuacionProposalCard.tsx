@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { ActuacionProposal } from '@/lib/legal-engine/actuacionProposal';
+import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 
 interface ActuacionProposalCardProps {
   proposal: ActuacionProposal;
@@ -25,6 +26,10 @@ const MATTER_LABEL: Record<string, string> = {
 export function ActuacionProposalCard({ proposal, selectedDocumentType, confirmed, onSelect, onConfirm, disabled = false }: ActuacionProposalCardProps) {
   const { detected, candidates, extraction } = proposal;
   const selected = candidates.find((item) => item.documentType === selectedDocumentType);
+  // El abogado puede haber elegido un tipo que no figura entre las vías propuestas (la decisión sobre la vía es suya):
+  // sin este caso no había forma de confirmarlo y Generar quedaba bloqueado sin salida.
+  const outsideProposal = !selected && Boolean(selectedDocumentType);
+  const outsideLabel = getCatalogDocument(selectedDocumentType)?.label || selectedDocumentType;
   const matter = MATTER_LABEL[detected.matter];
   const pages = detected.pages ? (detected.pages.start === detected.pages.end ? `p. ${detected.pages.start}` : `pp. ${detected.pages.start}–${detected.pages.end}`) : null;
 
@@ -88,6 +93,17 @@ export function ActuacionProposalCard({ proposal, selectedDocumentType, confirme
         <button type="button" className="lex-button lex-button-primary mt-3" onClick={onConfirm} disabled={disabled} data-testid="actuacion-confirm">
           Confirmar «{selected.label}»
         </button>
+      )}
+      {proposal.requiresConfirmation && outsideProposal && (
+        <div className="mt-3" data-testid="actuacion-outside-proposal">
+          <p className="text-sm">«{outsideLabel}» no está entre las actuaciones propuestas para este documento. Confírmala solo si es la vía que corresponde.</p>
+          {!confirmed && (
+            <button type="button" className="lex-button lex-button-primary mt-2" onClick={onConfirm} disabled={disabled} data-testid="actuacion-confirm">
+              Confirmar «{outsideLabel}»
+            </button>
+          )}
+          {confirmed && <p className="mt-2 text-sm text-emerald-800" data-testid="actuacion-confirmed">Actuación confirmada por el abogado.</p>}
+        </div>
       )}
       {proposal.requiresConfirmation && confirmed && selected && (
         <p className="mt-2 text-sm text-emerald-800" data-testid="actuacion-confirmed">Actuación confirmada por el abogado.</p>

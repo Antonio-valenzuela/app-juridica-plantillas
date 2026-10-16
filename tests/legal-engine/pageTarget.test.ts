@@ -15,9 +15,11 @@ import {
   evaluatePageTarget,
   pageTargetToGenerationExtension,
   pageTolerance,
+  pageTargetCheckId,
   parsePageTarget,
   tryParsePageTarget,
 } from '@/lib/legal-engine/pageTarget';
+import { buildWritingContractPrompt, getWritingContract } from '@/lib/legal-engine/writingContract';
 import { resolveGenerationExtensionContract } from '@/lib/legal-engine/generationExtension';
 import { contextFromDocument, validateGeneratedOutput } from '@/lib/legal-engine/generatedOutputValidator';
 import { redundancyRatio, splitParagraphs } from '@/lib/legal-engine/textRedundancy';
@@ -56,37 +58,46 @@ describe('parámetro tipado y validado', () => {
     }
   });
 
-  // Contrato cambiado (2026-10-14, a petición del titular): la extensión es un MÁXIMO, no una meta. Antes se
-  // traducía a un rango [meta−tolerancia, meta+tolerancia] y el motor ampliaba hasta alcanzarlo; ahora es un techo
-  // y no hay ampliación para llenar páginas.
-  it('se traduce al contrato de extensión como máximo, con presupuesto de palabras como techo y límites seguros', () => {
+  // Contrato cambiado (2026-10-16, a petición del titular): la extensión vuelve a ser una META real. Del 2026-10-14 a
+  // esa fecha fue un máximo (lengthIsCeiling, minPages 1, sin ampliación) y una selección de 40 páginas terminaba en ≈ 8.
+  it('se traduce al contrato de extensión como meta: mínimo = páginas pedidas, ampliación habilitada y límites seguros', () => {
     const contracts = [5, 10, 20, 40].map((pages) => resolveGenerationExtensionContract(pageTargetToGenerationExtension(parsePageTarget(pages))));
     expect(contracts.map((contract) => contract.generationMode)).toEqual(Array(4).fill('extended-legal'));
     expect(contracts.map((contract) => contract.targetPages)).toEqual([5, 10, 20, 40]);
     for (const contract of contracts) {
-      expect(contract.lengthIsCeiling).toBe(true);
-      expect(contract.minPages).toBe(1);
-      expect(contract.maxPages).toBe(contract.targetPages);
-      expect(contract.maxExpansionPasses).toBe(1);
+      expect(contract.lengthIsCeiling).toBeFalsy();
+      expect(contract.minPages).toBe(contract.targetPages);
+      expect(contract.maxPages).toBe(contract.targetPages + pageTolerance(contract.targetPages));
+      expect(contract.maxExpansionPasses).toBeGreaterThan(1);
       expect(contract.maxCallsPerDocument).toBeLessThanOrEqual(100);
     }
-    void pageTolerance;
     const words = contracts.map((contract) => contract.targetWords);
     expect([...words].sort((a, b) => a - b)).toEqual(words); // monótono
-    expect(resolveGenerationExtensionContract(pageTargetToGenerationExtension(parsePageTarget(2))).targetWords).toBeGreaterThanOrEqual(1000);
+    expect(resolveGenerationExtensionContract(pageTargetToGenerationExtension(parsePageTarget(2))).targetWords).toBeGreaterThanOrEqual(600);
   });
 
-  it('evalúa el resultado medido contra el máximo: ser más corto nunca es una falla; superarlo se avisa', () => {
+  it('evalúa el PDF medido contra la meta: por debajo es BELOW_TARGET con motivo; nunca se marca cumplido', () => {
     const target = parsePageTarget(40);
-    expect(evaluatePageTarget(target, 40).outcome).toBe('WITHIN_MAX');
-    const shorter = evaluatePageTarget(target, 22);
-    expect(shorter.outcome).toBe('WITHIN_MAX');
-    expect(shorter.notice).toBeUndefined();
+    expect(evaluatePageTarget(target, 40).outcome).toBe('MET');
+    expect(evaluatePageTarget(target, 46).outcome).toBe('MET');
+    const shorter = evaluatePageTarget(target, 8, 0, 'CONTENT_LIMIT_REACHED');
+    expect(shorter.outcome).toBe('BELOW_TARGET');
+    expect(shorter.stopReason).toBe('CONTENT_LIMIT_REACHED');
+    expect(shorter.notice).toContain('No se alcanzó la extensión solicitada (40 páginas; resultado: 8)');
+    expect(shorter.notice).toMatch(/hace falta más material/);
+    expect(pageTargetCheckId(shorter)).toBe('PAGE_TARGET_UNMET');
+    expect(evaluatePageTarget(target, 39, 0, 'PROVIDER_UNAVAILABLE').notice).toMatch(/proveedor de IA/);
     const above = evaluatePageTarget(parsePageTarget(5), 11);
-    expect(above.outcome).toBe('ABOVE_MAX');
-    expect(above.notice).toMatch(/supera el máximo/);
+    expect(above.outcome).toBe('ABOVE_TARGET');
     expect(above.notice).toMatch(/estructura obligatoria/);
-    expect(describePageTargetResult(shorter)).toBe('Máximo: 40 páginas · Resultado: 22 páginas');
+    expect(describePageTargetResult(shorter)).toBe('Objetivo: 40 páginas · Resultado: 8 páginas (por debajo del objetivo)');
+  });
+
+  it('la meta llega a las instrucciones del redactor como objetivo, no como máximo', () => {
+    const prompt = buildWritingContractPrompt(getWritingContract('contestacion_demanda_civil'), undefined, 40);
+    expect(prompt).toMatch(/extensión objetivo del escrito completo es de 40 páginas/);
+    expect(prompt).not.toMatch(/Es un máximo, no una meta/);
+    expect(prompt).toMatch(/nunca autoriza repetir/);
   });
 });
 
@@ -167,40 +178,64 @@ describe('mismo caso sintético con metas 5, 10, 20 y 40', () => {
     }, 120000);
   }
 
-  it('el máximo no se rebasa: las páginas crecen con él sin pasarse, y si la estructura obligatoria lo supera se informa', () => {
+  it('con material suficiente cada meta se alcanza en el PDF medido y las páginas crecen con ella', () => {
     const pages = [5, 10, 20, 40].map((target) => results.get(target)!.doc.generationMetadata.pageTargetResult.actualPages as number);
-    expect(pages.length).toBe(4);
     expect([...pages].sort((a, b) => a - b)).toEqual(pages);
     for (const target of [10, 20, 40]) {
       const result = results.get(target)!.doc.generationMetadata.pageTargetResult;
-      expect(result.outcome, `máximo ${target}`).toBe('WITHIN_MAX');
-      expect(result.actualPages, `máximo ${target}`).toBeLessThanOrEqual(target);
+      expect(result.outcome, `meta ${target}`).toBe('MET');
+      expect(result.actualPages, `meta ${target}`).toBeGreaterThanOrEqual(target);
+      expect(result.actualPages, `meta ${target}`).toBeLessThanOrEqual(target + pageTolerance(target));
     }
-    // El máximo de 5 es menor que el piso estructural de este escrito: se informa, no se recortan respuestas.
+    // La meta de 40 exige la etapa de ampliación sustantiva (la redacción por secciones sola no llega).
+    expect(results.get(40)!.doc.generationMetadata.generationExtension.metrics.expansionCalls).toBeGreaterThan(0);
+    // La meta de 5 puede ser menor que el piso estructural de este escrito: se informa, no se recortan respuestas.
     const brief = results.get(5)!.doc.generationMetadata.pageTargetResult;
-    expect(['WITHIN_MAX', 'ABOVE_MAX']).toContain(brief.outcome);
-    if (brief.outcome === 'ABOVE_MAX') expect(brief.notice).toMatch(/estructura obligatoria/);
-    process.stderr.write(`\nTABLA META→PÁGINAS ${JSON.stringify(Object.fromEntries([5, 10, 20, 40].map((t) => [t, results.get(t)!.doc.generationMetadata.pageTargetResult.actualPages])))}\n`);
+    expect(['MET', 'ABOVE_TARGET']).toContain(brief.outcome);
+    if (brief.outcome === 'ABOVE_TARGET') expect(brief.notice).toMatch(/estructura obligatoria/);
+    process.stderr.write(`
+TABLA META→PÁGINAS ${JSON.stringify(Object.fromEntries([5, 10, 20, 40].map((t) => [t, results.get(t)!.doc.generationMetadata.pageTargetResult.actualPages])))}
+`);
   });
 });
 
-describe('caso con poca información y máximo 40', () => {
-  it('el escrito es más corto, no hay aviso de «no alcanzada» y no se rellena ni se amplía', async () => {
+describe('caso con poca información y meta 40', () => {
+  it('no rellena ni repite: queda por debajo, se marca BELOW_TARGET con motivo y aviso, sin hechos inventados', async () => {
     const poor = syntheticCase(2, 1, 1);
     const { doc, writer } = await generate(40, poor, 8);
     const result = doc.generationMetadata.pageTargetResult;
-    expect(result.outcome).toBe('WITHIN_MAX');
-    expect(result.actualPages).toBeLessThan(30);
-    expect(result.notice).toBeUndefined();
-    expect(describePageTargetResult(result)).toMatch(/^Máximo: 40 páginas · Resultado: \d+ páginas$/);
-    // Sin etapa de ampliación: ninguna llamada de expansión para llenar páginas.
-    expect(writer.calls.some((call: { sectionId: string }) => call.sectionId.startsWith('expansion:'))).toBe(false);
-    expect(doc.generationMetadata.generationExtension.metrics.expansionCalls).toBe(0);
-    expect(writer.calls.every((call: { words: number }) => call.words >= 0)).toBe(true);
+    expect(result.outcome).toBe('BELOW_TARGET');
+    expect(result.actualPages).toBeLessThan(40);
+    expect(result.notice).toMatch(/No se alcanzó la extensión solicitada/);
+    expect(result.stopReason).toBeTruthy();
+    expect(describePageTargetResult(result)).toMatch(/^Objetivo: 40 páginas · Resultado: \d+ páginas \(por debajo del objetivo\)$/);
+    expect(doc.validation.warnings.some((warning: { checkId: string }) => warning.checkId === 'PAGE_TARGET_UNMET')).toBe(true);
+    expect(doc.generationMetadata.generationExtension.extensionTargetUnmet).toBe(true);
+    expect(doc.status).not.toBe('final');
+    // Solo el material sintético del caso: ningún hecho ajeno ni párrafo repetido para llenar.
+    const text = bodyOf(doc);
+    expect(text).not.toMatch(/AL HECHO 3\b/);
     const paragraphs = doc.sections.flatMap((section: any) => section.content.flatMap((block: any) =>
       splitParagraphs(block.text || '').map((paragraph: string, index: number) => ({ id: `${section.id}/${block.id}#${index}`, text: paragraph }))));
     expect(redundancyRatio(paragraphs, 0.85).ratio).toBeLessThanOrEqual(MAX_REDUNDANCY_RATIO);
-    expect(doc.validation.warnings.some((warning: { checkId: string }) => warning.checkId === 'PAGE_TARGET_EXCEEDED')).toBe(false);
-    expect(doc.generationMetadata.generationExtension.extensionTargetUnmet).toBe(false);
+  }, 120000);
+
+  it('un proveedor de ampliación caído no se presenta como éxito', async () => {
+    const c = syntheticCase(4, 3, 2);
+    const source = sourceFromText(syntheticDemandText(c), 'demanda');
+    (source as { classification?: unknown }).classification = { role: 'PRIMARY', sourceDocumentType: 'DEMANDA_CIVIL' };
+    const writer = createSimulatedWriter(c, 30);
+    const doc = await runGenerationPipeline({
+      selectedDocumentType: 'contestacion_demanda_civil', documentTypeLabel: 'Contestación de demanda civil', matter: 'Civil', jurisdiction: 'Jalisco',
+      userInstruction: 'Contestar la demanda.', sourceDocuments: [source], pageTarget: 40, generateSection: writer,
+      expansionProvider: async () => { throw Object.assign(new Error('rate limit'), { name: 'RateLimitError' }); },
+      workflow: { flow: 'DOCUMENT_ANALYSIS', selection: { mode: 'automatic' }, updatedAt: new Date().toISOString() },
+    } as never) as any;
+    const result = doc.generationMetadata.pageTargetResult;
+    expect(result.outcome).toBe('BELOW_TARGET');
+    expect(result.stopReason).toBe('PROVIDER_UNAVAILABLE');
+    expect(result.notice).toMatch(/proveedor de IA/);
+    expect(doc.generationMetadata.generationExtension.extensionTargetUnmet).toBe(true);
+    expect(doc.validation.warnings.some((warning: { checkId: string }) => warning.checkId === 'PAGE_TARGET_UNMET')).toBe(true);
   }, 120000);
 });

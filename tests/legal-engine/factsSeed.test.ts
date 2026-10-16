@@ -15,8 +15,10 @@ describe('renderFactsSeed — procedencia honesta', () => {
     expect(renderFactsSeed([fact({ contestedStatus: 'CONTESTED' })])).toContain('Afirma una de las partes');
   });
 
-  it('un hecho con fuente concreta cita la fuente y la página', () => {
-    expect(renderFactsSeed([fact({ sourceReference: { documentId: 'doc-7', page: 3 } })])).toContain('Consta en la fuente doc-7, página 3');
+  it('un hecho con fuente concreta cita el expediente y la página, sin el identificador interno', () => {
+    const text = renderFactsSeed([fact({ sourceReference: { documentId: 'pending-upload-1791991502775-0', page: 3 } })]);
+    expect(text).toContain('Consta en el expediente, página 3');
+    expect(text).not.toMatch(/pending-upload/);
   });
 
   it('sin procedencia verificable queda "por confirmar", jamás como probado', () => {
@@ -37,6 +39,46 @@ describe('renderFactsSeed — procedencia honesta', () => {
 
   it('conserva la redacción literal de la fuente (sourceFact) frente al texto normalizado', () => {
     expect(renderFactsSeed([fact({ sourceFact: 'REDACCIÓN LITERAL', text: 'resumen' })])).toContain('REDACCIÓN LITERAL');
+  });
+
+  it('rota la muletilla de procedencia en listas largas sin perder hechos, páginas ni procedencia', () => {
+    const text = renderFactsSeed([
+      fact({ id: 'a', text: 'Hecho A', sourceReference: { documentId: 'doc-1', page: 1 } }),
+      fact({ id: 'b', text: 'Hecho B', sourceReference: { documentId: 'doc-1', page: 2 } }),
+      fact({ id: 'c', text: 'Hecho C', sourceReference: { documentId: 'doc-1', page: 3 } }),
+      fact({ id: 'd', text: 'Hecho D', sourceReference: { documentId: 'doc-1', page: 4 } }),
+    ]);
+
+    expect(text).toContain('Consta en el expediente, página 1');
+    expect(text).toContain('Obra en el expediente, página 2');
+    expect(text).toContain('Está documentado en el expediente, página 3');
+    expect(text).toContain('Se acredita en el expediente, página 4');
+    for (const hecho of ['Hecho A', 'Hecho B', 'Hecho C', 'Hecho D']) expect(text).toContain(hecho);
+    const openers = text.split('\n').map((line) => line.replace(/^\d+\.\s*/, '').split(':')[0]);
+    expect(new Set(openers).size).toBe(openers.length);
+  });
+
+  it('rota también la procedencia pendiente cuando no hay fuente verificable', () => {
+    const text = renderFactsSeed([
+      fact({ id: 'a', text: 'Hecho A' }),
+      fact({ id: 'b', text: 'Hecho B' }),
+      fact({ id: 'c', text: 'Hecho C' }),
+    ]);
+
+    expect(text).toContain('Referido en el expediente, por confirmar');
+    expect(text).toContain('Mencionado en el expediente, por confirmar');
+    expect(text).toContain('Aludido en el expediente, por confirmar');
+    expect(text.toLowerCase()).not.toContain('probado');
+  });
+
+  it('cada clase rota por su cuenta: la primera afirmación no reinicia la procedencia documental', () => {
+    const text = renderFactsSeed([
+      fact({ id: 'a', actor: 'la parte actora', text: 'Hecho de parte' }),
+      fact({ id: 'b', text: 'Hecho documental', sourceReference: { documentId: 'doc-1', page: 7 } }),
+    ]);
+
+    expect(text).toContain('Afirma la parte actora');
+    expect(text).toContain('Consta en el expediente, página 7');
   });
 });
 

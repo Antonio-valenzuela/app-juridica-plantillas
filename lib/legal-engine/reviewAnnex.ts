@@ -62,6 +62,17 @@ export function splitSentences(paragraph: string): string[] {
 
 const NEW_VERIFICATION_MARKER = /\[\s*NO\s+VERIFICADO\s*:\s*([^\]]*)\]/gi;
 const PENDING_DEVELOPMENT_MARKER = /\[\s*(?:PENDIENTE\s+DE\s+DESARROLLO|PENDIENTE\s+DE\s+REVISI[ÓO]N|REQUIERE\s+REVISI[ÓO]N|REQUIERE\s+DESARROLLO(?:\s+JUR[ÍI]DICO)?|POR\s+VERIFICAR)\b[^\]]*\]/gi;
+// Peticiones de dato al abogado («[REQUIERE POSTURA DEL ABOGADO: …]», «[PENDIENTE: …]», «[DATO ANONIMIZADO: …]»): no son texto
+// del escrito; se listan en el anexo y el documento no puede salir como FINAL mientras sigan ahí.
+// «[DATO PENDIENTE: …]» NO está aquí: es un campo por completar (nombre, fecha, órgano, expediente) que debe permanecer
+// en el cuerpo, donde el pendiente de campos bloquea FINAL y la frase conserva su referente.
+const LAWYER_INPUT_MARKER = /\[\s*(?:REQUIERE\s+(?:POSTURA|CONFIRMACI[ÓO]N|INSTRUCCI[ÓO]N|DEFINIR|DATOS?)[^\]]*|PENDIENTE\s*:[^\]]*|DATO\s+ANONIMIZADO[^\]]*|A\s+CONFIRMAR[^\]]*)\]/gi;
+// Lo que queda de una oración sin sus marcadores: nada, o solo una etiqueta («AL HECHO 1.-», «PLANTEAMIENTO SOLICITADO:»).
+const STANDALONE_RESIDUE = /^(?:[\p{Lu}\d/ .\-–—]{0,80}[:.\-–—]?|[^.!?,;]{3,90}:)?\s*[.;,]?$/u;
+// «Pendiente: delimitar…» como valor suelto de una etiqueta, y los códigos internos del motor (UNVERIFIED_AUTHORITY…).
+const BARE_PENDING_LINE = /^(?:[^:]{3,70}:\s*)?Pendientes?(?:\s+[a-záéíóúñ ]+)?:\s.+$/i;
+const INTERNAL_CODE = /\b[A-Z]{3,}(?:_[A-Z0-9]{2,}){1,}\b/;
+const ENGINE_LIMIT_NOTE = /^L[ÍI]MITE:\s*No se sostiene/i;
 const LOOSE_PENDING_TAIL = /\s*\((?:cita\s+pendiente|pendiente\s+de\s+fundamentaci[oó]n|pendiente\s+de\s+verificaci[oó]n)\)/gi;
 
 const SIGNATURE_PARAGRAPH = /^(?:protesto\s+lo\s+necesario|atentamente|\[?\s*firma\b|abogad[oa]s?\s+postulantes?\b|_{6,}$)/i;
@@ -178,6 +189,28 @@ export function separateReviewMaterialFromText(text: string, annex: ReviewAnnex,
         continue;
       }
 
+      // Códigos internos del motor, «Pendiente: …» suelto y notas de límite del esqueleto: son del anexo, no del escrito.
+      if (INTERNAL_CODE.test(sentence) || BARE_PENDING_LINE.test(sentence) || ENGINE_LIMIT_NOTE.test(sentence)) {
+        annex.pendingItems.push({ section, text: excerpt(sentence.replace(/\b[A-Z]{3,}(?:_[A-Z0-9]{2,})+\b/g, (code) => code.toLowerCase().replace(/_/g, ' ')), 220) });
+        changed = true;
+        continue;
+      }
+
+      // Petición de dato al abogado: se retira del cuerpo y se lista.
+      LAWYER_INPUT_MARKER.lastIndex = 0;
+      const lawyerInput = [...sentence.matchAll(LAWYER_INPUT_MARKER)];
+      // Un marcador incrustado en una frase es un campo por completar de esa frase («…parte apelada [DATO…]»):
+      // retirarlo la deja rota («, en su carácter…», «ocurrida el .»). Solo se retira si ocupa la oración entera.
+      const residue = sentence.replace(LAWYER_INPUT_MARKER, ' ').replace(/\s{2,}/g, ' ').trim();
+      if (lawyerInput.length && !STANDALONE_RESIDUE.test(residue)) lawyerInput.length = 0;
+      if (lawyerInput.length) {
+        for (const match of lawyerInput) annex.pendingItems.push({ section, text: excerpt(match[0].replace(/^\[|\]$/g, '').trim(), 200) });
+        sentence = sentence.replace(LAWYER_INPUT_MARKER, ' ');
+        changed = true;
+        // Etiqueta que se quedó sin valor («PLANTEAMIENTO SOLICITADO:»): no se imprime sola.
+        if (/^[A-ZÁÉÍÓÚÑ/ ]{3,70}:?\s*$/.test(sentence.replace(/\s{2,}/g, ' ').trim())) continue;
+      }
+
       // Desarrollo o fundamento pendiente: se retira el marcador y se lista.
       PENDING_DEVELOPMENT_MARKER.lastIndex = 0;
       const pending = [...sentence.matchAll(PENDING_DEVELOPMENT_MARKER)];
@@ -191,10 +224,15 @@ export function separateReviewMaterialFromText(text: string, annex: ReviewAnnex,
       const modified = sentence !== original;
       sentence = sentence.replace(/\s{2,}/g, ' ').trim();
       // Restos cortos que deja un marcador retirado («, » o «y»): solo si la oración cambió.
-      if (!sentence || (modified && sentence.length < 12 && !/[.!?]$/.test(sentence))) continue;
+      if (!sentence || /^[\s.;,]+$/.test(sentence) || (modified && sentence.length < 12 && !/[.!?]$/.test(sentence))) continue;
       kept.push(sentence);
     }
-    if (kept.length) out.push(kept.join(' '));
+    // «PLANTEAMIENTO SOLICITADO: [PENDIENTE: …]»: sin su valor, la etiqueta no se imprime sola.
+    const joined = kept.join(' ');
+    // Si se retiró algo de la línea y lo que queda es solo una etiqueta («NORMA/CUESTIÓN JURÍDICA:»), tampoco se imprime.
+    const lostSomething = splitSentences(line).length !== kept.length;
+    if (kept.length && (line.includes('[') || lostSomething) && /^(?:[^.!?]{3,90}:|\d{1,2}[.)])\s*$/.test(joined)) changed = true;
+    else if (kept.length) out.push(joined);
     else changed = true;
   }
 

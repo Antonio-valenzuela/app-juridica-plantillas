@@ -247,7 +247,9 @@ describe('7. fallo de escritura', () => {
 
 describe('8. exportación DOCX/PDF sin Neon', () => {
   it('exporta el borrador guardado verificando la propiedad contra SQLite', async () => {
-    expect(process.env.DATABASE_URL ?? '').toBe('');
+    // El entorno de quien ejecuta puede traer una DATABASE_URL heredada (p. ej. desde .env). Se fija una URL remota
+    // sintética: la persistencia local debe ignorarla y la prueba 9 comprueba que no se abrió ninguna conexión.
+    vi.stubEnv('DATABASE_URL', 'postgresql://sintetico:x@ep-sintetico-pooler.example.invalid/neondb?sslmode=require');
     // Fuera de NODE_ENV=test para que la verificación de propiedad consulte la base real.
     vi.stubEnv('NODE_ENV', 'development');
     const layer = await reloadDataLayer();

@@ -25,6 +25,7 @@ data/imports/
 data/index/
 data/logs/
 coverage/
+graphify-out/
 
 # Public-repository safety: local analysis artifacts and generated case documents
 scratch/

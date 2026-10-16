@@ -21,7 +21,8 @@ import { ContestacionesAnalysisPanel } from './ContestacionesAnalysisPanel';
 import { ContestacionesConfigPanel } from './ContestacionesConfigPanel';
 import { ContestacionesChecklist } from './ContestacionesChecklist';
 import { AppealResolutionReviewPanel } from './AppealResolutionReviewPanel';
-import { CaseDossierPanel, type CaseDossierState } from './CaseDossierPanel';
+import { CaseDossierPanel, CaseDossierSummaryCard, type CaseDossierState } from './CaseDossierPanel';
+import { RequirementsDialog } from './RequirementsDialog';
 import type { CaseDossier } from '@/lib/legal-engine/caseDossier';
 import { getWritingContract } from '@/lib/legal-engine/writingContract';
 import { AppealReasoningAiReview } from './AppealReasoningCandidatesPanel';
@@ -309,6 +310,8 @@ export function CaseDocumentsReader({
   };
   const [selectedMachoteId, setSelectedMachoteId] = useState<string>('');
   const [dossierState, setDossierState] = useState<CaseDossierState>({ problems: [] });
+  const [requirementsOpen, setRequirementsOpen] = useState(false);
+  const autoOpenedKeyRef = useRef('');
   const [appealConfirmation, setAppealConfirmation] = useState<AppealConfirmation>();
   const appealReview = useMemo(() => isCivilFamilyAppeal(selectedResponseType) ? extractAppealResolutionReview(sourceDocs) : undefined, [sourceDocs, selectedResponseType]);
   useEffect(() => { setAppealConfirmation(undefined); }, [selectedResponseType, appealReview?.sourceFingerprint]);
@@ -564,6 +567,16 @@ export function CaseDocumentsReader({
   // Todo escrito con parte firmante pasa por la ficha del caso (solo si hay un documento fuente del que extraerla).
   const showCaseDossier = Boolean(selectedDoc && sourceDocs.length > 0 && getWritingContract(requestedResponseType).needsRepresentation);
   const dossierSourceKey = sourceDocs.map((source) => source.id).join('|');
+  // Si el escrito pide más datos, el panel se abre solo (una vez por documento y tipo); al confirmar la ficha se cierra.
+  const dossierKey = `${requestedResponseType}:${dossierSourceKey}`;
+  const dossierPending = showCaseDossier && !dossierState.dossier;
+  useEffect(() => {
+    if (dossierPending && autoOpenedKeyRef.current !== dossierKey) {
+      autoOpenedKeyRef.current = dossierKey;
+      setRequirementsOpen(true);
+    }
+  }, [dossierPending, dossierKey]);
+  useEffect(() => { if (dossierState.dossier) setRequirementsOpen(false); }, [dossierState.dossier]);
   // ¿Puede generarse el borrador de apelación? Basta la resolución principal detectada o la ratificada.
   const appealResolutionConfirmed = Boolean(appealReview && resolveAppealGeneration(appealReview, effectiveAppealConfirmation).canGenerate);
   // Flujo activo: cada workflow evalúa ÚNICAMENTE sus propios requisitos.
@@ -708,9 +721,12 @@ export function CaseDocumentsReader({
       return;
     }
 
-    const target = firstBlocker?.code === 'CASE_DOSSIER_PENDING'
-      ? document.querySelector<HTMLElement>('[data-testid="case-dossier-panel"]')
-      : firstBlocker?.code === 'ACTUACION_CONFIRMATION_PENDING'
+    if (firstBlocker?.code === 'CASE_DOSSIER_PENDING') {
+      setRequirementsOpen(true);
+      return;
+    }
+
+    const target = firstBlocker?.code === 'ACTUACION_CONFIRMATION_PENDING'
       ? document.querySelector<HTMLElement>('[data-testid="actuacion-proposal"]')
       : isAppealFlow
       ? document.querySelector<HTMLElement>('[aria-label="Resolución a impugnar"]')
@@ -1080,7 +1096,17 @@ export function CaseDocumentsReader({
             onOpenEditor={selectedDoc ? onOpenEditor : undefined}
             actionLabel={generateActionLabel}
           />
-          {showCaseDossier && <CaseDossierPanel key={`${requestedResponseType}:${dossierSourceKey}`} sources={sourceDocs} documentType={requestedResponseType} onChange={setDossierState} disabled={isGenerating} />}
+          {showCaseDossier && <>
+            <CaseDossierSummaryCard state={dossierState} onOpen={() => setRequirementsOpen(true)} disabled={isGenerating} />
+            <RequirementsDialog
+              open={requirementsOpen}
+              onClose={() => setRequirementsOpen(false)}
+              title="Confirma los datos del caso"
+              description="Este escrito necesita que confirmes la ficha y a quién representas. Corrige lo que haga falta y escribe lo que no se detectó."
+            >
+              <CaseDossierPanel key={dossierKey} sources={sourceDocs} documentType={requestedResponseType} onChange={setDossierState} disabled={isGenerating} />
+            </RequirementsDialog>
+          </>}
           {appealReview && <AppealResolutionReviewPanel key={`${selectedResponseType}:${appealReview.sourceFingerprint}`} review={appealReview} detectedExpediente={caseFicha?.expediente} onChange={setAppealConfirmation} disabled={isGenerating} />}
           {!selectedDoc && (
             <section className="lex-card lex-empty-state" aria-label="Sin documento">

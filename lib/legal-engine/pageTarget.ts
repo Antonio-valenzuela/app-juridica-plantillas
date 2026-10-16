@@ -1,21 +1,25 @@
 import type { GenerationExtensionInput } from './generationExtension';
 
 /**
- * Extensión MÁXIMA del escrito (páginas aproximadas).
+ * Extensión OBJETIVO del escrito (páginas reales del PDF renderizado).
  *
  * Es un parámetro REAL del pipeline: viaja tipado desde el selector de la interfaz hasta el
- * contrato de extensión (`generationExtension`), el presupuesto por sección y el registro del
- * borrador. Es un TECHO, no una meta: si el material no da para tanto, el escrito es más corto.
- * El sistema nunca amplía ni regenera secciones para llenar páginas.
+ * contrato de extensión (`generationExtension`), el presupuesto por sección, la etapa de
+ * ampliación sustantiva (`expandDocumentToPageTarget`) y el registro del borrador. Es una META:
+ * el motor planifica por secciones, mide el PDF renderizado y amplía las secciones pertinentes
+ * con análisis respaldado (hechos, pruebas y autoridades verificadas del expediente) hasta
+ * alcanzarla. Si el material no sostiene más contenido sin repetir ni inventar, el resultado se
+ * registra como `BELOW_TARGET` con el motivo y lo que haría falta; nunca se presenta como cumplido.
  *
+ * Cambio de contrato (2026-10-16, a petición del titular): del 2026-10-14 a esa fecha era un máximo.
  * No debe confundirse con el número de páginas del PDF fuente.
  */
 
 export const PAGE_TARGET_PRESETS = [
-  { id: 'BREVE', pages: 5, label: 'Breve', hint: 'máximo 5 páginas' },
-  { id: 'INTERMEDIO', pages: 10, label: 'Intermedio', hint: 'máximo 10 páginas' },
-  { id: 'DETALLADO', pages: 20, label: 'Detallado', hint: 'máximo 20 páginas' },
-  { id: 'EXTENSO', pages: 40, label: 'Extenso', hint: 'máximo 40 páginas' },
+  { id: 'BREVE', pages: 5, label: 'Breve', hint: 'objetivo de 5 páginas' },
+  { id: 'INTERMEDIO', pages: 10, label: 'Intermedio', hint: 'objetivo de 10 páginas' },
+  { id: 'DETALLADO', pages: 20, label: 'Detallado', hint: 'objetivo de 20 páginas' },
+  { id: 'EXTENSO', pages: 40, label: 'Extenso', hint: 'objetivo de 40 páginas' },
 ] as const;
 
 export type PageTargetPresetId = (typeof PAGE_TARGET_PRESETS)[number]['id'] | 'PERSONALIZADO';
@@ -39,15 +43,19 @@ export const WORDS_PER_PAGE = 340;
 export const MAX_REDUNDANCY_RATIO = 0.03;
 
 export const PAGE_TARGET_HELP_TEXT =
-  'La extensión es un máximo, no una meta: si los hechos, la evidencia y las reglas aplicables no dan para tanto, el escrito será más corto. El sistema no añade contenido para llenar páginas.';
+  'La extensión es un objetivo de generación: el sistema planifica las secciones, mide el PDF y amplía con análisis respaldado por el expediente hasta alcanzarla. Si los hechos, la evidencia y las fuentes verificables no lo permiten sin repetir ni inventar, el resultado se marca «por debajo del objetivo» con el motivo. Alcanzar las páginas no valida jurídicamente el escrito.';
 
 export interface PageTarget {
   preset: PageTargetPresetId;
   pages: number;
 }
 
-/** `WITHIN_MAX`: cabe en el máximo (incluso si es mucho más corto). `ABOVE_MAX`: lo supera por estructura obligatoria. */
-export type PageTargetOutcome = 'WITHIN_MAX' | 'ABOVE_MAX';
+/**
+ * `MET`: el PDF renderizado alcanza la meta (dentro de la tolerancia superior).
+ * `BELOW_TARGET`: no se alcanzó; nunca se presenta como cumplido.
+ * `ABOVE_TARGET`: la supera por estructura obligatoria (cada hecho, prestación o agravio).
+ */
+export type PageTargetOutcome = 'MET' | 'BELOW_TARGET' | 'ABOVE_TARGET';
 
 /** Resultado registrado con el borrador: objetivo vs páginas medidas sobre el documento renderizado. */
 export interface PageTargetResult {
@@ -55,8 +63,10 @@ export interface PageTargetResult {
   preset: PageTargetPresetId;
   actualPages: number;
   outcome: PageTargetOutcome;
-  /** Mensaje para el abogado cuando no se alcanzó la meta. */
+  /** Mensaje para el abogado cuando no se alcanzó la meta o se superó. */
   notice?: string;
+  /** Motivo de parada de la ampliación (`contentStopReason`) cuando no se alcanzó. */
+  stopReason?: string;
   redundancyRatio?: number;
   measuredWith: 'PDF_RENDERER';
 }
@@ -108,35 +118,64 @@ export function pageTargetToGenerationExtension(target: PageTarget): GenerationE
   const heavy = target.pages > 20;
   return {
     generationMode: 'extended-legal',
-    lengthIsCeiling: true,
+    // Meta real: el PDF renderizado debe alcanzar `minPages`; la ampliación sustantiva se detiene al llegar.
     targetPages: target.pages,
-    minPages: 1,
-    maxPages: target.pages,
+    minPages: target.pages,
+    maxPages: target.pages + pageTolerance(target.pages),
     targetWords: target.pages * WORDS_PER_PAGE,
-    maxCallsPerDocument: Math.min(100, Math.max(12, Math.round(target.pages * 1.2))),
+    // Redacción por sección + ampliación (≈ 1/3 de página nueva por llamada admitida), con holgura para
+    // rechazos por admisión jurídica, duplicado o salida truncada del proveedor.
+    maxCallsPerDocument: Math.min(100, Math.max(12, Math.round(target.pages * 1.5))),
     maxContinuationsPerSection: heavy ? 5 : 3,
-    // Sin ampliación: el máximo no se alcanza a la fuerza.
-    maxExpansionPasses: 1,
+    maxExpansionPasses: heavy ? 6 : 4,
     maxGeneratedTokens: heavy ? 6500 : 5000,
   };
 }
 
-/** Compara el resultado medido con el máximo. Ser más corto nunca es una falla. */
-export function evaluatePageTarget(target: PageTarget, actualPages: number, redundancyRatio?: number): PageTargetResult {
-  const outcome: PageTargetOutcome = actualPages > target.pages ? 'ABOVE_MAX' : 'WITHIN_MAX';
+const STOP_REASON_EXPLANATION: Record<string, string> = {
+  CONTENT_LIMIT_REACHED: 'los hechos, pruebas y autoridades verificadas del expediente ya están desarrollados; ampliar más exigiría repetir o inventar',
+  COVERAGE_COMPLETE: 'toda la cobertura respaldada del expediente ya está desarrollada; ampliar más exigiría repetir o inventar',
+  ATTORNEY_INPUT_REQUIRED: 'hay hechos o puntos que requieren la postura del abogado o del cliente antes de desarrollarlos',
+  REPETITION_BLOCKED: 'las ampliaciones propuestas repetían contenido existente y se rechazaron',
+  PROVIDER_UNAVAILABLE: 'el proveedor de IA falló, respondió de forma parcial o no devolvió contenido jurídico utilizable',
+  RESOURCE_LIMIT: 'se agotó el presupuesto de llamadas o pasadas de ampliación',
+};
+
+/** Compara el PDF medido con la meta. Quedarse corto es `BELOW_TARGET`, se explica y nunca se marca cumplido. */
+export function evaluatePageTarget(
+  target: PageTarget,
+  actualPages: number,
+  redundancyRatio?: number,
+  stopReason?: string,
+): PageTargetResult {
+  const outcome: PageTargetOutcome = actualPages < target.pages
+    ? 'BELOW_TARGET'
+    : actualPages > target.pages + pageTolerance(target.pages) ? 'ABOVE_TARGET' : 'MET';
+  const reason = stopReason ? STOP_REASON_EXPLANATION[stopReason] : undefined;
+  const notice = outcome === 'BELOW_TARGET'
+    ? `No se alcanzó la extensión solicitada (${target.pages} páginas; resultado: ${actualPages}). ${reason ? `Motivo: ${reason}. ` : ''}No se añadió texto de relleno ni hechos o fundamentos no respaldados. Para ampliar con calidad hace falta más material: documentos fuente adicionales, la postura del abogado sobre los hechos pendientes o fuentes jurídicas oficiales verificadas.`
+    : outcome === 'ABOVE_TARGET'
+      ? `El borrador supera la meta (${target.pages} páginas; resultado: ${actualPages}): incluye la estructura obligatoria del escrito (p. ej. responder individualmente cada hecho, prestación o agravio). No se omitió ninguna respuesta ni sección para ajustar la extensión.`
+      : undefined;
   return {
     requestedPages: target.pages,
     preset: target.preset,
     actualPages,
     outcome,
-    ...(outcome === 'ABOVE_MAX'
-      ? { notice: `El borrador supera el máximo (${target.pages} páginas; resultado: ${actualPages}): incluye la estructura obligatoria del escrito (p. ej. responder individualmente cada hecho, prestación o agravio). No se omitió ninguna respuesta ni sección para ajustar la extensión.` }
-      : {}),
+    ...(notice ? { notice } : {}),
+    ...(outcome === 'BELOW_TARGET' && stopReason ? { stopReason } : {}),
     ...(redundancyRatio === undefined ? {} : { redundancyRatio }),
     measuredWith: 'PDF_RENDERER',
   };
 }
 
-export function describePageTargetResult(result: Pick<PageTargetResult, 'requestedPages' | 'actualPages'>): string {
-  return `Máximo: ${result.requestedPages} páginas · Resultado: ${result.actualPages} páginas`;
+export function describePageTargetResult(result: Pick<PageTargetResult, 'requestedPages' | 'actualPages'> & { outcome?: string }): string {
+  const status = result.outcome === 'BELOW_TARGET' ? ' (por debajo del objetivo)'
+    : result.outcome === 'MET' ? ' (objetivo alcanzado)' : '';
+  return `Objetivo: ${result.requestedPages} páginas · Resultado: ${result.actualPages} páginas${status}`;
+}
+
+/** `PAGE_TARGET_UNMET` cuando el PDF quedó por debajo; `PAGE_TARGET_EXCEEDED` cuando la superó. */
+export function pageTargetCheckId(result: Pick<PageTargetResult, 'outcome'>): 'PAGE_TARGET_UNMET' | 'PAGE_TARGET_EXCEEDED' {
+  return result.outcome === 'BELOW_TARGET' ? 'PAGE_TARGET_UNMET' : 'PAGE_TARGET_EXCEEDED';
 }

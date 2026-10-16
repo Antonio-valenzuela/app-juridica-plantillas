@@ -25,7 +25,7 @@ function ms(envVar: string, defaultMs: number): number {
 // ─── Search timeouts ──────────────────────────────────────────────────────────
 
 /**
- * Maximum time (ms) to wait for the local PostgreSQL hybrid search.
+ * Maximum time (ms) to wait for the local search.
  * Default: 3 000 ms
  */
 export const LOCAL_SEARCH_MS = ms('TIMEOUT_LOCAL_SEARCH_MS', 3_000);

@@ -91,9 +91,17 @@ describe('registry source → output para los 33 tipos canónicos', () => {
       acc[rule.status] = (acc[rule.status] || 0) + 1;
       return acc;
     }, {});
+    // Aceptan cualquier fuente a propósito: los genéricos legacy (escrito_libre, otro) y los tipos cuyo catálogo declara
+    // «no requiere fuente» (escritos que se redactan con datos del cliente: sucesorio, contratos, consumidor, etc.).
+    const acceptingIds = new Set([
+      ...Object.entries(EXPECTED_STATUS).filter(([, status]) => status === 'ACCEPTS_ANY_SOURCE_INTENTIONALLY').map(([id]) => id),
+      ...LEGAL_CATALOG_REGISTRY.documents.filter((entry) => entry.sourceCompatibility?.acceptsAnySource).map((entry) => entry.id),
+    ]);
+    expect(new Set(Object.entries(SOURCE_OUTPUT_COMPATIBILITY_RULES)
+      .filter(([, rule]) => (rule as { status: string }).status === 'ACCEPTS_ANY_SOURCE_INTENTIONALLY').map(([id]) => id))).toEqual(acceptingIds);
     expect(counts).toEqual({
-      EXPLICIT_COMPATIBILITY: compatibilityIds.length - 20,
-      ACCEPTS_ANY_SOURCE_INTENTIONALLY: 5,
+      EXPLICIT_COMPATIBILITY: compatibilityIds.length - 15 - acceptingIds.size,
+      ACCEPTS_ANY_SOURCE_INTENTIONALLY: acceptingIds.size,
       UNSUPPORTED_DOCUMENT_TYPE: 15,
     });
   });
@@ -112,10 +120,20 @@ describe('registry source → output para los 33 tipos canónicos', () => {
     }
   });
 
-  it('aplica default-deny si un tipo generable pierde su regla', () => {
-    expect(() => getSourceOutputCompatibilityPolicy('contestacion_demanda_laboral', {})).toThrowError(
-      expect.objectContaining({ code: MISSING_SOURCE_COMPATIBILITY_RULE }),
-    );
+  it('aplica default-deny si un tipo generable pierde su regla y su declaración de catálogo', () => {
+    // Sin regla explícita, la política se toma de la declaración de fuente del catálogo; solo si tampoco existe se deniega.
+    const entry = LEGAL_CATALOG_REGISTRY.documents.find((item) => item.id === 'contestacion_demanda_laboral')!;
+    expect(entry.sourceCompatibility).not.toBeNull();
+    expect(() => getSourceOutputCompatibilityPolicy('contestacion_demanda_laboral', {})).not.toThrow();
+    const declared = entry.sourceCompatibility;
+    (entry as { sourceCompatibility: unknown }).sourceCompatibility = null;
+    try {
+      expect(() => getSourceOutputCompatibilityPolicy('contestacion_demanda_laboral', {})).toThrowError(
+        expect.objectContaining({ code: MISSING_SOURCE_COMPATIBILITY_RULE }),
+      );
+    } finally {
+      (entry as { sourceCompatibility: unknown }).sourceCompatibility = declared;
+    }
   });
 
   it('bloquea un tipo canónico sin strategy/template con DOCUMENT_TYPE_NOT_IMPLEMENTED', async () => {

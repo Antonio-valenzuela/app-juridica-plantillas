@@ -1,6 +1,8 @@
 # Extensión del escrito (meta de páginas)
 
-La interfaz de «Contestaciones y recursos» ofrece **Breve ≈ 5 · Intermedio ≈ 10 · Detallado ≈ 20 · Extenso ≈ 40 · Personalizado** (entero de 2 a 60). Es una meta aproximada: **el sistema no añade contenido para llenar páginas**.
+La interfaz ofrece **Breve 5 · Intermedio 10 · Detallado 20 · Extenso 40 · Personalizado** (entero de 2 a 60) para **todos los tipos de escrito del catálogo** (demandas, contestaciones, recursos, promociones y plantillas derivadas). Es un **objetivo de generación, no un máximo** (cambio de contrato del 2026-10-16; del 2026-10-14 a esa fecha funcionó como techo, y por eso una selección de 40 páginas terminaba en ≈ 8): el motor planifica las secciones con la meta, redacta, **mide el PDF renderizado** y **amplía las secciones pertinentes con análisis respaldado** hasta alcanzarla.
+
+La ampliación nunca rellena: cada bloque nuevo pasa por la admisión jurídica por proposición (`evaluateGeneratedLegalAdmission`), por la deduplicación contra todo el documento y por la higiene final. Si el material no sostiene más contenido, el resultado es **`BELOW_TARGET`** con el motivo (`contentStopReason`) y lo que haría falta. Alcanzar las páginas **no** valida jurídicamente el escrito: FINAL sigue dependiendo de la revisión humana y de los gates.
 
 ## Cómo viaja el parámetro
 
@@ -9,8 +11,11 @@ PageTargetSelector (UI)  →  CaseDocumentsReader  →  app/machotes/page.tsx  �
    {preset, pages}            (localStorage por           (body.pageTarget)        parsePageTarget() ⇒ 400 INVALID_PAGE_TARGET
                                expediente / sesión)                                            │
                                                                                                ▼
-runGenerationPipeline({ pageTarget })  →  pageTargetToGenerationExtension()  →  presupuesto por sección
-        │                                      (extended-legal, tolerancia ±15 %)   (secciones estructurales excluidas)
+runGenerationPipeline({ pageTarget })  →  pageTargetToGenerationExtension()  →  presupuesto por sección  →  prompt «extensión objetivo»
+        │                              (minPages = meta, maxPages = meta + 15 %)   (secciones estructurales excluidas)
+        ▼
+expandDocumentToPageTarget(): mide el PDF → amplía (1º cobertura pendiente respaldada; 2º secciones sustantivas por enfoque)
+        │                        → reintento único si la higiene final retiró texto y quedó por debajo
         ▼
 borrador.generationMetadata.pageTarget (lo pedido) + pageTargetResult (lo medido) → «Objetivo: N páginas · Resultado: M páginas»
 ```
@@ -36,7 +41,7 @@ Una contestación responde cada hecho y cada prestación individualmente. Ese co
 
 ## Resultado y honestidad
 
-`pageTargetResult` registra `requestedPages`, `actualPages` (**medido sobre el PDF renderizado**, no estimado), `outcome` (`MET`, `BELOW_TARGET`, `ABOVE_TARGET`) y, si no se alcanzó, el aviso: «No se alcanzó la extensión solicitada… la información, la evidencia y las reglas disponibles no sostienen más contenido sin redundancia. No se añadió texto de relleno.» También se registra `redundancyRatio`; por encima de **3 %** de párrafos casi idénticos (similitud de n-gramas ≥ 0,85) se emite el aviso `REDUNDANCY_THRESHOLD_EXCEEDED`. La higiene final elimina duplicados exactos y casi duplicados (≥ 0,92).
+`pageTargetResult` registra `requestedPages`, `actualPages` (**medido sobre el PDF renderizado**, no estimado), `outcome` (`MET` si el PDF alcanza la meta sin rebasar +15 %, `BELOW_TARGET`, `ABOVE_TARGET`), `stopReason` y, si no se alcanzó, el aviso `PAGE_TARGET_UNMET`: «No se alcanzó la extensión solicitada (N páginas; resultado: M). Motivo: … No se añadió texto de relleno… hace falta más material: documentos fuente adicionales, la postura del abogado o fuentes jurídicas oficiales verificadas.» Un fallo del proveedor, una respuesta truncada o el agotamiento del presupuesto se registran como `PROVIDER_UNAVAILABLE` / `RESOURCE_LIMIT` y **nunca** como meta cumplida. También se registra `redundancyRatio`; por encima de **3 %** de párrafos casi idénticos (similitud de n-gramas ≥ 0,85) se emite el aviso `REDUNDANCY_THRESHOLD_EXCEEDED`. La higiene final elimina duplicados exactos y casi duplicados (≥ 0,92).
 
 ## DOCX
 

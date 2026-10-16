@@ -12,11 +12,11 @@ export function ReviewAnnexPanel({ annex }: { annex?: ReviewAnnex }) {
   const counts = reviewAnnexCounts(annex);
   const pending = counts.notes + counts.unverifiedCitations + counts.pendingItems + counts.unresolvedFindings;
   return (
-    <details data-testid="review-annex" className="lex-card" style={{ margin: '0 12px 6px' }}>
-      <summary className="lex-card-title" style={{ cursor: 'pointer' }}>
+    <details data-testid="review-annex" className="lex-annex">
+      <summary className="lex-annex-summary">
         Anexo de revisión para el abogado ({pending} {pending === 1 ? 'punto' : 'puntos'}; fuera del escrito)
       </summary>
-      <div className="lex-help" style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+      <div className="lex-annex-body">
         {annex.unresolvedFindings.length > 0 && (
           <section aria-label="Hallazgos sin resolver">
             <strong>Hallazgos del validador sin resolver</strong>

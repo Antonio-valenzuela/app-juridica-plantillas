@@ -155,9 +155,9 @@ describe('P0 Security - lawyerAuth IDOR protection', () => {
     }
   });
 
-  it('permite analizar una fuente local si la base está sin cuota, sin crear identidad persistente', async () => {
-    mockOrgFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
-    mockUserFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+  it('permite analizar una fuente local si la base local no responde, sin crear identidad persistente', async () => {
+    mockOrgFindUnique.mockRejectedValue(new Error('SQLITE_BUSY: database is locked'));
+    mockUserFindUnique.mockRejectedValue(new Error('SQLITE_BUSY: database is locked'));
 
     const result = await requireLawyerAccess(new Request('http://localhost/api/templates/analyze-upload', {
       method: 'POST',
@@ -172,9 +172,9 @@ describe('P0 Security - lawyerAuth IDOR protection', () => {
     expect(mockUserCreate).not.toHaveBeenCalled();
   });
 
-  it('permite iniciar y consultar el job local de generación sin depender de Neon', async () => {
-    mockOrgFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
-    mockUserFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+  it('permite iniciar y consultar el job local de generación sin depender de la base', async () => {
+    mockOrgFindUnique.mockRejectedValue(new Error('SQLITE_BUSY: database is locked'));
+    mockUserFindUnique.mockRejectedValue(new Error('SQLITE_BUSY: database is locked'));
 
     const result = await requireLawyerAccess(new Request('http://localhost/api/legal-engine/generate', {
       method: 'POST',
@@ -187,9 +187,9 @@ describe('P0 Security - lawyerAuth IDOR protection', () => {
     }
   });
 
-  it('mantiene bloqueadas las rutas persistentes cuando la base está sin cuota', async () => {
-    mockOrgFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
-    mockUserFindUnique.mockRejectedValue(new Error('Your account or project has exceeded the quota'));
+  it('mantiene bloqueadas las rutas persistentes cuando la base local no responde', async () => {
+    mockOrgFindUnique.mockRejectedValue(new Error('SQLITE_BUSY: database is locked'));
+    mockUserFindUnique.mockRejectedValue(new Error('SQLITE_BUSY: database is locked'));
 
     const result = await requireLawyerAccess(new Request('http://localhost/api/legal-drafts', {
       method: 'POST',

@@ -17,8 +17,6 @@ import path from 'node:path';
 
 // Misma guarda que la suite offline: sin claves de proveedores y sin fetch a hosts externos.
 await import('../../tests/setup/offlineNetworkGuard');
-// La telemetría de uso no debe salir a la base remota durante la traza.
-process.env.DATABASE_URL = 'postgresql://offline:offline@127.0.0.1:1/offline';
 
 const { extractDocument } = await import('@/lib/pdf/documentExtractor');
 const { createSourceDocument } = await import('@/lib/legal-engine/context');

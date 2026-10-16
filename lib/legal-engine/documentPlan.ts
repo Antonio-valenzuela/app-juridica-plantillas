@@ -20,6 +20,7 @@ import { bindCoverageToSections } from './richCoverage';
 import { buildLegalIssueMatrix, type LegalIssueMatrix } from './legalIssueMatrix';
 import { factsPolicyFor } from './factsPolicy';
 import { injectNarrativeFacts } from './factsSeed';
+import { sectionDisplayTitle } from './documentStrategies';
 import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 
 /**
@@ -250,14 +251,19 @@ function reconcileDeclaredSections(
 ): DocumentNode[] {
   // Coincidencia por prioridad (exacta > comienza con > contiene) para anclar
   // cada sección declarada a la sección correcta y no a la primera que la mencione.
+  // Los contratos con IDs crudos (demanda civil/mercantil) se anclan también por
+  // `section.id`: su título visible es legible y ya no coincide con el declarado.
   const findSection = (declared: string) => {
     const wanted = normalizeTitleKey(declared);
-    const keys = result.map((section) => normalizeTitleKey(section.title));
-    const exact = keys.findIndex((key) => key === wanted);
+    const keys = result.map((section) => [
+      normalizeTitleKey(section.title),
+      normalizeTitleKey(section.id),
+    ].filter(Boolean));
+    const exact = keys.findIndex((pair) => pair.includes(wanted));
     if (exact >= 0) return exact;
-    const starts = keys.findIndex((key) => key.startsWith(wanted) || wanted.startsWith(key));
+    const starts = keys.findIndex((pair) => pair.some((key) => key.startsWith(wanted) || wanted.startsWith(key)));
     if (starts >= 0) return starts;
-    return keys.findIndex((key) => key.includes(wanted) || wanted.includes(key));
+    return keys.findIndex((pair) => pair.some((key) => key.includes(wanted) || wanted.includes(key)));
   };
   const seeded = buildTemplateSkeleton(template, doc);
   const result = [...sections];
@@ -283,15 +289,17 @@ function reconcileDeclaredSections(
 }
 
 export function buildTemplateSkeleton(tpl: DocumentTemplate, doc: UniversalLegalDocument): DocumentNode[] {
+  // En la demanda civil y mercantil la `estructura` declara IDs canónicos de
+  // sección (contrato de export/calidad). El ID sigue siendo ese identificador,
+  // pero el TÍTULO visible es el rótulo legible y jamás un `via_accion` crudo.
+  const idIsSectionContract = tpl.tipo === 'demanda_ordinaria_civil' || tpl.tipo === 'demanda_ejecutiva_mercantil';
   return tpl.estructura.map((title, i) => {
     const secType = inferSectionType(title);
     const seed = seedForSection(tpl, title, secType, doc);
     return createDocumentNode({
-      id: tpl.tipo === 'demanda_ordinaria_civil' || tpl.tipo === 'demanda_ejecutiva_mercantil'
-        ? title
-        : `sec-${tpl.tipo}-${i + 1}`,
+      id: idIsSectionContract ? title : `sec-${tpl.tipo}-${i + 1}`,
       type: secType,
-      title,
+      title: idIsSectionContract ? sectionDisplayTitle(title) : title,
       order: i * 10,
       isRepeatable: secType === 'argument',
       generationInstruction: seed.generationInstruction,

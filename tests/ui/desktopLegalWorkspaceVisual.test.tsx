@@ -37,6 +37,11 @@ function declarationsFor(selector: string) {
   return matches;
 }
 
+/** Overflow efectivo por eje: una regla puede declararlo con la abreviatura (`overflow`) o con las propiedades por eje. */
+function overflowOf(declarations: Record<string, string> | undefined) {
+  return { x: declarations?.['overflow-x'] ?? declarations?.overflow, y: declarations?.['overflow-y'] ?? declarations?.overflow };
+}
+
 describe('Workspace jurídico de escritorio', () => {
   it.each(moduleCases)('%s expone identidad visual estable para su módulo', (mode, moduleName) => {
     const markup = renderToStaticMarkup(React.createElement(WorkspaceModulesView, {
@@ -119,11 +124,10 @@ describe('Workspace jurídico de escritorio', () => {
 
     expect(mainScroll.at(-1)).toMatchObject({ height: '100%', padding: '0', overflow: 'hidden' });
     expect(workspace.at(-1)).toMatchObject({ height: '100%', 'min-height': '0', overflow: 'hidden' });
-    expect(declarationsFor('.appshell-content[data-active-tab="responses_resources"] .machotes-shell .contestaciones-main-column .contestaciones-document-pdf-viewport').at(-1)).toMatchObject({
-      'height': '100%',
-      'max-height': 'none',
-      'overflow-y': 'auto',
-    });
+    // El visor dentro de la columna principal recibe la regla del visor (sin selector de columna): mismo alto y un único scroll.
+    const pdfViewportRule = declarationsFor('.appshell-content[data-active-tab="responses_resources"] .machotes-shell .contestaciones-document-pdf-viewport').at(-1);
+    expect(pdfViewportRule).toMatchObject({ 'height': '100%', 'max-height': 'none' });
+    expect(overflowOf(pdfViewportRule).y).toBe('auto');
     expect(inspector).toContainEqual(expect.objectContaining({ 'overflow-y': 'auto' }));
     expect(inspectorContent.at(-1)).toMatchObject({ display: 'contents' });
     expect(inspectorFooter.at(-1)).toMatchObject({ position: 'static', 'margin-top': '0' });
@@ -152,14 +156,14 @@ describe('Workspace jurídico de escritorio', () => {
       'min-height': '0',
       'max-height': 'none',
     });
-    expect(declarationsFor('.appshell-content[data-active-tab="responses_resources"] .machotes-shell .contestaciones-main-column .contestaciones-document-preview').at(-1)).toMatchObject({
+    const previewInColumn = declarationsFor('.appshell-content[data-active-tab="responses_resources"] .machotes-shell .contestaciones-main-column .contestaciones-document-preview').at(-1);
+    expect(previewInColumn).toMatchObject({
       flex: '1 1 auto',
       'height': 'auto',
       'min-height': '0',
       'max-height': 'none',
-      'overflow-y': 'visible',
-      'overflow-x': 'visible',
     });
+    expect(overflowOf(previewInColumn)).toEqual({ x: 'visible', y: 'visible' });
     expect(declarationsFor('.appshell-content[data-active-tab="responses_resources"] .machotes-shell .contestaciones-document-viewer').at(-1)).toMatchObject({
       display: 'flex',
       'flex-direction': 'column',
@@ -175,9 +179,6 @@ describe('Workspace jurídico de escritorio', () => {
       'height': '100%',
       'max-height': 'none',
     });
-    expect(declarationsFor('.appshell-content[data-active-tab="responses_resources"] .machotes-shell .contestaciones-document-preview').at(-1)).toMatchObject({
-      'overflow-y': 'visible',
-      'overflow-x': 'visible',
-    });
+    // (La vista previa sin visor interno solo recibe estilo dentro de la columna principal; ya se comprobó arriba.)
   });
 });

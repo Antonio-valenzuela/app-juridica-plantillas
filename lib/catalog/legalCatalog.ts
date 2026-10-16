@@ -896,7 +896,7 @@ export function getInitialWritingDocumentOptions(options: { includeUncertifiedDr
     if (!entry.id.startsWith('demanda_')) return [];
     const statusAllowed = entry.functionalStatus === 'PASS'
       || (options.includeUncertifiedDrafts === true && entry.functionalStatus === 'FAIL');
-    if (entry.status !== 'IMPLEMENTED' || !entry.implemented || !statusAllowed || !DocumentTemplates[entry.id]) return [];
+    if (entry.status !== 'IMPLEMENTED' || !entry.implemented || !statusAllowed || !(DocumentTemplates[entry.id] || familyDerivedTemplateFor(entry.id))) return [];
     return [{
       value: entry.id,
       label: entry.functionalStatus === 'PASS'

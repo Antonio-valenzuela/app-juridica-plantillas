@@ -3,6 +3,7 @@ import { stripTrustMarkers } from './trustLayer';
 import { normalizeMarkdownFormatting, normalizeTitleText, looksLikeHeading } from './markdownNormalizer';
 import { extractUnresolvedFieldMarkers, normalizeUnresolvedFieldMarkers } from './pendingFields';
 import { stripTransientAuditTrace } from './generationTraceSanitizer';
+import { stripInternalIds, stripSourceNoise } from './sourceNoise';
 
 export type PlaceholderKind = 'INTENTIONAL_ANONYMIZATION' | 'TECHNICAL_UNRESOLVED' | 'USER_REQUIRED_MISSING';
 
@@ -167,6 +168,43 @@ function isInternalHeaderLine(line: string): boolean {
 }
 
 /**
+ * Eco del encabezado de tarea del pipeline («SECCIÓN: CONTESTACIÓN DE
+ * PRESTACIONES») que el modelo llega a repetir dentro del texto. Es sintaxis
+ * interna: nunca es contenido jurídico. El patrón exige la etiqueta en
+ * MAYÚSCULAS seguida de un rótulo en mayúsculas, de modo que la prosa normal
+ * («la sección: primera», «SUBSECCIÓN: A») queda intacta.
+ */
+const SECTION_HEADER_ECHO_RE = /\bSECCIÓN[ \t]*:[ \t]*[A-ZÁÉÍÓÚÑÜ0-9]+(?:[ \t]+[A-ZÁÉÍÓÚÑÜ0-9]+)*[.;:,]?/g;
+
+/**
+ * Conectores que exigen continuación: si tras retirar el eco una oración o
+ * párrafo TERMINA en alguno de ellos, el fragmento quedó incompleto y NO puede
+ * presentarse como texto correcto. No se inventa la continuación ni se toca la
+ * oración siguiente: el bloque se marca para regeneración/revisión.
+ */
+const DANGLING_CONNECTOR_RE =
+  /(?:^|[\s,;:(])(?:porque|puesto que|ya que|dado que|debido a que|toda vez que|en raz[oó]n de que|en virtud de que|a fin de que|con el fin de que|con el objeto de que|para que|a efecto de que|a causa de|como consecuencia de)[ \t]*[.;:,]?$/i;
+
+function endsWithDanglingConnector(text: string): boolean {
+  return text
+    .trimEnd()
+    .split(/\n\s*\n/)
+    .some((paragraph) => DANGLING_CONNECTOR_RE.test(paragraph.trimEnd()));
+}
+
+function stripSectionHeaderEchoes(text: string): { out: string; removed: number; leftIncomplete: boolean } {
+  let removed = 0;
+  const out = text.replace(SECTION_HEADER_ECHO_RE, () => {
+    removed++;
+    return '';
+  });
+  if (removed === 0) return { out, removed, leftIncomplete: false };
+  // Solo cuando hubo eco: limpia los espacios que dejó la etiqueta.
+  const cleaned = out.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+$/gm, '');
+  return { out: cleaned, removed, leftIncomplete: endsWithDanglingConnector(cleaned) };
+}
+
+/**
  * Eliminación SOLO de metadata interna del pipeline sobre texto suelto.
  * Usada por el fallback de emergencia cuando `sanitizeLegalDocument` falla:
  * garantiza que ninguna salida llegue sin el filtro de etiquetas internas.
@@ -175,7 +213,7 @@ function isInternalHeaderLine(line: string): boolean {
  */
 export function stripInternalPromptMetadata(raw: string): string {
   if (!raw) return raw;
-  return stripPrompts(normalizeMarkdownFormatting(raw)).out;
+  return stripSectionHeaderEchoes(stripPrompts(normalizeMarkdownFormatting(raw)).out).out;
 }
 
 function stripPrompts(text: string): { out: string, removed: number } {
@@ -357,14 +395,18 @@ export function formatTabularStructures(text: string): string {
   return text;
 }
 
-function sanitizeBlockText(raw: string): { sanitized: string; stats: { prompts:number; metadata:number; watermarks:number; crypto:number; placeholders:string[]; classifiedPlaceholders:ClassifiedPlaceholder[]; proofreading:number } } {
-  let text = stripTrustMarkers(raw);
+function sanitizeBlockText(raw: string): { sanitized: string; stats: { prompts:number; metadata:number; watermarks:number; crypto:number; placeholders:string[]; classifiedPlaceholders:ClassifiedPlaceholder[]; proofreading:number; echoLeftIncomplete:boolean } } {
+  // Sellos de firma electrónica, volcados hexadecimales e identificadores internos que se hayan colado del PDF
+  // fuente o de las constancias citadas: nunca forman parte del escrito.
+  let text = stripTrustMarkers(stripInternalIds(stripSourceNoise(raw).text));
   // Markdown de la IA (**)…**, ###, viñetas) → texto limpio. DEBE ejecutarse
   // ANTES de stripPrompts para que encabezados como "### OBJETIVO DEL BLOQUE:"
   // queden reconocibles. Preserva líneas/corridas de redacción (*****).
   text = normalizeMarkdownFormatting(text);
   text = normalizeUnresolvedFieldMarkers(text);
   text = formatTabularStructures(text);
+  const echo = stripSectionHeaderEchoes(text);
+  text = echo.out;
   const p = stripPrompts(text);
   text = p.out;
   const m = stripMetadata(text);
@@ -395,7 +437,7 @@ function sanitizeBlockText(raw: string): { sanitized: string; stats: { prompts:n
   text = text.replace(/\n{3,}/g, '\n\n').trim();
   return {
     sanitized: text,
-    stats: { prompts: p.removed, metadata: m.removed, watermarks: w.removed, crypto: cryptoRemoved, placeholders: ph.found, classifiedPlaceholders: ph.classified, proofreading: pr.count },
+    stats: { prompts: p.removed + echo.removed, metadata: m.removed, watermarks: w.removed, crypto: cryptoRemoved, placeholders: ph.found, classifiedPlaceholders: ph.classified, proofreading: pr.count, echoLeftIncomplete: echo.leftIncomplete },
   };
 }
 
@@ -488,6 +530,12 @@ export function sanitizeLegalDocument(doc: UniversalLegalDocument, options?: San
     placeholdersFound: [], classifiedPlaceholders: [], truncatedWarnings: [], coherenceWarnings: [], partsWarnings: [], proofreadingApplied: 0,
   };
 
+  // Bloques donde retirar el eco interno dejó una oración incompleta (p. ej.
+  // termina en «porque»): NUNCA se presentan como texto correcto; se marcan
+  // truncados para regeneración/revisión (bloquea export y FINAL vía las
+  // guardas existentes de generationStatus === 'truncated').
+  const echoIncompleteIssues: ValidationIssue[] = [];
+
   // Clone doc shallow
   const sanitized: UniversalLegalDocument = {
     ...doc,
@@ -506,6 +554,13 @@ export function sanitizeLegalDocument(doc: UniversalLegalDocument, options?: San
         }
         report.proofreadingApplied += stats.proofreading;
 
+        if (stats.echoLeftIncomplete) {
+          echoIncompleteIssues.push({
+            checkId: 'section_echo_left_incomplete_sentence',
+            message: `El bloque "${block.id}" quedó con una oración incompleta tras retirar una etiqueta interna («SECCIÓN: …»); requiere regeneración o revisión antes de presentarse.`,
+          });
+        }
+
         // Encabezado jurídico implícito ("PRUEBAS", "CONTESTACIÓN", "RESUELVE"):
         // un bloque de un solo párrafo en mayúsculas se marca en NEGRITA a nivel
         // de estilo para que editor, DOCX y PDF lo jerarquicen consistentemente.
@@ -516,6 +571,7 @@ export function sanitizeLegalDocument(doc: UniversalLegalDocument, options?: San
 
         return {
           ...block,
+          ...(stats.echoLeftIncomplete ? { generationStatus: 'truncated' as const } : {}),
           text: clean,
           style: styleBold ? { ...(block.style || {}), fontWeight: 'bold' } : block.style,
         };
@@ -580,6 +636,7 @@ export function sanitizeLegalDocument(doc: UniversalLegalDocument, options?: San
   // Detect truncated
   const allText = sanitized.sections.map(s=>s.content.map(b=>b.text).join('\n\n')).join('\n\n');
   report.truncatedWarnings = detectTruncated(allText, sanitized);
+  report.truncatedWarnings.push(...echoIncompleteIssues);
 
   // Validate coherence
   report.coherenceWarnings = validateCoherence(sanitized);
