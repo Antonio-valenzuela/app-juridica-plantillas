@@ -1,9 +1,12 @@
 import { fetch } from "undici";
 import type { AIHealthResult, AIProvider, AIProviderResult, AIRequest } from "./types";
 import { sanitizeAiError } from "./types";
+import { linkAbortSignal } from "../abortContext";
 import { getNvidiaModel as getChainNvidiaModel } from "../providerChain";
 
 export interface NVIDIACompletionOptions {
+  /** Cancelación externa (plazo del pipeline): aborta la petición en curso. */
+  signal?: AbortSignal;
   prompt: string;
   systemPrompt?: string;
   temperature?: number;
@@ -64,6 +67,7 @@ export async function generateNVIDIACompletion(
   const configuredTimeout = Number(process.env.NVIDIA_REQUEST_TIMEOUT_MS);
   const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1000 ? configuredTimeout : 120000;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const unlinkAbort = linkAbortSignal(controller, options.signal);
 
   // PASO 2: logging sanitizado del request (sin secretos)
   const sanitizedRequestLog = {
@@ -106,6 +110,8 @@ export async function generateNVIDIACompletion(
     });
 
     clearTimeout(timeoutId);
+
+    unlinkAbort();
     const latencyMs = Date.now() - startMs;
 
     if (!response.ok) {
@@ -149,6 +155,7 @@ export async function generateNVIDIACompletion(
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    unlinkAbort();
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`[NVIDIA Provider] Timeout de ${timeoutMs}ms alcanzado en la llamada a NVIDIA Build.`);
     }
@@ -169,6 +176,7 @@ export class NVIDIAProvider implements AIProvider {
 
     try {
       const res = await generateNVIDIACompletion({
+        signal: request.signal,
         prompt: request.userMessage,
         systemPrompt: request.systemPrompt,
         temperature: request.temperature,

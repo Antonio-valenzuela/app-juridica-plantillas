@@ -748,3 +748,15 @@ export type {
   DocumentCoverageItem,
   CoverageMatrix,
 } from './coverageMatrix';
+
+/**
+ * Clase de cada proposición del borrador (audit D.3). Se asigna de forma determinista antes de aceptar el bloque.
+ * FINAL depende de la clase: UNVERIFIED_CITATION y UNSUPPORTED_OR_CONTRADICTORY bloquean.
+ */
+export type LegalPropositionClass =
+  | 'VERIFIED_AUTHORITY'
+  | 'SOURCE_STATED'
+  | 'LEGAL_REASONING'
+  | 'PENDING_CONFIRMATION'
+  | 'UNVERIFIED_CITATION'
+  | 'UNSUPPORTED_OR_CONTRADICTORY';

@@ -86,7 +86,7 @@ import { advanceDocumentState, createDocumentState, type DocumentState } from '.
 import { buildSourceGroundingForDocuments } from './sourceGrounding';
 import { evaluateProvenanceIntegrityGate } from './provenanceIntegrityGate';
 import { correctMisappliedLaborAuthorities } from './authorityPropositionGate';
-import { evaluateGeneratedLegalAdmission } from './generatedLegalAdmission';
+import { confirmedEvidenceDescriptions, evaluateGeneratedLegalAdmission } from './generatedLegalAdmission';
 
 export interface LegalResearchOnlyInput {
   caseAnalysis: CaseAnalysis;
@@ -382,7 +382,9 @@ import { validateDocumentEvidence } from './documentEvidence';
 import { validateDocumentAuthorities } from './documentAuthority';
 import { markUnverifiedAuthorityReferences } from './authorityReferenceAudit';
 import { enforceOutputHygiene } from './generatedOutputValidator';
-import { MAX_REDUNDANCY_RATIO, evaluatePageTarget, pageTargetCheckId, pageTargetToGenerationExtension, parsePageTarget, tryParsePageTarget, type PageTarget, type PageTargetResult } from './pageTarget';
+import { bindGenerationSignal, currentAbortSignal, throwIfCancelled, abortRace } from '../ai/abortContext';
+import { evaluateBlockFactualSupport, sourceTextsOf } from './blockFactualGate';
+import { MAX_REDUNDANCY_RATIO, evaluatePageTarget, pageTargetCheckId, pageTargetFailureResult, pageTargetToGenerationExtension, parsePageTarget, tryParsePageTarget, type PageTarget, type PageTargetResult } from './pageTarget';
 import { unreadableSourcePages } from './extractionCoverage';
 import { applyDossierToDocument, enforceWritingContract, finalizeReviewAnnex, prepareWritingContract, type PreparedWritingContract } from './writingContractStage';
 import { emptyReviewAnnex, reviewAnnexHasItems, separateReviewMaterial } from './reviewAnnex';
@@ -842,6 +844,8 @@ export interface PipelineInput {
   expansionProvider?: import('./generationExpansion').ExtendedExpansionOptions['invokeProvider'];
   /** Meta de extensión (5/10/20/40/personalizada). Tiene prioridad sobre `draftDepth` y `generationExtension`. */
   pageTarget?: PageTarget | { preset?: string; pages?: number };
+  /** Cancelación cooperativa (plazo agotado): deja de iniciar llamadas al proveedor y ampliaciones nuevas. */
+  signal?: AbortSignal;
   legalResearchProvider?: LegalResearchProvider;
   /** Ficha del caso confirmada por el abogado (única fuente de nombres, órgano, lugar y fechas). */
   caseDossier?: CaseDossier;
@@ -1611,17 +1615,37 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
       const callProvider = async (userMessage: string) => {
         const startedAt = new Date();
         const startedMs = Date.now();
-        const aiPromise = runFastMode({ ...providerRequest, userMessage });
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Timeout de IA por bloque (${SECTION_TIMEOUT_MS}ms)`)), SECTION_TIMEOUT_MS)
-        );
-        const result = await Promise.race([aiPromise, timeoutPromise]);
-        return {
-          result,
-          startedAt,
-          durationMs: Math.max(0, Date.now() - startedMs),
-          inputSizeBytes: Buffer.byteLength(userMessage, 'utf8'),
-        };
+        const signal = currentAbortSignal();
+        throwIfCancelled(signal);
+        // Presupuesto global por documento (redacción inicial + ampliación) solo en modo extenso.
+        const contract = (doc.generationMetadata as any).generationExtension as GenerationExtensionContract | undefined;
+        const extended = contract?.generationMode === 'extended-legal';
+        if (extended && contract.metrics.llmCalls >= contract.maxCallsPerDocument) {
+          throw new Error('PROVIDER_CALL_BUDGET_EXHAUSTED: se agotó el presupuesto de llamadas del documento');
+        }
+        if (extended) {
+          contract.metrics.llmCalls += 1;
+        }
+        const aiPromise = runFastMode({ ...providerRequest, userMessage, signal });
+        // Un rechazo tardío (tras perder la carrera) no debe quedar sin manejar.
+        aiPromise.catch(() => undefined);
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(`Timeout de IA por bloque (${SECTION_TIMEOUT_MS}ms)`)), SECTION_TIMEOUT_MS);
+        });
+        const cancellation = abortRace(signal);
+        try {
+          const result = await Promise.race([aiPromise, timeoutPromise, cancellation.promise]);
+          return {
+            result,
+            startedAt,
+            durationMs: Math.max(0, Date.now() - startedMs),
+            inputSizeBytes: Buffer.byteLength(userMessage, 'utf8'),
+          };
+        } finally {
+          clearTimeout(timeoutId);
+          cancellation.dispose();
+        }
       };
       const recordProviderAttempt = (
         attempt: Awaited<ReturnType<typeof callProvider>>,
@@ -1776,6 +1800,12 @@ Escribe el bloque completo con desarrollo argumentativo exhaustivo.`;
     }
   }
 
+// Control fáctico por bloque: una fecha o monto ausente de la fuente se sustituye por un dato pendiente (bloquea FINAL).
+const factualSupport = evaluateBlockFactualSupport(rawText, [...sourceTextsOf(doc), ...confirmedEvidenceDescriptions(caseAnalysis, instruction), instruction || '']);
+if (!factualSupport.accepted) {
+  trace?.addWarning(`FACTUAL_SUPPORT_MISSING:${block.id}:${factualSupport.rejectedItems.join('+')}`);
+  rawText = `[DATO PENDIENTE DE EXPEDIENTE: ${factualSupport.rejectedItems.join('; ')}]`;
+}
 const admission = evaluateGeneratedLegalAdmission({ text: rawText, sectionType: block.sectionType, document: doc, analysis: caseAnalysis, instruction, legalIssueIds: sectionPlan?.legalIssueIds });
   // Remediación granular por proposición. El razonamiento admisible se conserva
   // y sólo se suspenden las proposiciones inseguras; el marcador emitido sigue
@@ -2496,6 +2526,12 @@ function buildDeterministicBlockText(block: LegalBlock, doc: UniversalLegalDocum
             `PRIMERO. Tener por promovida la demanda de amparo en materia laboral.\n` +
             `SEGUNDO. Conceder la suspensión del acto reclamado conforme a derecho.\n` +
             `TERCERO. En su oportunidad, otorgar el amparo y protección de la Justicia Federal.`;
+        }
+        // Escrito no contencioso (parte interesada): sin petitorio de demanda ni condena a la contraria.
+        if (getDocumentTemplate(doc.documentType, doc.documentTypeLabel)?.rolAutor === 'parte_interesada') {
+          return `PUNTOS PETITORIOS:\n\n` +
+            `PRIMERO. Tener por presentado el presente escrito en tiempo y forma.\n` +
+            `SEGUNDO. Proveer conforme a derecho lo solicitado en el cuerpo del escrito.`;
         }
         return `PUNTOS PETITORIOS:\n\n` +
           `PRIMERO. Tenerme por presentado en tiempo y forma con la presente demanda laboral.\n` +
@@ -3818,6 +3854,8 @@ export async function runGenerationPipeline(
   const rawSources = confirmedAppeal?.selected ? selectAppealSources(suppliedSources, confirmedAppeal.selected) : suppliedSources;
   // Sellos de firma electrónica, volcados hexadecimales y marcas de página del PDF no son del documento: se
   // limpian antes de analizar, citar o fundamentar nada (si no, se «citan» como constancias y parten las frases).
+  // Cancelación del plazo: la señal llega a router y adaptadores por contexto asíncrono.
+  bindGenerationSignal(input.signal);
   const sources: UploadedSourceDocument[] = rawSources.map((source) =>
     markDocumentAsSource({ ...sanitizeSourceDocument(source) }, source.id)
   );
@@ -4631,6 +4669,7 @@ export async function runGenerationPipeline(
     const accumulatedGenerationTasks: GenerationTask[] = [];
     const taskAccountingFindings: DocumentAssemblyFinding[] = [];
     let documentState: DocumentState = createDocumentState(caseAnalysis, doc.legalIssueMatrix);
+    const movedAuthorityRules: Array<{ blockId: string; citation: string; rule: string }> = [];
     const markBlockAuthorityReferences = (block: ContentBlock) => {
       // El texto determinista también cita artículos sin verificación oficial: se marca igual.
       // Solo se exime el texto literal de la fuente y el escrito/edición del propio abogado.
@@ -4643,6 +4682,7 @@ export async function runGenerationPipeline(
         verifiedAuthorities: doc.generationMetadata.verifiedAuthorities || [],
       });
       block.text = result.text;
+      for (const moved of result.movedRules) movedAuthorityRules.push({ blockId: block.id, citation: moved.citation, rule: moved.rule });
       if (result.findings.length > 0) {
         traceContext?.addWarning(`UNVERIFIED_AUTHORITY_REFERENCES:${block.id}:${result.findings.length}`);
       }
@@ -4980,6 +5020,10 @@ export async function runGenerationPipeline(
     // Contrato del escrito: separa notas y marcadores hacia el anexo, valida, repara cierre y firma y regenera
     // (una vez) las secciones que incumplan. Lo que persiste queda registrado y bloquea FINAL.
     const reviewAnnex = emptyReviewAnnex();
+    // Reglas atribuidas a citas no verificadas: salen del cuerpo y van al anexo de revisión.
+    for (const moved of movedAuthorityRules) {
+      reviewAnnex.unverifiedCitations.push({ section: moved.blockId, citation: moved.citation, omitted: moved.rule });
+    }
     let contractResult: Awaited<ReturnType<typeof enforceWritingContract>> | undefined;
     if (writingPrepared) {
       jobUpdate((input as any).jobId, { phase: 'verify', stage: 'Verificando el contrato del escrito' });
@@ -5006,7 +5050,7 @@ export async function runGenerationPipeline(
     // detiene con un motivo explícito (BELOW_TARGET), nunca rellena.
     if (generationExtension.generationMode === 'extended-legal' && !generationExtension.lengthIsCeiling) {
       jobUpdate((input as any).jobId, { phase: 'extend', stage: 'Extensión jurídica' });
-      const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
+      const expansion = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, signal: input.signal, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
       finalExpansionBudgetState = {
         hasAvailableContinuationBudget: expansion.continuationBudgetAvailable === true,
         hasAvailableCallBudget: expansion.callBudgetAvailable === true,
@@ -5265,7 +5309,7 @@ export async function runGenerationPipeline(
         const remeasured = await measureRenderedDocumentPages(doc);
         if (remeasured.actualPages < generationExtension.minPages) {
           jobUpdate((input as any).jobId, { phase: 'extend', stage: 'Extensión jurídica (ajuste tras depuración)' });
-          const retry = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
+          const retry = await expandDocumentToPageTarget(doc, caseAnalysis, generationExtension, { trace: traceContext, signal: input.signal, ...(input.expansionProvider ? { invokeProvider: input.expansionProvider } : {}) });
           doc.generationMetadata.draftContentStopReason = retry.contentStopReason;
           finalExpansionBudgetState = {
             hasAvailableContinuationBudget: retry.continuationBudgetAvailable === true,
@@ -5275,6 +5319,8 @@ export async function runGenerationPipeline(
           if (hygiene.actions.length > 0) traceContext?.addWarning(`OUTPUT_HYGIENE_AFTER_EXPANSION:${hygiene.actions.length}`);
         }
       } catch (retryError) {
+        // Una cancelación debe propagarse; un fallo del retry de extensión es solo un warning.
+        if (input.signal?.aborted) throw retryError;
         traceContext?.addWarning(`EXTENSION_RETRY_FAILED:${retryError instanceof Error ? retryError.message : String(retryError)}`);
       }
     }
@@ -5346,6 +5392,12 @@ export async function runGenerationPipeline(
         const message = measurementError instanceof Error ? measurementError.message : String(measurementError);
         generationExtension.extensionTargetUnmet = true;
         doc.validation.warnings.push({ checkId: 'EXTENDED_GENERATION_MEASUREMENT_FAILED', message });
+        // Fallo de medición = estado explícito: nunca se presenta como meta cumplida.
+        if (pageTarget) {
+          const failed = pageTargetFailureResult(pageTarget, 'MEASUREMENT_FAILED', 0);
+          (doc.generationMetadata as any).pageTargetResult = failed;
+          doc.validation.warnings.push({ checkId: pageTargetCheckId(failed), message: failed.notice } as ValidationIssue);
+        }
       }
     }
 

@@ -6,6 +6,8 @@ import type { TemplateItem } from './TemplateLibraryManager';
 import { type GenerationStatusData } from './GenerationStatusBar';
 import { analyzeWritingRequest, getDynamicIntakeFields } from '@/lib/legal-engine/writingIntake';
 import { rankTemplateCandidates } from '@/lib/templates/templateCompatibility';
+import { DEFAULT_PAGE_TARGET, type PageTarget } from '@/lib/legal-engine/pageTarget';
+import { PageTargetSelector } from './PageTargetSelector';
 
 interface WorkspaceDraftGeneratorModalProps {
   isOpen: boolean;
@@ -19,6 +21,7 @@ interface WorkspaceDraftGeneratorModalProps {
     selectedTemplate?: TemplateItem | null;
     templateRefText?: string;
     writingMode?: 'analyze' | 'new' | 'template' | 'continue';
+    pageTarget?: PageTarget;
   }) => Promise<void | boolean>;
   templates: TemplateItem[];
   uploadedSources: UploadedSourceDocument[];
@@ -79,6 +82,7 @@ export function WorkspaceDraftGeneratorModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [selectedDocumentType, setSelectedDocumentType] = useState<string | undefined>(undefined);
+  const [pageTarget, setPageTarget] = useState<PageTarget>(DEFAULT_PAGE_TARGET);
   const [userPrompt, setUserPrompt] = useState<string>('');
   const [selectedTpl, setSelectedTpl] = useState<TemplateItem | null>(null);
   const [templateRefText, setTemplateRefText] = useState<string>('');
@@ -173,6 +177,7 @@ export function WorkspaceDraftGeneratorModal({
         selectedTemplate: selectedTpl,
         templateRefText: templateRefText || undefined,
         writingMode,
+        pageTarget,
       });
       if (result !== false) onClose();
     } catch (err: any) {
@@ -427,6 +432,7 @@ export function WorkspaceDraftGeneratorModal({
 
         {/* Pie del Modal: progreso real + Botón Generar */}
         <div className="p-5 border-t border-slate-100 bg-[#fbf9f5] space-y-3">
+          <PageTargetSelector value={pageTarget} onChange={setPageTarget} disabled={isGenerating} />
           <div className="flex items-center justify-between">
           <button
             onClick={onClose}

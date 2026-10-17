@@ -8,9 +8,12 @@ export interface MaterialLegalCitation {
 }
 
 const ARTICLE_CITATION_RE = /\b(?:art[ií]culos?|art\.)\s+\d+[a-z]?(?:\s*(?:bis|ter|qu[aá]ter))?(?:\s*,?\s*fracci[oó]n\s+[ivxlcdm\d]+)?/giu;
-const STATUTE_TITLE_RE = /\b(?:constituci[oó]n(?!\p{L})(?:\s+pol[ií]tica)?(?:\s+de\s+(?:los\s+)?estados\s+unidos\s+mexicanos)?|(?:ley|c[oó]digo|reglamento|decreto|acuerdo)\s+(?:(?:federal|general|org[aá]nica|estatal|municipal|nacional)\s+)?(?:de(?:l)?\s+)?[\p{L}\d]+(?:\s+(?!(?:se|que|establece|dispone|prev[eé]|regula|aplica|aplicable|conforme|resulta|considera|ordena|garantiza|protege|permite|sustenta|se[nñ]ala|se[nñ]alan)\b)[\p{L}\d]+){0,7})/giu;
+// «acuerdo» solo como ordenamiento cuando va seguido de «de/del» (p. ej. «Acuerdo General del Pleno»): «de acuerdo con» y «del acuerdo al que» no son citas.
+// El filtro de palabras excluidas usa (?!\p{L}) y no \b: en JS \b no reconoce «é», así que «prevé» se absorbía en el nombre del ordenamiento.
+const STATUTE_TITLE_RE = /\b(?:constituci[oó]n(?!\p{L})(?:\s+pol[ií]tica)?(?:\s+de\s+(?:los\s+)?estados\s+unidos\s+mexicanos)?|(?:ley|c[oó]digo|reglamento|decreto)\s+(?:(?:federal|general|org[aá]nica|estatal|municipal|nacional)\s+)?(?:de(?:l)?\s+)?[\p{L}\d]+|acuerdo\s+(?:general\s+)?de(?:l)?\s+[\p{L}\d]+)(?:\s+(?!(?:se|que|establece|dispone|prev[eé]|regula|aplica|aplicable|conforme|resulta|considera|ordena|garantiza|protege|permite|sustenta|se[nñ]ala|se[nñ]alan)(?!\p{L}))[\p{L}\d]+){0,7}/giu;
 const ARTICLE_STATUTE_ABBREVIATION_RE = /\b(?:art[ií]culos?|art\.)\s+\d+[a-z]?(?:\s*(?:bis|ter|qu[aá]ter))?\s+de\s+(?:la|el)\s+([A-Z][A-Z0-9]{1,8})\b/gu;
-const OTHER_MATERIAL_CITATION_RE = /\b(?:registro\s+digital\s*[:#]?\s*\d+|(?:tesis|jurisprudencia|precedente)\s+(?:[a-z0-9]+\s*){0,2}[a-z0-9]+(?:[./-][a-z0-9]+)+)\b/giu;
+// Claves de precedente: «2a./J. 23/2010», «P./J. 12/2010», tesis aislada «I.3o.C.123 C», contradicción «45/2019».
+const OTHER_MATERIAL_CITATION_RE = /\b(?:registro\s+digital\s*[:#]?\s*\d+|(?:[12]a|P)\.?\s*\/\s*J\.?\s*\d+\s*\/\s*\d{4}|[IVX]+\.\d+o?\.[A-Za-z]\.\d+(?:\s+[A-Z])?|contradicci[oó]n\s+de\s+tesis\s+\d+\s*\/\s*\d{4}|(?:tesis|jurisprudencia|precedente)\s+(?:[a-z0-9]+\s*){0,2}[a-z0-9]+(?:[./-][a-z0-9]+)+(?:\s+[A-Z](?=[\s,.;:)]|$))?)\b/giu;
 const UNVERIFIED_MARKER_RE = /\[NO VERIFICADO:[^\]]+\]/giu;
 
 export function normalizeLegalCitation(value: string): string {

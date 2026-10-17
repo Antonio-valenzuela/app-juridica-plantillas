@@ -1,4 +1,5 @@
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
+import { postureDirectiveLines } from './posturePrompt';
 import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { GenerationTask } from './generationTasks';
 import type { CaseAnalysis } from './caseAnalysis';
@@ -329,6 +330,8 @@ export interface IssueContextPack {
   legalDraftingContract?: LegalDraftingContract;
   legalIssue: Pick<LegalIssueItem, 'id' | 'issueType' | 'question' | 'status' | 'relationStatus' | 'required'>;
   contentRole: SectionContract['contentRole'];
+  /** Tipo del documento: decide la directiva de postura según su rol procesal. */
+  documentPosture?: { documentType?: string; documentTypeLabel?: string };
   draftContract?: IssueDraftContract;
   coverage: DocumentCoverageItem[];
   claims: Array<{ id: string; text: string; status?: string }>;
@@ -645,7 +648,7 @@ export function buildIssueContextPack(
       : undefined,
     provenance: uniqueProvenance(linkedProvenance),
   };
-  return { ...packWithoutHash, contextHash: contextHash(packWithoutHash) };
+  return { ...packWithoutHash, documentPosture: { documentType: doc.documentType, documentTypeLabel: doc.documentTypeLabel }, contextHash: contextHash({ ...packWithoutHash, documentPosture: { documentType: doc.documentType, documentTypeLabel: doc.documentTypeLabel } }) };
 }
 
 export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): IssuePrompt {
@@ -769,12 +772,7 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
       'Conserva supportLevel, temporalidad, jurisdicción y limitations; no afirmes obligatoriedad no respaldada por bindingCharacter.',
       'No inventes una autoridad ni conviertas una proposición jurídica en un hecho del expediente.',
     ] : []),
-    ...((!pack.clientPosition || pack.clientPosition.status === 'UNKNOWN') ? [
-      'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
-      'No existe postura confirmada de la parte demandada para este punto.',
-      'ESTÁ PERMITIDO ÚNICAMENTE: cuestionar la acreditación probatoria de lo afirmado por la contraria, invocar la carga de la prueba, señalar falta de precisión o suficiencia, analizar presupuestos legales, alcance probatorio y formular argumentos subsidiarios estrictamente jurídicos.',
-      'ESTÁ TERMINANTEMENTE PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad, inventar una versión fáctica del demandado (como contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados), inventar documentos inexistentes, fechas no mencionadas o causas de terminación laboral no comprobadas en autos, o inventar acontecimientos materiales.',
-    ] : []),
+    ...((!pack.clientPosition || pack.clientPosition.status === 'UNKNOWN') ? (pack.documentPosture ? postureDirectiveLines(pack.documentPosture) : ['DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:', 'No existe postura confirmada de la parte demandada para este punto.']) : []),
     strategy,
   ].join('\n');
   const userMessage = [

@@ -13,7 +13,9 @@ function documentWithDraftDepth(coverageItems: any[], facts: any[] = [], section
     caseAnalysis: { facts },
     sections: sections.map((id, order) => ({
       id,
-      title: id === 'section-1' ? 'Contestación de hechos' : 'Excepciones y defensas',
+      // Contrato (P1-6, lote 3): «Contestación de hechos/prestaciones» es una respuesta individual que la
+      // ampliación no debe engrosar. Las pruebas de ampliación usan una sección de defensa, no de respuesta.
+      title: 'Excepciones y defensas',
       type: 'argument',
       order,
       content: [{ id: `base-${id}`, text: `Base ${id}` }],

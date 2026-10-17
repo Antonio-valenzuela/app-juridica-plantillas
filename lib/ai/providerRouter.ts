@@ -9,6 +9,7 @@ import type {
   LegalAIProvider,
 } from "./providers/types";
 import { sanitizeAiError } from "./providers/types";
+import { currentAbortSignal, GenerationCancelledError, throwIfCancelled } from "./abortContext";
 import { getProviderChain } from "./providerChain";
 import { trackAiUsage } from "./usageTracker";
 import { recordExternalEgress } from "./externalEgressLedger";
@@ -114,9 +115,13 @@ export class ProviderRouter {
   async route(originalRequest: AIRequest): Promise<RouteResult> {
     // Contrato del escrito (rol de quien firma, datos de la ficha, lo que no debe contener): va primero en el
     // prompt de sistema de CADA solicitud, sea cual sea el proveedor o el reintento.
-    const request: AIRequest = originalRequest.writingContractPrompt
-      ? { ...originalRequest, systemPrompt: [originalRequest.writingContractPrompt, originalRequest.systemPrompt || ''].filter(Boolean).join(String.fromCharCode(10, 10)) }
-      : originalRequest;
+    // Cancelación: la señal explícita o la del contexto de la generación; se comprueba antes de cada intento.
+    const signal = originalRequest.signal ?? currentAbortSignal();
+    throwIfCancelled(signal);
+    const requestWithSignal: AIRequest = signal ? { ...originalRequest, signal } : originalRequest;
+    const request: AIRequest = requestWithSignal.writingContractPrompt
+      ? { ...requestWithSignal, systemPrompt: [originalRequest.writingContractPrompt, originalRequest.systemPrompt || ''].filter(Boolean).join(String.fromCharCode(10, 10)) }
+      : requestWithSignal;
     const externalAllowed = request.externalProviderOptIn === true;
     const authorized = Array.isArray(request.authorizedExternalProviders) ? new Set(request.authorizedExternalProviders) : null;
     // Un respaldo remoto solo se usa si figura en la autorización expresa de esta operación.
@@ -129,6 +134,8 @@ export class ProviderRouter {
     const attemptedProviders = new Set<AIProviderId>();
 
     for (const [fallbackRank, providerIdStr] of chain.entries()) {
+      // Una cancelación nunca cae al respaldo siguiente (ni al local).
+      throwIfCancelled(request.signal);
       const providerId = providerIdStr as AIProviderId;
       if (attemptedProviders.has(providerId)) {
         continue;
@@ -269,6 +276,7 @@ export class ProviderRouter {
         }
         break;
         } catch (err: unknown) {
+          if (request.signal?.aborted) throw new GenerationCancelledError();
           const durationMs = Date.now() - startMs;
           const sanitized = sanitizeAiError(err);
           const failureReason = sanitized.toLowerCase().includes("timeout")

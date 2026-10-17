@@ -1,9 +1,14 @@
+import type { LegalPropositionClass } from './types';
 import type { CaseAnalysis } from './caseAnalysis';
 import type { UniversalLegalDocument } from './types';
 import { extractUnresolvedFieldMarkers, normalizeUnresolvedFieldMarkers, type UnresolvedFieldMarkerCause } from './pendingFields';
 
 export type LegalAdmissionReason = 'UNCONFIRMED_EVIDENCE' | 'ABSOLUTE_EVIDENCE_VALUATION'
   | 'UNVERIFIED_LEGAL_ASSERTION' | 'UNSUPPORTED_PROOF_RULE' | 'UNSUPPORTED_PETITION'
+  /** Afirmación de criterio jurisprudencial sin cita verificada («la Suprema Corte ha resuelto…»). */
+  | 'UNVERIFIED_PRECEDENT_ASSERTION'
+  /** Plazo con cifra sin fuente verificada («el plazo… es de quince días hábiles»). */
+  | 'UNVERIFIED_DEADLINE'
   /** P0-B: el bloque contiene ayuda del asistente de interfaz, no derecho. */
   | 'UI_ASSISTANT_CONTENT_LEAK';
 
@@ -151,6 +156,10 @@ const NORMATIVE_PREDICATE = /\b(?:establece|dispone|ordena|exige|prev[eé]|deter
 const REFERENCE_CLAUSE = /\b(?:conforme\s+al?|conforme\s+con|en\s+los\s+t[ée]rminos\s+de|por\s+lo\s+que\s+dispone|de\s+conformidad\s+con|seg[uú]n\s+el\s+(?:art[íi]culo|precepto|ordenamiento)|al\s+amparo\s+de)\b/i;
 const PROOF_RULE = /\b(?:carga\s+(?:de\s+la\s+prueba|probatoria)|inversi[óo]n\s+de\s+(?:la\s+)?carga|presunci[óo]n\s+(?:legal|de\s+hecho)|(?:corresponde|incumbe)\s+(?:a\s+[^.!?\n]{1,60})?(?:probar|acreditar)|(?:debe|deber[aá])\s+(?:probar|acreditar))\b/i;
 /** Referencia temporal: se neutraliza la frase, no el razonamiento que la rodea. */
+/** Plazo con cifra y unidad: «el plazo para promover… es de quince días hábiles». */
+const DEADLINE_PERIOD = /\b(?:plazo|t[ée]rmino)\s+(?:para|de|del)\b[^.;]{0,80}?\b(?:\d+|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|cuarenta|cincuenta|sesenta|noventa|ciento\s+veinte)\s+(?:d[ií]as|meses|a[ñn]os)(?:\s+h[áa]biles)?(?!\p{L})/iu;
+/** Criterio jurisprudencial atribuido sin cita: «la Suprema Corte ha resuelto…», «la jurisprudencia sostiene…». */
+const PRECEDENT_ASSERTION = /\b(?:suprema\s+corte|scjn|tribunal(?:es)?\s+colegiado(?:s)?|jurisprudencia)\b[^.;]{0,80}?\b(?:ha\s+|han\s+)?(?:resuelto|sostenido|establecido|determinado|sustentado|reiterado)\b/iu;
 const DEADLINE_CLAIM = /\b(?:dentro\s+del\s+(?:t[ée]rmino|plazo)\s+legal|plazo\s+legal|t[ée]rmino\s+legal|dentro\s+del\s+plazo)\b/i;
 const COMPETENCE_CLAIM = /\b(?:competencia\s+(?:material|territorial|por\s+grado|funcional)|es\s+competente\s+el|no\s+se\s+encuentra\s+dentro\s+del\s+[áa]mbito\s+de\s+competencia|excede\s+la\s+competencia|re(?:s|sole)\s+de\s+la\s+competencia)\b/i;
 const PROCEDURE_NORMATIVE_CLAIM = /\b(?:procede\s+el\s+recurso|el\s+recurso\s+procede|es\s+procedente\s+el\s+recurso)\b/i;
@@ -165,6 +174,10 @@ function pendingMark(reason: LegalAdmissionReason): string {
   switch (reason) {
     case 'UNVERIFIED_LEGAL_ASSERTION':
       return '[PENDIENTE DE DESARROLLO / FUNDAMENTO NORMATIVO ESPECÍFICO PENDIENTE DE VERIFICAR: incorporar sólo después de verificar el texto vigente en fuente oficial]';
+    case 'UNVERIFIED_PRECEDENT_ASSERTION':
+      return '[PENDIENTE DE DESARROLLO / CRITERIO JURISPRUDENCIAL PENDIENTE DE VERIFICAR EN FUENTE OFICIAL]';
+    case 'UNVERIFIED_DEADLINE':
+      return '[PENDIENTE DE DESARROLLO / PLAZO PENDIENTE DE VERIFICAR EN FUENTE OFICIAL]';
     case 'UNSUPPORTED_PROOF_RULE':
       return '[PENDIENTE DE DESARROLLO / REGLA DE CARGA PROBATORIA PENDIENTE DE VERIFICAR]';
     case 'UNCONFIRMED_EVIDENCE':
@@ -259,7 +272,7 @@ interface Verdict { reason: LegalAdmissionReason; remediation: Remediation; matc
  */
 const REASON_PRIORITY: LegalAdmissionReason[] = [
   'UNCONFIRMED_EVIDENCE', 'UNSUPPORTED_PETITION', 'ABSOLUTE_EVIDENCE_VALUATION',
-  'UNVERIFIED_LEGAL_ASSERTION', 'UNSUPPORTED_PROOF_RULE',
+  'UNVERIFIED_LEGAL_ASSERTION', 'UNVERIFIED_PRECEDENT_ASSERTION', 'UNVERIFIED_DEADLINE', 'UNSUPPORTED_PROOF_RULE',
 ];
 
 function evaluateSegment(segment: Segment, sectionType: string, context: AdmissionContext): Verdict[] {
@@ -294,12 +307,26 @@ function evaluateSegment(segment: Segment, sectionType: string, context: Admissi
     }
   }
 
+  // 2b. Criterio jurisprudencial sin cita verificada.
+  if (!verifiedNorm && PRECEDENT_ASSERTION.test(text)) {
+    verdicts.push({ reason: 'UNVERIFIED_PRECEDENT_ASSERTION', remediation: 'SENTENCE', kind: 'UNVERIFIED_LEGAL_PROPOSITION' });
+  }
+
   // 3. Referencia temporal: se retira la frase, sobrevive el razonamiento.
   const deadline = text.match(DEADLINE_CLAIM);
   if (!verifiedNorm && deadline && deadline.index !== undefined) {
     verdicts.push({
       reason: 'UNVERIFIED_LEGAL_ASSERTION', remediation: 'SPAN', kind: 'UNVERIFIED_LEGAL_PROPOSITION',
       match: { start: deadline.index, end: deadline.index + deadline[0].length },
+    });
+  }
+
+  // 3b. Plazo con cifra y unidad sin fuente: se retira sólo el enunciado del plazo.
+  const period = text.match(DEADLINE_PERIOD);
+  if (!verifiedNorm && period && period.index !== undefined) {
+    verdicts.push({
+      reason: 'UNVERIFIED_DEADLINE', remediation: 'SPAN', kind: 'UNVERIFIED_LEGAL_PROPOSITION',
+      match: { start: period.index, end: period.index + period[0].length },
     });
   }
 
@@ -466,4 +493,22 @@ export function evaluateGeneratedLegalAdmission(input: {
     fullyNeutralized: admittedCount === 0,
     pendingMarkerCauses,
   };
+}
+
+/**
+ * Clase de una proposición según los motivos de admisión (audit D.3). El peor motivo gobierna:
+ * un hecho, prueba o petición sin respaldo rechaza la proposición aunque también tenga una cita sin verificar.
+ */
+export function classifyPropositionReasons(reasons: readonly string[]): LegalPropositionClass {
+  const unsupported = ['UNCONFIRMED_EVIDENCE', 'UNSUPPORTED_PETITION', 'ABSOLUTE_EVIDENCE_VALUATION', 'UI_ASSISTANT_CONTENT_LEAK'];
+  if (reasons.some((reason) => unsupported.includes(reason))) return 'UNSUPPORTED_OR_CONTRADICTORY';
+  const unverified = ['UNVERIFIED_PRECEDENT_ASSERTION', 'UNVERIFIED_DEADLINE', 'UNVERIFIED_LEGAL_ASSERTION', 'UNSUPPORTED_PROOF_RULE'];
+  if (reasons.some((reason) => unverified.includes(reason))) return 'UNVERIFIED_CITATION';
+  return 'LEGAL_REASONING';
+}
+
+/** Resumen del editor: «N citas sin verificar, M datos pendientes, modelos usados: …». */
+export function summarizePropositionClasses(classes: readonly LegalPropositionClass[], models: readonly string[]): string {
+  const count = (cls: LegalPropositionClass) => classes.filter((item) => item === cls).length;
+  return `${count('UNVERIFIED_CITATION')} citas sin verificar, ${count('PENDING_CONFIRMATION')} datos pendientes, modelos usados: ${models.join(', ') || 'ninguno'}`;
 }

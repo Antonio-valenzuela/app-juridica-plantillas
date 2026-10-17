@@ -1,5 +1,6 @@
 import type { UniversalLegalDocument } from './types';
 import { extractMaterialLegalCitations, normalizeLegalCitation } from './materialLegalCitations';
+import { rolAutorOf } from './documentTemplates';
 import { findRedundantParagraphs, normalizeForComparison, splitParagraphs, type ParagraphRef } from './textRedundancy';
 
 /**
@@ -13,6 +14,7 @@ import { findRedundantParagraphs, normalizeForComparison, splitParagraphs, type 
  */
 
 export type OutputFindingCode =
+  | 'NON_CONTENTIOUS_VOCABULARY'
   | 'SCAFFOLDING'
   | 'PROMPT_LEAK'
   | 'JSON_LEAK'
@@ -74,6 +76,13 @@ const SCAFFOLD_PATTERNS: ReadonlyArray<{ code: OutputFindingCode; re: RegExp; de
   // de desarrollo en mayúsculas seguido de «:», «(» o de una nota en minúsculas.
   { code: 'IRRELEVANT_PLACEHOLDER', re: /(?:^|[\s/#*-])TODO(?:\s*[:(]|\s+[a-z])/, detail: 'Placeholder técnico sin resolver.' },
 ];
+
+/**
+ * Vocabulario contencioso en minúscula, como rol en la prosa. Los nombres propios en mayúsculas quedan fuera.
+ * «demandado/a» cuenta solo como sustantivo de parte («la parte demandada», «al demandado»), no como adjetivo
+ * («derechos demandados», «autoridad demandada»).
+ */
+const NON_CONTENTIOUS_FORBIDDEN_VOCABULARY = /\b(?:excepci[oó]n(?:es)?|actor(?:a)?s?)\b|\b(?:parte|el|la|al|del|los|las|a\s+la|a\s+el)\s+demandad[oa]s?\b/;
 
 function excerptAround(text: string, index: number, length = 90): string {
   const start = Math.max(0, index - 20);
@@ -221,6 +230,15 @@ export function validateGeneratedOutput(
     if (seen.has(key)) {
       findings.push({ code: 'REPEATED_HEADING', severity: 'WARNING', sectionId: section.id, excerpt: String(section.title), detail: `Encabezado repetido (también en la sección ${seen.get(key)}).` });
     } else seen.set(key, section.id);
+  }
+
+  // Familia no contenciosa (rol parte_interesada explícito): advertencia, no bloqueo, hasta corregir plantillas.
+  if (doc.documentType && rolAutorOf(doc.documentType, doc.documentTypeLabel) === 'parte_interesada') {
+    for (const block of blocks) {
+      const match = block.text.match(NON_CONTENTIOUS_FORBIDDEN_VOCABULARY);
+      if (match?.index === undefined) continue;
+      findings.push({ code: 'NON_CONTENTIOUS_VOCABULARY', severity: 'WARNING', sectionId: block.sectionId, blockId: block.blockId, excerpt: excerptAround(block.text, match.index), detail: `Vocabulario contencioso (${match[0]}) en un escrito no contencioso.` });
+    }
   }
 
   if (doc.status === 'final' && !context.allowFinal) {

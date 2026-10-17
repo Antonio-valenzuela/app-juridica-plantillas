@@ -68,7 +68,35 @@ export interface PageTargetResult {
   /** Motivo de parada de la ampliación (`contentStopReason`) cuando no se alcanzó. */
   stopReason?: string;
   redundancyRatio?: number;
+  /** Causa cuando el resultado no proviene de una medición completa (timeout o fallo de medición). */
+  failureCause?: PageTargetFailureCause;
   measuredWith: 'PDF_RENDERER';
+}
+
+export type PageTargetFailureCause = 'TIMEOUT' | 'MEASUREMENT_FAILED';
+
+/**
+ * Resultado honesto cuando la generación no terminó o no se pudo medir: siempre `BELOW_TARGET`, con la causa.
+ * `actualPages` es la última medición válida conocida (0 si no hubo ninguna); nunca se presenta como cumplido.
+ */
+export function pageTargetFailureResult(
+  target: PageTarget,
+  cause: PageTargetFailureCause,
+  lastKnownPages = 0,
+): PageTargetResult {
+  const reason = cause === 'TIMEOUT'
+    ? 'se agotó el tiempo máximo de generación y se detuvieron las llamadas al proveedor'
+    : 'no fue posible medir el documento renderizado';
+  return {
+    requestedPages: target.pages,
+    preset: target.preset,
+    actualPages: lastKnownPages,
+    outcome: 'BELOW_TARGET',
+    notice: `No se alcanzó la extensión solicitada (${target.pages} páginas). Motivo: ${reason}. El documento conserva solo el último punto de guardado válido y requiere revisión antes de usarse.`,
+    stopReason: cause,
+    failureCause: cause,
+    measuredWith: 'PDF_RENDERER',
+  };
 }
 
 export class PageTargetValidationError extends Error {
@@ -138,6 +166,8 @@ const STOP_REASON_EXPLANATION: Record<string, string> = {
   ATTORNEY_INPUT_REQUIRED: 'hay hechos o puntos que requieren la postura del abogado o del cliente antes de desarrollarlos',
   REPETITION_BLOCKED: 'las ampliaciones propuestas repetían contenido existente y se rechazaron',
   PROVIDER_UNAVAILABLE: 'el proveedor de IA falló, respondió de forma parcial o no devolvió contenido jurídico utilizable',
+  TIMEOUT: 'se agotó el tiempo máximo de generación y se detuvieron las llamadas al proveedor',
+  MEASUREMENT_FAILED: 'no fue posible medir el documento renderizado',
   RESOURCE_LIMIT: 'se agotó el presupuesto de llamadas o pasadas de ampliación',
 };
 

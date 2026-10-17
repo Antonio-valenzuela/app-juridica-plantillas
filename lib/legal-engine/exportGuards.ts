@@ -530,6 +530,21 @@ const SPECIALIZED_SECTION_IDS: Record<string, string> = {
 };
 
 /** Convierte IDs y títulos históricos al mismo identificador semántico. */
+/**
+ * Proposiciones que bloquean FINAL (audit D.3). Se derivan de los marcadores del texto:
+ * - UNVERIFIED_CITATION: cita o regla sin verificar ([NO VERIFICADO: …]).
+ * - UNSUPPORTED_OR_CONTRADICTORY: dato sin respaldo en la fuente ([DATO PENDIENTE DE EXPEDIENTE: …]).
+ */
+export function finalPropositionBlockers(doc: Pick<UniversalLegalDocument, 'sections'>): string[] {
+  const texts = (doc.sections || []).flatMap((section) => (section.content || []).map((block) => block.text || ''));
+  const unverified = texts.join('\n').match(/\[NO VERIFICADO:[^\]]+\]/g)?.length ?? 0;
+  const unsupported = texts.join('\n').match(/\[DATO PENDIENTE DE EXPEDIENTE:/g)?.length ?? 0;
+  const blockers: string[] = [];
+  if (unverified > 0) blockers.push(`UNVERIFIED_CITATION: ${unverified} cita(s) o regla(s) sin verificar en fuente oficial.`);
+  if (unsupported > 0) blockers.push(`UNSUPPORTED_OR_CONTRADICTORY: ${unsupported} dato(s) sin respaldo en la fuente.`);
+  return blockers;
+}
+
 export function getCanonicalSectionId(value: string): string {
   let normalized = normalizeSectionId(value);
   normalized = normalized.replace(/^sec_(?:con|crad)_/, '');
@@ -1127,6 +1142,10 @@ export async function prepareUniversalDocumentForExport(
       checkId: 'DRAFT_UNVERIFIED_AUTHORITY_CITATIONS_MARKED',
       message: `${markedAuthorities} cita(s) permanecen marcadas para verificación oficial; FINAL continúa bloqueado.`,
     });
+  }
+  if (exportMode === 'FINAL') {
+    const propositionBlockers = finalPropositionBlockers(exportDocument);
+    if (propositionBlockers.length) guardFailure(propositionBlockers, []);
   }
   if (!qualityGate.passed || !qualityGate.canMarkAsFinal) {
     const qualityErrors = [

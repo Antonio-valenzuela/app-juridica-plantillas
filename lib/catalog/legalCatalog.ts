@@ -1,4 +1,4 @@
-import { DocumentTemplates, familyDerivedTemplateFor, registerFamilyDerivedTemplates, createFamilyDerivedTemplate, type DocumentTemplate } from '@/lib/legal-engine/documentTemplates';
+import { DocumentTemplates, ROL_AUTOR_OVERRIDES, familyDerivedTemplateFor, registerFamilyDerivedTemplates, createFamilyDerivedTemplate, type DocumentTemplate } from '@/lib/legal-engine/documentTemplates';
 import { FAMILY_BLUEPRINTS, composeFamilyStructure, familyBlueprintFor } from '@/lib/legal-engine/documentFamilyBlueprints';
 import { WRITING_TYPE_EVIDENCE, WRITING_TYPE_EVIDENCE_BLOCKERS } from './writingTypeEvidence.generated';
 
@@ -655,7 +655,7 @@ function buildDocumentIdentifier(id: string): CatalogDocumentIdentifier {
     functionalStatusReason: isFamily ? undefined : functionalStatusReasonFor(id, computeFunctionalStatus(id, productStatus)),
     capabilities: { selectableInContestaciones: contestacionesDocumentTypeIds.has(id) },
     outputFilename: template ? `${label} - {date}.docx` : null, jurisdiction: template?.jurisdiccion || 'según autoridad competente', legalStage: template?.procedimiento || source.procedureLabel,
-    partyRole: template?.rolAutor || 'por definir', uiVisibility: 'VISIBLE', status: OFFICIAL_FORM_IDS.has(id) ? 'REQUIRES_OFFICIAL_FORM' : ASSISTED_DRAFT_IDS.has(id) ? 'ASSISTED_DRAFT' : implementedIds.has(id) ? 'IMPLEMENTED' : 'CATALOG_ONLY',
+    partyRole: ROL_AUTOR_OVERRIDES[id] || template?.rolAutor || 'por definir', uiVisibility: 'VISIBLE', status: OFFICIAL_FORM_IDS.has(id) ? 'REQUIRES_OFFICIAL_FORM' : ASSISTED_DRAFT_IDS.has(id) ? 'ASSISTED_DRAFT' : implementedIds.has(id) ? 'IMPLEMENTED' : 'CATALOG_ONLY',
   };
   if (isFamily) return { ...base, kind: 'FAMILY', implemented: false, strategyId: null, templateId: null, sourceCompatibility: null, status: 'NOT_APPLICABLE', uiVisibility: 'VISIBLE' };
   // CONTRACTO DE FORMULARIO OFICIAL / BORRADOR ASISTIDO (no negociable):

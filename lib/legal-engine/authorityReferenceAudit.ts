@@ -11,6 +11,8 @@ export interface MarkedAuthorityReferencesResult {
   text: string;
   findings: AuthorityReferenceFinding[];
   unverifiedCitationCount: number;
+  /** Regla atribuida a una cita no verificada: sale del cuerpo y se entrega al anexo de revisión. */
+  movedRules: Array<{ citation: string; rule: string }>;
 }
 
 /** Adds an inline review marker only when the existing official-authority gate cannot validate the cite. */
@@ -52,6 +54,7 @@ export function markUnverifiedAuthorityReferences(input: {
   }
 
   let markedText = input.text;
+  const movedRules: Array<{ citation: string; rule: string }> = [];
   for (const reference of [...unverifiedReferences].reverse()) {
     // Marcar la cita no basta: si el mismo enunciado la afirma como regla
     // ("[NO VERIFICADO: tesis X] ... establece que ..."), la proposición
@@ -68,6 +71,7 @@ export function markUnverifiedAuthorityReferences(input: {
     const stop = tail.search(/[.!?;\n]/);
     const clause = stop === -1 ? tail : tail.slice(0, stop);
     const assertsRule = /\b(?:establece|dispone|ordena|exige|prev[eé]|determina|regula|impone|obliga|se\s+conoce|se\s+entiende|se\s+contiene)\s+que\b/i.test(clause);
+    if (assertsRule) movedRules.unshift({ citation: reference.text, rule: clause.trim() });
     markedText = assertsRule
       ? `${markedText.slice(0, reference.start)}[NO VERIFICADO: ${reference.text}] [PENDIENTE DE DESARROLLO / FUNDAMENTO NORMATIVO ESPECÍFICO PENDIENTE DE VERIFICAR: incorporar sólo después de verificar el texto vigente en fuente oficial]${stop === -1 ? '' : tail.slice(stop)}`
       : `${markedText.slice(0, reference.start)}[NO VERIFICADO: ${reference.text}]${tail}`;
@@ -77,5 +81,6 @@ export function markUnverifiedAuthorityReferences(input: {
     text: markedText,
     findings,
     unverifiedCitationCount: findings.length + countUnverifiedCitationMarkers(input.text),
+    movedRules,
   };
 }

@@ -52,3 +52,12 @@ describe('ruta /generate con ficha del caso', () => {
     expect(input.requireCaseDossier).toBe(false);
   });
 });
+
+describe('aviso de fundamentos no verificados en el resultado', () => {
+  it('sin investigación verificada del expediente, el documento devuelto lleva el aviso global', async () => {
+    const response = await post({ selectedDocumentType: 'contestacion_demanda_civil', sourceDocuments: [], expediente: 'EXP-SIN-INVESTIGACION/9' });
+    const body = await response.json();
+    const warnings = body.document?.validation?.warnings || [];
+    expect(warnings.some((warning: { checkId?: string }) => warning.checkId === 'UNVERIFIED_FUNDAMENTALS')).toBe(true);
+  });
+});

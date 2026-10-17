@@ -1983,12 +1983,12 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   recurso_administrativo: def({
     tipo: 'recurso_administrativo',
+    rolAutor: 'recurrente',
     etiquetas: ['recurso administrativo', 'recurso de inconformidad administrativo'],
     materia: 'ADMINISTRATIVO',
     jurisdiccion: 'administrativa',
     via: 'recurso administrativo (inconformidad/revisión)',
     procedimiento: 'impugnación ante la autoridad emisora o superior',
-    rolAutor: 'parte_interesada',
     rolContraparte: 'autoridad administrativa emisora',
     destinatario: 'autoridad administrativa competente',
     objetivoProcesal: 'Revocar o modificar la resolución administrativa impugnada',
@@ -2373,6 +2373,7 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   apelacion_civil: specializedProceduralTemplate({
     tipo: 'apelacion_civil',
+    rolAutor: 'apelante',
     etiquetas: ['recurso de apelación civil', 'apelación civil'],
     materia: 'CIVIL',
     procedimiento: 'APELACION_CIVIL',
@@ -2447,6 +2448,7 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   apelacion_mercantil: specializedProceduralTemplate({
     tipo: 'apelacion_mercantil',
+    rolAutor: 'apelante',
     etiquetas: ['recurso de apelación mercantil', 'apelación mercantil'],
     materia: 'MERCANTIL',
     procedimiento: 'APELACION_MERCANTIL',
@@ -2911,12 +2913,12 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   apelacion_familiar: specializedFamiliarTemplate({
     tipo: 'apelacion_familiar',
+    rolAutor: 'apelante',
     etiquetas: ['apelación familiar', 'recurso de apelación familiar', 'expresión de agravios familiar'],
     procedimiento: 'APELACION_FAMILIAR',
     subtipo: 'recurso de apelación en materia familiar',
     objetivoProcesal: 'Interponer apelación y expresar agravios contra sentencia definitiva o auto dictado por juez familiar.',
     estructura: FAMILIAR_RECURSO_STRUCTURE,
-    rolAutor: 'parte_interesada',
     rolContraparte: 'contraparte procesal',
     camposObligatorios: ['juzgado de lo familiar o sala familiar', 'expediente o toca', 'recurrente', 'contraparte', 'resolución recurrida', 'agravios y violaciones procesales', 'petitorios'],
     reglas: ['Formula agravios combatiendo cada consideración de la resolución impugnada, señalando normas y jurisprudencias violadas.'],
@@ -6438,6 +6440,24 @@ export function createFamilyDerivedTemplate(spec: {
     voz: [`Actúa como abogado postulante de la parte ${spec.rolAutor || 'promovente'}.`, `Salida procesal especializada: ${subtipo}.`],
     vozPrompt: `Actúa como abogado postulante especializado en ${spec.via}. Redacta exclusivamente ${subtipo}, sin inventar hechos, acuerdos, resoluciones, pruebas ni consecuencias no sustentadas.`,
   });
+}
+
+/**
+ * Rol procesal del autor por tipo. Excepciones explícitas para tipos del catálogo sin plantilla propia:
+ * su rol no puede heredarse de la familia (p. ej. parte interesada).
+ */
+export const ROL_AUTOR_OVERRIDES: Readonly<Record<string, RolProcesal>> = Object.freeze({
+  contestacion_proveedor: 'demandado',
+});
+
+/** Rol del autor de un tipo: excepción explícita, o el de su plantilla. Nunca lanza. */
+export function rolAutorOf(documentType?: string, documentTypeLabel?: string): RolProcesal | undefined {
+  if (documentType && ROL_AUTOR_OVERRIDES[documentType]) return ROL_AUTOR_OVERRIDES[documentType];
+  try {
+    return getDocumentTemplate(documentType, documentTypeLabel)?.rolAutor;
+  } catch {
+    return undefined;
+  }
 }
 
 export function getDocumentTemplate(

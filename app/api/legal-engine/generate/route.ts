@@ -4,11 +4,12 @@ import { z } from 'zod';
 import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { UploadedSourceDocument, UniversalLegalDocument, CaseWorkflow } from '@/lib/legal-engine/types';
 import { requireWorkspaceExecutionAccess, executionOwnerKey, ownsExecution } from '@/lib/security/workspaceExecutionAccess';
+import { loadResearchBundles, researchStoreKey, unverifiedFundamentalsNotice } from '@/lib/legal-engine/researchBundleStore';
 import { DesktopProfileRepository } from '@/lib/workspace/desktopProfileRepository';
 import { LawyerProfile } from '@/lib/workspace/lawyerProfileTypes';
 import { loadLawyerProfile } from '@/lib/workspace/lawyerProfileStore';
 import { buildFingerprint } from '@/lib/legal-engine/generationLock';
-import { createGenerationJob, findActiveJobByFingerprint, getGenerationJob, updateJobProgress, ensureTerminalJobState } from '@/lib/legal-engine/generationJobs';
+import { createGenerationJob, findActiveJobByFingerprint, getGenerationJob, updateJobProgress, ensureTerminalJobState, registerJobAbort, unregisterJobAbort } from '@/lib/legal-engine/generationJobs';
 import { recoverActiveGenerationJob, recoverGenerationJob } from '@/lib/legal-engine/generationJobPersistence';
 import { CUSTOM_VALUE_MAX_LENGTH, sanitizeCustomValue } from '@/lib/legal-taxonomy';
 import { resolveGenerationTotal } from '@/lib/legal-engine/generationProgress';
@@ -18,7 +19,8 @@ import { buildReviewRequest } from '@/lib/legal-engine/reviewRequest';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { checkGenerationAdmission, maxGenerationInputChars } from '@/lib/security/aiCostControls';
 import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
-import { getGenerationJobDeadlineMs } from '@/lib/legal-engine/generationDeadline';
+import { getGenerationJobDeadlineMs, runWithGenerationDeadline } from '@/lib/legal-engine/generationDeadline';
+import { pageTargetFailureResult, pageTargetToGenerationExtension } from '@/lib/legal-engine/pageTarget';
 import { resolveDraftDepthProfile } from '@/lib/legal-engine/draftDepth';
 import { generationExtensionForDraftDepth } from '@/lib/legal-engine/generationExtension';
 import { PageTargetValidationError, parsePageTarget, tryParsePageTarget, type PageTarget } from '@/lib/legal-engine/pageTarget';
@@ -81,20 +83,19 @@ function buildFingerprintFromBody(body: any, sourcesArr: UploadedSourceDocument[
   });
 }
 
-async function withGenerationDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      const error = new Error('El tiempo máximo de generación fue alcanzado.') as Error & { code?: string };
-      error.code = 'GENERATION_TIMEOUT';
-      reject(error);
-    }, deadlineMs);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
+
+/** Estado terminal compartido por ambas rutas: meta no alcanzada o fallo de medición nunca es «completado». */
+function resultTerminalStatus(doc: UniversalLegalDocument): 'COMPLETED' | 'NEEDS_REVIEW' {
+  const result = (doc.generationMetadata as any)?.pageTargetResult;
+  if (result?.failureCause || result?.outcome === 'BELOW_TARGET') return 'NEEDS_REVIEW';
+  return doc.status === 'draft' ? 'NEEDS_REVIEW' : 'COMPLETED';
+}
+
+/** Marca un checkpoint parcial como BELOW_TARGET por TIMEOUT (si había meta). Copia independiente. */
+function markTimeoutOnDocument(checkpoint: UniversalLegalDocument, pageTarget: PageTarget | undefined): UniversalLegalDocument {
+  const copy = structuredClone(checkpoint);
+  if (pageTarget) (copy.generationMetadata as any).pageTargetResult = pageTargetFailureResult(pageTarget, 'TIMEOUT', 0);
+  return copy;
 }
 
 export async function POST(req: NextRequest) {
@@ -171,6 +172,8 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
   }
+  // La meta validada en el servidor define el contrato y el plazo: el `generationExtension` del cliente no decide.
+  if (pageTarget) effectiveGenerationExtension = pageTargetToGenerationExtension(pageTarget);
 
   // Ficha del caso confirmada por el abogado: se valida su forma; el pipeline comprueba que corresponda a las fuentes.
   const parsedCaseDossier = body.caseDossier === undefined || body.caseDossier === null ? undefined : parseCaseDossier(body.caseDossier);
@@ -323,23 +326,45 @@ export async function POST(req: NextRequest) {
     if (taxonomy.documentType) effectiveDocumentTypeLabel = resolveDocumentTypeLabel(taxonomy);
   }
 
+  // Bundles de investigación verificada del propietario y expediente: solo del almacén del servidor.
+  const researchBundlesByIssueId = loadResearchBundles(researchStoreKey(executionOwnerKey(auth.context), (expediente as string | undefined)?.trim() || ''));
   // Compat sync directo (para tests internos o clientes legacy que lo soliciten explícitamente)
   if (wantSync) {
+    // Mismo contrato que la ruta asíncrona: plazo cooperativo, cancelación y último checkpoint válido.
+    let syncCheckpoint = null as UniversalLegalDocument | null;
+    const syncController = new AbortController();
     try {
-      const doc = await runGenerationPipeline({
+      const doc = await runWithGenerationDeadline((signal) => runGenerationPipeline({
+        signal,
         requireAppealConfirmation: requiresAppealConfirmation, appealConfirmation: body.appealConfirmation,
         userInstruction, sourceDocuments: sourcesArr, allowUnvalidatedSource,
         referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension: effectiveGenerationExtension,
         draftDepth,
         pageTarget,
         caseDossier, requireCaseDossier, separateReviewAnnex,
+          researchBundlesByIssueId,
         externalProviderOptIn,
         authorizedExternalProviders,
-      }, {} as any);
-      if (owner.desktopOwnerId) await saveGenerationArtifact({ ...owner, document: doc, progress: 100,
-        terminalStatus: doc.status === 'draft' ? 'NEEDS_REVIEW' : 'COMPLETED' });
-      return NextResponse.json({ ok: true, document: doc });
+      }, {
+        onStageComplete: (stage: any, document: UniversalLegalDocument) => {
+          if (stage === 'generate_sections' && document && !syncController.signal.aborted) syncCheckpoint = structuredClone(document);
+        },
+        onBlockComplete: (_c: number, _t: number, _b: any, _m: any, document?: UniversalLegalDocument) => {
+          if (document && !syncController.signal.aborted) syncCheckpoint = structuredClone(document);
+        },
+      } as any), getGenerationJobDeadlineMs(effectiveGenerationExtension), syncController);
+      // Aviso global: sin investigación verificada, los fundamentos del documento no están verificados.
+      const fundamentalsNotice = unverifiedFundamentalsNotice(researchBundlesByIssueId);
+      if (fundamentalsNotice) (doc.validation ??= { warnings: [], errors: [] } as any).warnings.push({ checkId: 'UNVERIFIED_FUNDAMENTALS', message: fundamentalsNotice } as any);
+      const terminalStatus = resultTerminalStatus(doc);
+      if (owner.desktopOwnerId) await saveGenerationArtifact({ ...owner, document: doc, progress: 100, terminalStatus });
+      return NextResponse.json({ ok: true, document: doc, terminalStatus });
     } catch (err: any) {
+      if (err?.code === 'GENERATION_TIMEOUT') {
+        syncController.abort();
+        const partial = syncCheckpoint ? markTimeoutOnDocument(syncCheckpoint, pageTarget) : null;
+        return NextResponse.json({ ok: false, errorCode: 'GENERATION_TIMEOUT', terminalStatus: 'NEEDS_REVIEW', message: 'La generación tardó demasiado y quedó pendiente de revisión.', document: partial }, { status: 504 });
+      }
       if ([
         'SOURCE_DOCUMENT_INCOMPATIBLE',
         'MISSING_SOURCE_COMPATIBILITY_RULE',
@@ -389,6 +414,10 @@ export async function POST(req: NextRequest) {
   // Detach promise — no await
   (async () => {
     let latestCheckpoint: UniversalLegalDocument | null = null;
+    // Cancelación cooperativa: al vencer el plazo se aborta; los checkpoints posteriores se ignoran.
+    const generationController = new AbortController();
+    // cancelJob (POST /generate/cancel) aborta este controlador: el pipeline deja de llamar al proveedor.
+    registerJobAbort(job.jobId, generationController);
     let terminalError: any = null;
     let persistenceChain: Promise<void> = Promise.resolve();
     let persistedDraftRecordId: string | null = null;
@@ -438,24 +467,28 @@ export async function POST(req: NextRequest) {
           });
         },
         onBlockComplete: (_completed: number, _total: number, _block: any, _meta: any, document?: UniversalLegalDocument) => {
-          if (document) {
-            latestCheckpoint = document;
-            updateJobProgress(job.jobId, { checkpointDocument: document });
+          // Copia independiente: el pipeline sigue mutando su documento; el checkpoint persistido no debe cambiar.
+          if (document && !generationController.signal.aborted) {
+            const snapshot = structuredClone(document);
+            latestCheckpoint = snapshot;
+            updateJobProgress(job.jobId, { checkpointDocument: snapshot });
           }
         },
         onStageComplete: (stage: any, document: UniversalLegalDocument) => {
-          if (stage === 'generate_sections' && document) {
-            latestCheckpoint = document;
-            updateJobProgress(job.jobId, { checkpointDocument: document, phase: 'extend', stage: 'Extensión jurídica' });
-            queueCheckpoint(document);
+          if (stage === 'generate_sections' && document && !generationController.signal.aborted) {
+            const snapshot = structuredClone(document);
+            latestCheckpoint = snapshot;
+            updateJobProgress(job.jobId, { checkpointDocument: snapshot, phase: 'extend', stage: 'Extensión jurídica' });
+            queueCheckpoint(snapshot);
           }
         },
       };
 
       // Ejecutar pipeline con callbacks. El pipeline internamente invoca generateLegalBlock
       // con timeout individual 15s por bloque y fallback determinístico — sin timeout global.
-      const doc: UniversalLegalDocument = await withGenerationDeadline(runGenerationPipeline(
+      const doc: UniversalLegalDocument = await runWithGenerationDeadline((signal) => runGenerationPipeline(
         {
+          signal,
           userInstruction,
           sourceDocuments: sourcesArr,
           requireAppealConfirmation: requiresAppealConfirmation,
@@ -479,6 +512,7 @@ export async function POST(req: NextRequest) {
           draftDepth,
           pageTarget,
           caseDossier, requireCaseDossier, separateReviewAnnex,
+          researchBundlesByIssueId,
           externalProviderOptIn,
           authorizedExternalProviders,
         },
@@ -490,7 +524,9 @@ export async function POST(req: NextRequest) {
           onStageComplete: callbacks.onStageComplete as any,
           onBlockComplete: callbacks.onBlockComplete as any,
         } as any
-      ), getGenerationJobDeadlineMs(effectiveGenerationExtension));
+      ), getGenerationJobDeadlineMs(effectiveGenerationExtension), generationController);
+      const fundamentalsNotice = unverifiedFundamentalsNotice(researchBundlesByIssueId);
+      if (fundamentalsNotice) (doc.validation ??= { warnings: [], errors: [] } as any).warnings.push({ checkId: 'UNVERIFIED_FUNDAMENTALS', message: fundamentalsNotice } as any);
       latestCheckpoint = doc;
       const finalTotal = resolveGenerationTotal(doc, job.total);
       updateJobProgress(job.jobId, { total: finalTotal, completed: finalTotal, phase: 'materialize', stage: 'Materializando documento', currentBlock: doc.sections[doc.sections.length-1]?.title || null, checkpointDocument: doc });
@@ -498,16 +534,27 @@ export async function POST(req: NextRequest) {
     } catch (err: any) {
       terminalError = err;
       console.error(`[pipeline:job] Job ${job.jobId} fallido:`, err?.code || 'GENERATION_FAILED');
+      // Timeout con meta: el último checkpoint válido queda registrado como BELOW_TARGET por TIMEOUT.
+      if (pageTarget && err?.code === 'GENERATION_TIMEOUT' && latestCheckpoint) {
+        (latestCheckpoint.generationMetadata as any).pageTargetResult = pageTargetFailureResult(pageTarget, 'TIMEOUT', 0);
+      }
     } finally {
+      unregisterJobAbort(job.jobId);
       await persistenceChain;
       if (localPersistenceFailure) terminalError = localPersistenceFailure;
-      const checkpointTerminalStatus = !latestCheckpoint
+      // Timeout o fallo de medición nunca se presentan como generación completa.
+      const pageResult = (latestCheckpoint as any)?.generationMetadata?.pageTargetResult;
+      const measurementFailed = Boolean(pageResult?.failureCause) || pageResult?.outcome === 'BELOW_TARGET';
+      const checkpointTerminalStatus = terminalError?.code === 'GENERATION_CANCELLED' ? 'CANCELLED' as const
+        : !latestCheckpoint
         ? 'FAILED' as const
-        : !terminalError
-          ? 'COMPLETED' as const
-          : terminalError?.code === 'GENERATION_TIMEOUT' || String(terminalError?.code || '').startsWith('EXTENSION_')
-            ? 'COMPLETED_WITH_WARNINGS' as const
-            : 'NEEDS_REVIEW' as const;
+        : terminalError?.code === 'GENERATION_TIMEOUT' || measurementFailed
+          ? 'NEEDS_REVIEW' as const
+          : !terminalError
+            ? 'COMPLETED' as const
+            : String(terminalError?.code || '').startsWith('EXTENSION_')
+              ? 'COMPLETED_WITH_WARNINGS' as const
+              : 'NEEDS_REVIEW' as const;
       const finalJob = ensureTerminalJobState(job.jobId, {
         document: latestCheckpoint,
         error: terminalError?.message || 'Ejecución finalizada sin documento materializable.',

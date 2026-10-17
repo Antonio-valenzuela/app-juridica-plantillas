@@ -1,8 +1,11 @@
 import { fetch } from "undici";
 import type { AIHealthResult, AIProviderResult, AIRequest, LegalAIProvider } from "./types";
 import { sanitizeAiError } from "./types";
+import { linkAbortSignal } from "../abortContext";
 
 export interface GeminiCompletionOptions {
+  /** Cancelación externa (plazo del pipeline): aborta la petición en curso. */
+  signal?: AbortSignal;
   prompt: string;
   systemPrompt?: string;
   temperature?: number;
@@ -109,6 +112,7 @@ export async function generateGeminiCompletion(
   const configuredTimeout = Number(process.env.GEMINI_REQUEST_TIMEOUT_MS);
   const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1000 ? configuredTimeout : 30000;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const unlinkAbort = linkAbortSignal(controller, options.signal);
 
   const sanitizedRequestLog = {
     provider: "gemini",
@@ -139,6 +143,8 @@ export async function generateGeminiCompletion(
     });
 
     clearTimeout(timeoutId);
+
+    unlinkAbort();
     const latencyMs = Date.now() - startMs;
 
     if (!response.ok) {
@@ -195,6 +201,7 @@ export async function generateGeminiCompletion(
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    unlinkAbort();
     if (error instanceof Error && error.name === "AbortError") {
       throw new GeminiCompletionError(
         `[Gemini Provider] Timeout de ${timeoutMs}ms alcanzado en la llamada a Gemini.`,
@@ -219,6 +226,7 @@ export class GeminiProvider implements LegalAIProvider {
 
     try {
       const res = await generateGeminiCompletion({
+        signal: request.signal,
         prompt: request.userMessage,
         systemPrompt: request.systemPrompt,
         temperature: request.temperature,

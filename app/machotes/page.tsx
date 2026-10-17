@@ -64,7 +64,9 @@ import { createGenerationIdentityFactory } from '@/lib/legal-engine/generationId
 import { WorkspaceModulesView, type WorkspaceModule } from './components/WorkspaceModulesView';
 import type { WorkspaceCaseSummary } from '@/lib/workspace/cases';
 import { getSafeApiErrorMessage, getGenerationErrorPresentation } from '@/lib/apiErrorMessage';
-import { describePageTargetResult, type PageTargetResult } from '@/lib/legal-engine/pageTarget';
+import { DEFAULT_PAGE_TARGET, describePageTargetResult, type PageTarget, type PageTargetResult } from '@/lib/legal-engine/pageTarget';
+import { pageTargetRequestField } from '@/lib/legal-engine/pageTargetRequest';
+import { PageTargetSelector } from './components/PageTargetSelector';
 import type { CaseDossier } from '@/lib/legal-engine/caseDossier';
 import type { ReviewAnnex } from '@/lib/legal-engine/reviewAnnex';
 import { ReviewAnnexPanel } from './components/ReviewAnnexPanel';
@@ -453,7 +455,14 @@ export default function MachotesPage() {
               genIsGeneratingRef.current = false;
               generationOriginTabRef.current = null;
               setActiveGenJob(null);
-              if (j.documentReadiness === 'READY') {
+              // Meta no alcanzada, timeout o fallo de medición: nunca se anuncia como documento listo.
+              const pageResult = (doc.generationMetadata as { pageTargetResult?: { outcome?: string; failureCause?: string } } | undefined)?.pageTargetResult;
+              const targetNotMet = pageResult?.outcome === 'BELOW_TARGET' || Boolean(pageResult?.failureCause);
+              if (targetNotMet) {
+                notify('warning', pageResult?.failureCause === 'TIMEOUT'
+                  ? '⚠️ La generación excedió el tiempo máximo: documento parcial pendiente de revisión, no completo'
+                  : '⚠️ Documento por debajo de la extensión solicitada: revisa el aviso de meta antes de usarlo');
+              } else if (j.documentReadiness === 'READY') {
                 notify('success', '✓ Documento generado y listo para revisión final');
               } else if (j.documentReadiness === 'BLOCKED' || j.documentReadiness === 'INVALID') {
                 notify('error', '⚠️ Documento generado con bloqueos estructurales (requiere subsanación)');
@@ -669,6 +678,8 @@ export default function MachotesPage() {
   const [initialViewMode, setInitialViewMode] = useState<'form' | 'editor'>('form');
   const [initialStep, setInitialStep] = useState(1);
   const [initialWritingsSessionDocIds, setInitialWritingsSessionDocIds] = useState<Set<string>>(new Set());
+  // Meta de extensión compartida por Escritos iniciales, Universal y el modal (se envía en la solicitud).
+  const [generationPageTarget, setGenerationPageTarget] = useState<PageTarget>(DEFAULT_PAGE_TARGET);
   const [showUncertifiedInitialTypes, setShowUncertifiedInitialTypes] = useState(false);
 
   const [universalForm, setUniversalForm] = useState({
@@ -1397,6 +1408,7 @@ export default function MachotesPage() {
     caseParties?: Array<{ role: string; name: string; source?: string }>;
     expediente?: string;
     uncertifiedDraftAcknowledged?: boolean;
+    pageTarget?: PageTarget;
   }) => {
     const selectedDocumentType = resolveSelectedDocumentType(payload.documentType, payload.taxonomy);
     if (!selectedDocumentType || !canGenerateDocumentDraft(selectedDocumentType, payload.uncertifiedDraftAcknowledged === true)) {
@@ -1488,6 +1500,7 @@ export default function MachotesPage() {
           idempotencyKey: generationId,
           externalProviderOptIn,
           authorizedExternalProviders: authorizedExternalProviders(),
+          ...pageTargetRequestField(payload.pageTarget ?? generationPageTarget),
         }),
       });
 
@@ -2957,6 +2970,11 @@ export default function MachotesPage() {
                     )}
 
                     {/* Navegación wizard + Acción final */}
+                    {initialStep === 6 && (
+                      <div className="pt-2">
+                        <PageTargetSelector value={generationPageTarget} onChange={setGenerationPageTarget} disabled={isUniversalGenerating} />
+                      </div>
+                    )}
                     <div className="pt-3 flex items-center justify-between gap-3 border-t border-slate-100">
                       <button
                         onClick={() => setInitialStep((s) => Math.max(1, s - 1))}
@@ -3017,6 +3035,7 @@ export default function MachotesPage() {
                                 caseParties: partiesForPipeline.length > 0 ? partiesForPipeline : undefined,
                                 expediente: expedienteVal || undefined,
                                 uncertifiedDraftAcknowledged: showUncertifiedInitialTypes,
+                                pageTarget: generationPageTarget,
                               } as any);
                             }}
                             disabled={isUniversalGenerating}
@@ -3407,6 +3426,11 @@ export default function MachotesPage() {
                       </div>
                       </details>
 
+                    {/* Meta de extensión (se envía al generar) */}
+                    <div className="pt-2">
+                      <PageTargetSelector value={generationPageTarget} onChange={setGenerationPageTarget} disabled={isUniversalGenerating} />
+                    </div>
+
                     {/* Botón Ejecutar Análisis */}
                     <div className="pt-2 flex justify-end">
                       <button
@@ -3445,6 +3469,7 @@ export default function MachotesPage() {
                             flowLabel: 'universal',
                             taxonomy: taxonomyU,
                             uncertifiedDraftAcknowledged: showUncertifiedUniversalTypes,
+                            pageTarget: generationPageTarget,
                           } as any);
                         }}
                         disabled={isUniversalGenerating}

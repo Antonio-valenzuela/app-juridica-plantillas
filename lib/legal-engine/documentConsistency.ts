@@ -1,7 +1,7 @@
 import type { RichCaseAnalysis } from './case-extraction/types';
 import type { DocumentAssemblyFinding, DocumentAssemblyResult } from './documentAssemblyTypes';
 
-export type DocumentPropositionKind = 'FACT' | 'STANCE' | 'LEGAL_CONCLUSION';
+export type DocumentPropositionKind = 'FACT' | 'STANCE' | 'LEGAL_CONCLUSION' | 'EVENT';
 export type DocumentPropositionScope = 'SOURCE' | 'CLIENT' | 'UNKNOWN';
 
 export interface DocumentPropositionEntry {
@@ -81,6 +81,16 @@ function makeEntry(
   };
 }
 
+/** Temas cuya polaridad (existió / nunca existió, se pagó / no se pagó) no puede contradecirse en el documento. */
+const POLARITY_TOPICS: ReadonlyArray<{ topic: string; pattern: RegExp }> = [
+  { topic: 'CONTRATO', pattern: /(?<!\p{L})(?:contrato|convenio)(?!\p{L})/iu },
+  { topic: 'RELACION_LABORAL', pattern: /(?<!\p{L})(?:relaci[oó]n\s+laboral|trabaj[oó]|laboraba)(?!\p{L})/iu },
+  { topic: 'PAGO', pattern: /(?<!\p{L})(?:pag[oó]|pagos?|liquid[oó])(?!\p{L})/iu },
+  { topic: 'NOTIFICACION', pattern: /(?<!\p{L})notificaci[oó]n(?!\p{L})|(?<!\p{L})notific[oó](?!\p{L})/iu },
+  { topic: 'ENTREGA', pattern: /(?<!\p{L})(?:entreg[oó]|entrega)(?!\p{L})/iu },
+];
+const POLARITY_NEGATION = /(?<!\p{L})(?:nunca|jam[áa]s|no\s+(?:existi[oó]|existe|celebr[oó]|celebra|se\s+(?:celebr[oó]|pag[oó]|notific[oó]|entreg[oó]|realiz[oó]))|no\s+hubo|no\s+fue\s+(?:pagad[oa]|notificad[oa]|entregad[oa]))(?!\p{L})/iu;
+
 export function buildDocumentPropositionLedger(input: DocumentConsistencyInput): readonly DocumentPropositionEntry[] {
   const entries: DocumentPropositionEntry[] = [];
   for (const block of input.assembly.orderedBlocks) {
@@ -100,6 +110,13 @@ export function buildDocumentPropositionLedger(input: DocumentConsistencyInput):
     if (stance) {
       for (const factId of factIds) {
         entries.push(makeEntry('STANCE', `${factId}:STANCE:${scope}`, stance, block, scope));
+      }
+    }
+    for (const sentence of block.text.split(/(?<=[.;!?])\s+/)) {
+      for (const { topic, pattern } of POLARITY_TOPICS) {
+        if (!pattern.test(sentence)) continue;
+        const value = POLARITY_NEGATION.test(sentence) ? 'DENIED' : 'AFFIRMED';
+        entries.push(makeEntry('EVENT', `EVENT:${topic}`, value, block, scope));
       }
     }
     if (LEGAL_CONCLUSION_PATTERN.test(block.text)) {
@@ -212,7 +229,31 @@ function compareStances(input: DocumentConsistencyInput, ledger: readonly Docume
   return findings;
 }
 
+/** Un mismo tema afirmado y negado en el documento: conflicto a revisar por el abogado (nunca se resuelve solo). */
+function comparePolarity(ledger: readonly DocumentPropositionEntry[]): DocumentAssemblyFinding[] {
+  const groups = new Map<string, DocumentPropositionEntry[]>();
+  for (const entry of ledger.filter((item) => item.kind === 'EVENT')) {
+    const existing = groups.get(entry.propositionKey) || [];
+    existing.push(entry);
+    groups.set(entry.propositionKey, existing);
+  }
+  const findings: DocumentAssemblyFinding[] = [];
+  for (const [key, entries] of groups) {
+    const values = new Set(entries.map((entry) => entry.value));
+    if (values.size <= 1) continue;
+    findings.push(finding(
+      'EVENT_POLARITY_CONFLICT',
+      'REVIEW',
+      `El documento afirma y niega el mismo hecho (${key.replace('EVENT:', '').toLowerCase()}).`,
+      entries.flatMap((entry) => entry.blockIds),
+      entries.flatMap((entry) => entry.factIds),
+      entries.flatMap((entry) => entry.legalIssueIds),
+    ));
+  }
+  return findings;
+}
+
 export function validateDocumentConsistency(input: DocumentConsistencyInput): readonly DocumentAssemblyFinding[] {
   const ledger = buildDocumentPropositionLedger(input);
-  return [...compareFacts(input, ledger), ...compareStances(input, ledger)];
+  return [...compareFacts(input, ledger), ...compareStances(input, ledger), ...comparePolarity(ledger)];
 }

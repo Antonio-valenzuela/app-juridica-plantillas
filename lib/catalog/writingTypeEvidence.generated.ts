@@ -8,13 +8,13 @@
  *
  * NO editar a mano. Regenerar con la suite.
  *
- *Evidencia: 2026-10-14T13:28:39.286Z
+ *Evidencia: 2026-10-17T02:27:14.046Z
  * Contrato: writing-type-evidence/2
  * Total: 278 | Generables: 266 | PASS: 266 | FAIL: 0 | No generables: 12
  */
 
 export const WRITING_TYPE_EVIDENCE_CONTRACT = 'writing-type-evidence/2';
-export const WRITING_TYPE_EVIDENCE_GENERATED_AT = '2026-10-14T13:28:39.286Z';
+export const WRITING_TYPE_EVIDENCE_GENERATED_AT = '2026-10-17T02:27:14.046Z';
 
 export const WRITING_TYPE_EVIDENCE: Readonly<Record<string, true>> = Object.freeze({
   'demanda_ordinaria_civil': true,

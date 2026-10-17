@@ -1814,3 +1814,20 @@ function canonicalizeStrategyId(value: string): string {
 export function getDocumentStrategy(documentType: string): DocumentStrategyDefinition | undefined {
   return DOCUMENT_STRATEGIES[canonicalizeStrategyId(documentType)];
 }
+
+/** IDs de contrato de sección: solo los de demanda civil y mercantil (ver documentPlan.buildTemplateSkeleton). */
+export function isSectionContractId(id: string): boolean {
+  return (CIVIL_DEMAND_REQUIRED_SECTION_IDS as readonly string[]).includes(id)
+    || (COMMERCIAL_ENFORCEMENT_REQUIRED_SECTION_IDS as readonly string[]).includes(id);
+}
+
+/**
+ * Título visible que debe tener una sección requerida. Un ID de contrato sin título mapeado LANZA:
+ * no hay fallback silencioso. Los rótulos legibles se devuelven tal cual.
+ */
+export function requiredSectionTitle(id: string): string {
+  if (!isSectionContractId(id)) return id;
+  const title = STRATEGY_SECTION_TITLES[id];
+  if (!title) throw new Error(`SECTION_TITLE_UNMAPPED: el ID de contrato ${id} no tiene título visible`);
+  return title;
+}

@@ -100,8 +100,19 @@ const STRUCTURAL_SECTION_TYPES = new Set(['closing', 'signature', 'header']);
 
 const isSpecificCitation = (citation: MaterialLegalCitation) => Boolean(citation.articleText)
   || /\bart[ií]culos?\s+\d|\bart\.\s*\d|\b(?:registro\s+digital|tesis|jurisprudencia|precedente)\b/i.test(citation.text);
-const isSupportedCitation = (citation: MaterialLegalCitation, supportNorm: string) =>
-  citation.aliases.map(normalizeLegalCitation).some((alias) => Boolean(alias) && supportNorm.includes(alias));
+/**
+ * Una cita consta en las fuentes solo si consta COMPLETA, o si consta su artículo y, cuando lo hay, también
+ * su ordenamiento. El nombre de la ley sola no respalda un artículo distinto («art. 2847» con «art. 1295»).
+ */
+const isSupportedCitation = (citation: MaterialLegalCitation, supportNorm: string) => {
+  const full = normalizeLegalCitation(citation.text);
+  if (full && supportNorm.includes(full)) return true;
+  const article = citation.articleText ? normalizeLegalCitation(citation.articleText) : '';
+  const statute = citation.statuteText ? normalizeLegalCitation(citation.statuteText) : '';
+  if (article && statute) return supportNorm.includes(article) && supportNorm.includes(statute);
+  if (article) return supportNorm.includes(article);
+  return Boolean(statute) && supportNorm.includes(statute);
+};
 
 /** Aplica la separación a un bloque de texto y vuelca lo retirado en el anexo. */
 export function separateReviewMaterialFromText(text: string, annex: ReviewAnnex, context: SeparationContext): SeparationResult {

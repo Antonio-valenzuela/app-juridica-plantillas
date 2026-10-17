@@ -9,6 +9,8 @@ export type AIResponseOrigin =
   | "SOURCE_DIRECT";
 
 export interface AIRequest {
+  /** Cancelación cooperativa del pipeline: aborta la llamada en curso y impide las siguientes. */
+  signal?: AbortSignal;
   /**
    * Propósito EXPRESO de la llamada. `UI_ASSISTANT` es el chat/asistente de la
    * interfaz; `LEGAL_GENERATION` es redacción jurídica.

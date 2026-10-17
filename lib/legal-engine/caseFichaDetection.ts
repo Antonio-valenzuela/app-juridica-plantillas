@@ -65,13 +65,19 @@ export function detectCaseFicha(texts: string[]): CaseFicha {
   // El número del caso no se toma de la jurisprudencia o las tesis que el escrito cita («Amparo directo 3296/2004»,
   // «1a./J. 18/2005»): son precedentes ajenos. Y una demanda que inicia la acción todavía no tiene expediente: solo se
   // acepta el número con rótulo explícito («Expediente: …»), no un «N/AAAA» suelto del texto.
-  const ownText = stripCitedPrecedents(full);
+  const ownText = stripCitedPrecedents(full).replace(/\bamparo\s+(?:directo|indirecto)\s*:?\s*\d{1,6}\s*\/\s*\d{2,4}/gi, ' ');
+  // Fallback N/AAAA (sin rótulo): el número existe pero no está confirmado por un rótulo.
+  let fromFallback = false;
   const expediente = startsAction
     // Demanda: solo «Expediente: N/AAAA»; «juicio/amparo directo N/AAAA» dentro de la exposición suele ser una cita.
     ? firstMatch(ownText, [/\b(?:expediente|exp\.)\s*(?:n[uú]m(?:ero)?\.?|no\.?)?\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i])
     : firstMatch(ownText, [
       /(?:expediente|juicio|toca|amparo\s+directo|amparo\s+indirecto|proceso)\s*[:\-]?\s*([0-9]{1,6}\s*[\/\-\.]\s*[0-9]{2,4})/i,
-    ]) || firstMatch(ownText, [/\b(\d{1,6}\/\d{4})\b/i]);
+    ]) || (() => {
+      const loose = firstMatch(ownText, [/\b(\d{1,6}\/\d{4})\b/i]);
+      fromFallback = Boolean(loose);
+      return loose;
+    })();
 
   const actor =
     extractPartyField(full, [
@@ -123,7 +129,8 @@ export function detectCaseFicha(texts: string[]): CaseFicha {
   else if (startsAction) tipo = 'Demanda';
 
   const foundCount = [expediente, actor, demandado, abogado, autoridad, fechas].filter(Boolean).length;
-  const confianza = Math.min(100, Math.round(35 + foundCount * 11));
+  // Un número sin rótulo no es confiable por sí mismo: baja la confianza de la ficha.
+  const confianza = Math.min(100, Math.round(35 + foundCount * 11) - (fromFallback ? 25 : 0));
 
   return { expediente, actor, demandado, abogado, autoridad, fechas, materia, tipo, confianza };
 }

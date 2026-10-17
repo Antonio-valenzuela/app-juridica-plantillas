@@ -14,7 +14,8 @@ import { MAX_REDUNDANCY_RATIO, pageTolerance } from '@/lib/legal-engine/pageTarg
 import { redundancyRatio, splitParagraphs } from '@/lib/legal-engine/textRedundancy';
 import { createSimulatedWriter, syntheticCase, syntheticDemandText } from '../helpers/simulatedLegalWriter';
 
-vi.mock('@/lib/ai/fastMode', () => ({ runFastMode: async () => ({ success: false, text: '', error: 'OFFLINE_PROVIDER_UNAVAILABLE' }) }));
+// Rechazos explícitos y listados: el tipo exige otra fuente o viabilidad procesal. Cualquier otro error falla la suite.
+const LISTED_REFUSAL_CODES = ['SOURCE_DOCUMENT_INCOMPATIBLE', 'PROCEDURAL_VIABILITY_FAILED'] as const;
 
 const TARGET = 20;
 const targets = CANONICAL_DOCUMENT_TYPES.filter((type) => type.status === 'IMPLEMENTED' && type.implemented);
@@ -39,8 +40,10 @@ describe(`meta de ${TARGET} páginas en cada tipo implementado del catálogo`, (
       } as never);
     } catch (error) {
       // Un tipo que exige otra fuente o ficha se rechaza explícitamente antes de generar: no es éxito simulado.
-      outcomes.ERROR.push(`${type.id}:${error instanceof Error ? error.message.slice(0, 60) : 'error'}`);
-      expect(error).toBeInstanceOf(Error);
+      // Un error que no sea un rechazo listado no se cuenta como resultado: la suite falla.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!LISTED_REFUSAL_CODES.some((code) => message.includes(code))) throw error;
+      outcomes.ERROR.push(`${type.id}:${message.slice(0, 60)}`);
       return;
     }
     const metadata = doc.generationMetadata;

@@ -8,6 +8,7 @@
 
 import type { UniversalLegalDocument } from './types';
 import { enqueueGenerationJobPersistence } from './generationJobPersistence';
+import { GenerationCancelledError } from '../ai/abortContext';
 import { ownsExecution, type ExecutionOwner } from '@/lib/security/workspaceExecutionAccess';
 
 type CompletionDocument = UniversalLegalDocument & {
@@ -224,7 +225,10 @@ export function completeJob(
     || (doc.status === 'draft' || !doc.generationMetadata?.pipelineState?.isComplete ? 'REQUIRES_REVIEW' : 'READY');
 
   job.status = 'completed';
-  job.terminalStatus = options?.terminalStatus || (derivedReadiness === 'READY' ? 'COMPLETED' : 'NEEDS_REVIEW');
+  // Meta no alcanzada, timeout o fallo de medición: nunca «completado».
+  const pageResult = (completionDoc.generationMetadata as { pageTargetResult?: { outcome?: string; failureCause?: string } } | undefined)?.pageTargetResult;
+  const targetNotMet = pageResult?.outcome === 'BELOW_TARGET' || Boolean(pageResult?.failureCause);
+  job.terminalStatus = options?.terminalStatus || (derivedReadiness === 'READY' && !targetNotMet ? 'COMPLETED' : 'NEEDS_REVIEW');
   job.document = doc;
   job.checkpointDocument = doc;
   job.documentId = doc.id;
@@ -234,7 +238,7 @@ export function completeJob(
   job.percentage = 100;
   job.warnings = Array.from(new Set([...(job.warnings || []), ...(options?.warnings || [])]));
 
-  if (derivedReadiness === 'READY') {
+  if (derivedReadiness === 'READY' && !targetNotMet) {
     job.stage = 'Documento generado y listo para revisión final';
   } else if (derivedReadiness === 'BLOCKED' || derivedReadiness === 'INVALID') {
     job.stage = 'Documento generado con bloqueos estructurales (requiere subsanación)';
@@ -273,10 +277,23 @@ export function failJob(
   return job;
 }
 
+/** Controlador de cancelación de cada trabajo en curso: cancelJob lo aborta para detener el pipeline. */
+const ABORT_CONTROLLERS = new Map<string, AbortController>();
+
+export function registerJobAbort(jobId: string, controller: AbortController): void {
+  ABORT_CONTROLLERS.set(jobId, controller);
+}
+
+export function unregisterJobAbort(jobId: string): void {
+  ABORT_CONTROLLERS.delete(jobId);
+}
+
 export function cancelJob(jobId: string): GenerationJob | undefined {
   const job = JOBS.get(jobId);
   if (!job) return undefined;
   if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') return job;
+  // Aborta el pipeline: deja de llamar a proveedores y el checkpoint ya no cambia.
+  ABORT_CONTROLLERS.get(jobId)?.abort(new GenerationCancelledError());
   job.status = 'cancelled';
   job.terminalStatus = 'CANCELLED';
   job.cancelRequested = true;

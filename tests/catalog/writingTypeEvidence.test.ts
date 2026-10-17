@@ -13,6 +13,7 @@ import { readDocxPackage } from '../helpers/docxPackageReader';
 import { syntheticSourceBody } from '../helpers/evidenceFixture';
 import { COMMERCIAL_FACT, COMMERCIAL_MANUAL } from '../helpers/commercialFixture';
 import { hasSeedMarkers } from '@/lib/legal-engine/seedMarkers';
+import { missingRequiredSections } from '../helpers/sectionCoverage';
 
 /**
  * P0-C / §2-§5 — evidencia REAL y reproducible.
@@ -145,12 +146,9 @@ async function evaluate(identity: WritingTypeIdentity): Promise<Entry> {
   metrics.sections = document.sections.length;
   metrics.bodyChars = body.trim().length;
 
-  // requiredSections presentes
-  const titles: string[] = document.sections.map((section: any) => String(section.title || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase());
-  const missing = identity.requiredSections.filter((required) => {
-    const key = required.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    return !titles.some((title) => title.includes(key) || key.includes(title));
-  });
+  // requiredSections presentes: IDs de contrato comparados contra su t\u00edtulo visible y con cuerpo
+  // (ver tests/helpers/sectionCoverage.ts; prueba negativa en tests/catalog/evidenceSectionCoverage.test.ts).
+  const missing = missingRequiredSections(identity.requiredSections, document.sections);
   if (missing.length) reasons.push(`MISSING_SECTIONS:${missing.length}`);
 
   // Hechos: aparecen o hay pendiente específico
