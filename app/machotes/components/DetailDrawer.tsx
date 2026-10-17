@@ -57,6 +57,7 @@ export function DetailDrawer({ open, title, eyebrow, onClose, children }: Detail
         <div className="lex-modal-body">{children}</div>
       </div>
     </div>,
-    document.body,
+    // Dentro de .machotes-shell siguen vigentes las utilidades del contenido (fuera de él el reset global las anula).
+    document.querySelector('.machotes-shell') ?? document.body,
   );
 }

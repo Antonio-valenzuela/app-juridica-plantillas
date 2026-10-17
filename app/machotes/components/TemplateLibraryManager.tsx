@@ -5,6 +5,7 @@ import { LEGAL_MATTERS_CATALOG } from '@/lib/catalog/legalCatalog';
 import { TemplateVersion } from '@/lib/legal-engine/types';
 import type { PersonalTemplateStructure, PersonalTemplateVariable } from '@/lib/templates/personalTemplateBuilder';
 import { LexIcon } from '@/components/layout/LexIcon';
+import { DetailDrawer } from './DetailDrawer';
 
 export interface TemplateItem {
   id: string;
@@ -319,24 +320,9 @@ export function TemplateLibraryManager({
         </div>
       )}
 
-      {previewTemplate && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-              <div>
-                <h4 className="text-xs font-black text-[#0B2545] uppercase tracking-wider">
-                  Vista Previa del Machote
-                </h4>
-                <p className="text-xs text-slate-600 font-bold mt-0.5">{previewTemplate.name}</p>
-              </div>
-              <button
-                onClick={() => setPreviewTemplate(null)}
-                className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
+      <DetailDrawer open={Boolean(previewTemplate)} eyebrow="Vista Previa del Machote" title={previewTemplate?.name} onClose={() => setPreviewTemplate(null)}>
+        {previewTemplate && (
+          <div className="flex flex-col">
             <div className="p-6 overflow-y-auto flex-1 bg-[#f5f2eb] flex justify-center">
               <div className="bg-white p-8 rounded-lg shadow-md border border-slate-300 w-full max-w-lg min-h-[400px] text-xs font-serif text-slate-800 leading-relaxed">
                 <div className="text-center font-bold mb-4 border-b pb-2">
@@ -388,8 +374,8 @@ export function TemplateLibraryManager({
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </DetailDrawer>
     </div>
   );
 }
