@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { WorkspaceAuthorityResult, WorkspaceLibraryItem } from '@/lib/workspace/research';
 import type { WorkspaceCaseSummary } from '@/lib/workspace/cases';
 import { calculateWorkspaceTerm, workspaceTermStorageKey, type WorkspaceTermMode, type WorkspaceTermRecord } from '@/lib/workspace/terms';
-import { AGENDA_CHANGED_EVENT, readAgendaEvents, writeAgendaEvents, type AgendaEvent, type AgendaPriority } from '@/lib/workspace/agenda';
+import { AGENDA_CHANGED_EVENT, hasDesktopWorkspaceCapability, readAgendaEvents, writeAgendaEvents, type AgendaEvent, type AgendaPriority } from '@/lib/workspace/agenda';
 import { describeWorkspaceHttpError } from '@/lib/workspace/httpErrors';
 import type { LegalWorkspaceCaseContext } from '@/context/LegalWorkspaceContext';
 import { LocalImportPanel } from './LocalImportPanel';
@@ -330,6 +330,8 @@ function RealTermsView({ activeCase }: { activeCase?: LegalWorkspaceCaseContext 
   const [desktopAgenda, setDesktopAgenda] = useState(false);
   const [agendaError, setAgendaError] = useState('');
   const refreshLocalAgenda = React.useCallback(async () => {
+    // QA-F405: agenda web no disponible — sin capacidad de escritorio se usa la copia local sin llamar a la API.
+    if (!hasDesktopWorkspaceCapability()) { setDesktopAgenda(false); setAgenda(readAgendaEvents()); setAgendaError(''); return; }
     try {
       const response = await fetch('/api/workspace/agenda', { cache: 'no-store' });
       if ([401, 405].includes(response.status)) { setAgenda(readAgendaEvents()); return; }

@@ -224,3 +224,15 @@ export function writeAgendaEvents(events: AgendaEvent[]): void {
     // La generación no debe fallar si el almacenamiento local está bloqueado.
   }
 }
+
+/** Cookie de capacidad del launcher de escritorio (la emite /api/desktop-local/session). */
+export const DESKTOP_WORKSPACE_CAPABILITY_COOKIE = 'lex_desktop_workspace_cap';
+
+/**
+ * QA-F405: la agenda durable del workspace solo existe con la capacidad de escritorio.
+ * En web («agenda web no disponible») los clientes se quedan con la copia local y no llaman a la API.
+ */
+export function hasDesktopWorkspaceCapability(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.cookie.split(';').some((entry) => entry.trim().startsWith(`${DESKTOP_WORKSPACE_CAPABILITY_COOKIE}=`));
+}
