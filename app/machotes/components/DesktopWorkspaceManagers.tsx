@@ -83,14 +83,14 @@ export function DesktopAgendaManager({ events, onSaved }: { events: AgendaEvent[
     catch (error) { setError(error instanceof Error ? error.message : 'No se pudo eliminar.'); }
   }
   return <div className="mt-4 rounded-xl border border-slate-200 p-3"><button type="button" className={button} onClick={() => begin()}>Nuevo evento</button>
-    {error && <p role="alert" className="mt-2 text-xs text-red-700">{error}</p>}
-    {editing && <form onSubmit={save} className="mt-3 grid gap-3 sm:grid-cols-2">
+    {error && !editing && <p role="alert" className="mt-2 text-xs text-red-700">{error}</p>}
+    <DetailDrawer open={editing} eyebrow="Agenda" title={id ? 'Editar evento' : 'Nuevo evento'} onClose={() => setEditing(false)}>{error && <p role="alert" className="mt-2 text-xs text-red-700">{error}</p>}<form onSubmit={save} className="mt-3 grid gap-3 sm:grid-cols-2">
       <Fields form={form} onChange={(key, value) => setForm(current => ({ ...current, [key]: value }))} definitions={[
         { key: 'title', label: 'Título del evento', required: true }, { key: 'dueDate', label: 'Fecha del evento', type: 'date', required: true },
         { key: 'time', label: 'Hora del evento', type: 'time' }, { key: 'priority', label: 'Prioridad del evento', options: [{ value: 'HIGH', label: 'Alta' }, { value: 'MEDIUM', label: 'Media' }, { value: 'LOW', label: 'Baja' }] },
         { key: 'caseId', label: 'Expediente del evento', options: [{ value: '', label: 'Agenda general' }, ...cases.map(item => ({ value: item.id, label: item.title }))] },
         { key: 'eventType', label: 'Tipo de evento' }, { key: 'notes', label: 'Notas del evento' }]} />
-      <div className="flex gap-2 sm:col-span-2"><button className={button} type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar evento'}</button><button className={button} type="button" onClick={() => setEditing(false)}>Cancelar</button></div></form>}
+      <div className="flex gap-2 sm:col-span-2"><button className={button} type="submit" disabled={saving}>{saving ? 'Guardando…' : 'Guardar evento'}</button><button className={button} type="button" onClick={() => setEditing(false)}>Cancelar</button></div></form></DetailDrawer>
     <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">{events.map(event => <div key={event.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-2 text-xs">
       <span>{event.title} · {event.dueDate || 'Fecha pendiente de revisión'} {event.time || ''}</span><div className="flex gap-2"><button className={button} type="button" onClick={() => begin(event)}>Editar evento</button><button className={button} type="button" onClick={() => void remove(event)}>Eliminar evento</button></div>
     </div>)}</div></div>;

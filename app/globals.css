@@ -6567,3 +6567,11 @@ textarea:disabled {
 .lex-drawer .lex-modal-body > p { margin: 6px 0 0; font-size: 13px; color: var(--ws-muted); }
 .lex-drawer .lex-modal-body > p:first-child { margin-top: 0; }
 .lex-drawer .lex-modal-body > .lex-button { margin-top: 18px; }
+/* Formularios dentro del panel: una columna a su ancho y los mismos botones que .lex-button-secondary. */
+.lex-drawer form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+.lex-drawer form > * { grid-column: auto; }
+.lex-drawer form input, .lex-drawer form select { display: block; width: 100%; box-sizing: border-box; }
+.lex-drawer form button { display: inline-flex; align-items: center; min-height: 38px; padding: 0 16px; border: 1px solid var(--ws-line-strong); border-radius: 8px; background: var(--ws-surface); color: var(--ws-ink); font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.lex-drawer form button[type="submit"] { background: var(--ws-navy); border-color: var(--ws-navy); color: #fff; }
+.lex-drawer form button:disabled { opacity: .5; cursor: not-allowed; }
+.lex-drawer form > div:last-child { display: flex; gap: 8px; }

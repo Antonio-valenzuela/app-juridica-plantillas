@@ -67,3 +67,17 @@ it('web: la ficha abre en el panel lateral sin controles de escritorio', async (
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+it('escritorio: «Editar evento» abre el formulario en un panel lateral con los datos del evento; Esc lo cierra y devuelve el foco', async () => {
+  const event = { id: 'ev-1', title: 'Audiencia del fixture', dueDate: '2026-11-03', time: '10:00', priority: 'HIGH', notes: '', eventType: 'Audiencia', caseId: '' };
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('cases') ? { ok: true, cases: [] } : { ok: true, storage: 'DESKTOP_LOCAL', events: [event] })));
+  render(<WorkspaceModulesView mode="terminos" onNavigate={() => undefined} />);
+  const editButton = await screen.findByRole('button', { name: 'Editar evento' });
+  editButton.focus();
+  fireEvent.click(editButton);
+  const dialog = screen.getByRole('dialog', { name: 'Editar evento' });
+  expect(within(dialog).getByLabelText('Título del evento')).toHaveValue('Audiencia del fixture');
+  expect(within(dialog).getByLabelText('Fecha del evento')).toHaveValue('2026-11-03');
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(editButton).toHaveFocus();
+});
