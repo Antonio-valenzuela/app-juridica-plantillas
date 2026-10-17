@@ -108,6 +108,13 @@ export function WorkspaceDocumentEditor({
   const [exportMenuPosition, setExportMenuPosition] = useState({ top: 0, left: 0 });
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showPendingModal, setShowPendingModal] = useState(false);
+  // Esc cierra los modales de calidad y de pendientes (mismo contrato que «Opciones de redacción»).
+  useEffect(() => {
+    if (!showReviewModal && !showPendingModal) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { setShowReviewModal(false); setShowPendingModal(false); } };
+    window.document.addEventListener('keydown', onKeyDown);
+    return () => window.document.removeEventListener('keydown', onKeyDown);
+  }, [showReviewModal, showPendingModal]);
   const [zoomMode, setZoomMode] = useState<'custom' | 'fit-width' | 'fit-page'>('custom');
   const [docTitle, setDocTitle] = useState(document?.title || '');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -1274,16 +1281,17 @@ export function WorkspaceDocumentEditor({
 
       {/* Modal de Calidad / Quality Gate */}
       {showReviewModal && qualityGate && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-[1001] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 text-xs font-sans animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-extrabold text-[#0B2545]">
+        <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowReviewModal(false); }}>
+          <div className="lex-modal" role="dialog" aria-modal="true" aria-labelledby="quality-review-title">
+            <header className="lex-modal-header">
+              <h3 id="quality-review-title" className="lex-modal-title">
                 Revisión de Calidad Jurídica
               </h3>
-              <button onClick={() => setShowReviewModal(false)} className="text-slate-400 hover:text-slate-700 font-bold text-sm">
-                ✕
+              <button type="button" onClick={() => setShowReviewModal(false)} className="lex-modal-close" aria-label="Cerrar">
+                ×
               </button>
-            </div>
+            </header>
+            <div className="lex-modal-body space-y-4 text-xs">
 
             <div className={`p-3 rounded-xl border font-bold flex items-center justify-between ${
               qualityGate.canMarkAsFinal
@@ -1313,33 +1321,37 @@ export function WorkspaceDocumentEditor({
                 Aceptar
               </button>
             </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Modal de Aspectos Pendientes antes de Exportar */}
       {showPendingModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[1002] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 text-xs font-sans animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowPendingModal(false); }}>
+          <div className="lex-modal" role="dialog" aria-modal="true" aria-labelledby="pending-export-title">
+            <header className="lex-modal-header">
               <div className="flex items-center gap-2">
                 <span className="text-xl">📋</span>
                 <div>
-                  <h3 className="text-sm font-extrabold text-[#0B2545]">
+                  <h3 id="pending-export-title" className="lex-modal-title">
                     {pendingCount > 0 ? 'Documento en Revisión' : 'Listo para Finalizar'}
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="lex-help">
                     Control de calidad jurídica previo a la exportación
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowPendingModal(false)}
-                className="text-slate-400 hover:text-slate-700 font-bold text-base p-1"
+                className="lex-modal-close"
+                aria-label="Cerrar"
               >
-                ✕
+                ×
               </button>
-            </div>
+            </header>
+            <div className="lex-modal-body space-y-4 text-xs">
 
             <p className="text-slate-600 leading-relaxed">
               {pendingCount > 0
@@ -1417,6 +1429,7 @@ export function WorkspaceDocumentEditor({
                   )}
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>
