@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   mode: 'answer' as 'answer' | 'hang',
   calls: 0,
   afterAbortCalls: 0,
+  hangStarted: false,
 }));
 
 vi.mock('@/lib/ai/orchestrator', async () => {
@@ -76,11 +77,24 @@ const post = (body: Record<string, unknown>) => POST(new NextRequest('http://loc
   }),
 }));
 
+/**
+ * Espera determinista con `setImmediate` real bajo reloj falso: deja avanzar el pipeline
+ * (microtasks y temporizadores de 0 ms) hasta que la condición se cumpla, sin depender del reloj de pared.
+ */
+async function waitForState(predicate: () => boolean, timeoutMs = 10_000) {
+  const realDeadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < realDeadline) {
+    await vi.advanceTimersByTimeAsync(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
 describe('ruta /generate síncrona: meta, plazo, cancelación y presupuesto', () => {
   beforeEach(() => {
     state.mode = 'answer';
     state.calls = 0;
     state.afterAbortCalls = 0;
+    state.hangStarted = false;
     vi.mocked(getGenerationJobDeadlineMs).mockClear();
   });
 
@@ -92,60 +106,85 @@ describe('ruta /generate síncrona: meta, plazo, cancelación y presupuesto', ()
   });
 
   it('timeout durante la ampliación: 504 con GENERATION_TIMEOUT, NEEDS_REVIEW y BELOW_TARGET/TIMEOUT; sin llamadas posteriores', async () => {
-    // Redacción inicial OK; las ampliaciones (prompts «Redacción jurídica…») se quedan colgadas.
-    const { runFastMode } = await import('@/lib/ai/orchestrator');
-    vi.mocked(runFastMode).mockImplementation(async (request: any) => {
-      // Mismo contrato que el router: una llamada con la señal ya cancelada no llega al proveedor.
-      const { currentAbortSignal, GenerationCancelledError } = await import('@/lib/ai/abortContext');
-      const signal = request.signal ?? currentAbortSignal();
-      if (signal?.aborted) { state.afterAbortCalls += 1; throw new GenerationCancelledError(); }
-      if (String(request.systemPrompt).startsWith('Redacción jurídica')) {
+    // Plazo bajo reloj falso: el vencimiento ocurre justo cuando la ampliación ya está colgada,
+    // nunca antes por retraso del event-loop bajo carga (flake observado en la suite completa).
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // Redacción inicial OK; las ampliaciones (prompts «Redacción jurídica…») se quedan colgadas.
+      const { runFastMode } = await import('@/lib/ai/orchestrator');
+      vi.mocked(runFastMode).mockImplementation(async (request: any) => {
+        // Mismo contrato que el router: una llamada con la señal ya cancelada no llega al proveedor.
+        const { currentAbortSignal, GenerationCancelledError } = await import('@/lib/ai/abortContext');
+        const signal = request.signal ?? currentAbortSignal();
+        if (signal?.aborted) { state.afterAbortCalls += 1; throw new GenerationCancelledError(); }
+        if (String(request.systemPrompt).startsWith('Redacción jurídica')) {
+          state.calls += 1;
+          state.hangStarted = true;
+          return new Promise<never>(() => undefined);
+        }
         state.calls += 1;
-        return new Promise<never>(() => undefined);
-      }
-      state.calls += 1;
-      return { provider: 'groq', model: 'test', success: true, latencyMs: 1, content: 'Desarrollo inicial sintético.', origin: 'AI_GENERATED_LEGAL_CONTENT', isLegalAiContent: true } as any;
-    });
+        return { provider: 'groq', model: 'test', success: true, latencyMs: 1, content: 'Desarrollo inicial sintético.', origin: 'AI_GENERATED_LEGAL_CONTENT', isLegalAiContent: true } as any;
+      });
 
-    const response = await post({ pageTarget: { preset: 'EXTENSO', pages: 40 } });
-    const body = await response.json();
-    expect(response.status).toBe(504);
-    expect(body.errorCode).toBe('GENERATION_TIMEOUT');
-    expect(body.terminalStatus).toBe('NEEDS_REVIEW');
-    expect(body.document?.generationMetadata?.pageTargetResult).toMatchObject({ outcome: 'BELOW_TARGET', failureCause: 'TIMEOUT' });
+      const responsePromise = post({ pageTarget: { preset: 'EXTENSO', pages: 40 } });
+      await waitForState(() => state.hangStarted);
+      expect(state.hangStarted).toBe(true);
+      await vi.advanceTimersByTimeAsync(350);
 
-    // El pipeline terminó (post() ya resolvió). Drena la cola de microtasks para que
-    // cualquier tarea asíncrona pendiente en el event-loop pueda completarse; luego
-    // verifica que no hubo llamadas adicionales al proveedor tras el abort.
-    const callsAtTimeout = state.calls;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(state.calls).toBe(callsAtTimeout);
-    expect(state.afterAbortCalls).toBe(0);
+      const response = await responsePromise;
+      const body = await response.json();
+      expect(response.status).toBe(504);
+      expect(body.errorCode).toBe('GENERATION_TIMEOUT');
+      expect(body.terminalStatus).toBe('NEEDS_REVIEW');
+      expect(body.document?.generationMetadata?.pageTargetResult).toMatchObject({ outcome: 'BELOW_TARGET', failureCause: 'TIMEOUT' });
+
+      // El pipeline terminó (post() ya resolvió). Drena la cola de microtasks para que
+      // cualquier tarea asíncrona pendiente en el event-loop pueda completarse; luego
+      // verifica que no hubo llamadas adicionales al proveedor tras el abort.
+      const callsAtTimeout = state.calls;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(state.calls).toBe(callsAtTimeout);
+      expect(state.afterAbortCalls).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('cancelación durante la redacción inicial: el proveedor colgado no retiene la generación ni inicia llamadas nuevas', async () => {
-    const { runFastMode } = await import('@/lib/ai/orchestrator');
-    vi.mocked(runFastMode).mockImplementation(async (request: any) => {
-      const { currentAbortSignal, GenerationCancelledError } = await import('@/lib/ai/abortContext');
-      const signal = request.signal ?? currentAbortSignal();
-      if (signal?.aborted) { state.afterAbortCalls += 1; throw new GenerationCancelledError(); }
-      state.calls += 1;
-      return new Promise<never>(() => undefined); // redacción inicial colgada
-    });
+    // Mismo patrón determinista: el plazo simulado vence solo cuando la primera llamada ya está colgada.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { runFastMode } = await import('@/lib/ai/orchestrator');
+      vi.mocked(runFastMode).mockImplementation(async (request: any) => {
+        const { currentAbortSignal, GenerationCancelledError } = await import('@/lib/ai/abortContext');
+        const signal = request.signal ?? currentAbortSignal();
+        if (signal?.aborted) { state.afterAbortCalls += 1; throw new GenerationCancelledError(); }
+        state.calls += 1;
+        state.hangStarted = true;
+        return new Promise<never>(() => undefined); // redacción inicial colgada
+      });
 
-    const response = await post({ pageTarget: { preset: 'EXTENSO', pages: 40 } });
-    const body = await response.json();
-    expect(response.status).toBe(504);
-    expect(body.errorCode).toBe('GENERATION_TIMEOUT');
-    expect(body.terminalStatus).toBe('NEEDS_REVIEW');
-    // Solo el último checkpoint válido (bloques no-IA ya completados), marcado como TIMEOUT: nunca completo.
-    expect(body.document?.generationMetadata?.pageTargetResult).toMatchObject({ outcome: 'BELOW_TARGET', failureCause: 'TIMEOUT' });
+      const responsePromise = post({ pageTarget: { preset: 'EXTENSO', pages: 40 } });
+      await waitForState(() => state.hangStarted);
+      expect(state.hangStarted).toBe(true);
+      await vi.advanceTimersByTimeAsync(350);
 
-    // Drena microtasks pendientes de forma determinista (sin sleep fijo).
-    const callsAtTimeout = state.calls;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(state.calls).toBe(callsAtTimeout);
-    expect(state.afterAbortCalls).toBe(0);
+      const response = await responsePromise;
+      const body = await response.json();
+      expect(response.status).toBe(504);
+      expect(body.errorCode).toBe('GENERATION_TIMEOUT');
+      expect(body.terminalStatus).toBe('NEEDS_REVIEW');
+      // Solo el último checkpoint válido (bloques no-IA ya completados), marcado como TIMEOUT: nunca completo.
+      expect(body.document?.generationMetadata?.pageTargetResult).toMatchObject({ outcome: 'BELOW_TARGET', failureCause: 'TIMEOUT' });
+
+      // Drena microtasks pendientes de forma determinista (sin sleep fijo).
+      const callsAtTimeout = state.calls;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(state.calls).toBe(callsAtTimeout);
+      expect(state.afterAbortCalls).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('el presupuesto global de llamadas se respeta entre redacción inicial y ampliación', async () => {

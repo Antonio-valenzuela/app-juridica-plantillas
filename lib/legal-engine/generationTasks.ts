@@ -25,6 +25,7 @@ import type { LawyerProfile } from '../workspace/lawyerProfileTypes';
 import { loadActiveManual } from '../operational-manual/store';
 import { retrieveManualRules, formatManualTaskContext, type ManualMatter } from '../operational-manual/core';
 import { runFastMode } from '@/lib/ai/orchestrator';
+import { currentAbortSignal, GenerationCancelledError, throwIfCancelled, withAbort } from '@/lib/ai/abortContext';
 import { sanitizeGeneratedText } from './pipeline';
 import {
   hasSeedMarkers,
@@ -1104,6 +1105,10 @@ export async function executeGenerationTask(
 ): Promise<{ block: ContentBlock; result: GenerationTaskResult }> {
   const taskStartedAt = new Date().toISOString();
   const taskStartedMs = Date.now();
+  const signal = currentAbortSignal();
+  // Cancelación cooperativa: con la señal ya abortada esta tarea no inicia ninguna llamada nueva y la
+  // cancelación se propaga; jamás se fabrica un fallback que «complete» trabajo cancelado.
+  throwIfCancelled(signal);
   task.status = 'in_progress';
   task.passes = 1;
   task.revisionPasses = 0;
@@ -1329,6 +1334,7 @@ export async function executeGenerationTask(
         },
       };
     } catch (err: any) {
+      if (err instanceof GenerationCancelledError) throw err;
       task.status = 'fallback';
       task.fallbackUsed = true;
       task.error = err?.message || 'Error en generador';
@@ -1440,7 +1446,7 @@ export async function executeGenerationTask(
 
   try {
     // ── Pase 1 ──────────────────────────────────────────────────────────────
-    const aiRes = await runFastMode({
+    const aiRes = await withAbort(runFastMode({
       purpose: 'LEGAL_GENERATION' as const,
       systemPrompt,
       userMessage,
@@ -1448,7 +1454,7 @@ export async function executeGenerationTask(
       maxTokens: task.tokenBudget,
       maxProviderRetries: extendedContract ? 1 : undefined,
       ...caseProviderFlags(doc),
-    });
+    }), signal);
 
     const isLegalAiResponse = Boolean(
       aiRes.success &&
@@ -1510,7 +1516,8 @@ export async function executeGenerationTask(
               'Continúa exactamente desde el argumento inconcluso sin repetir lo ya redactado y concluye de forma contundente el planteamiento jurídico.',
             ].join('\n');
 
-        const contRes = await runFastMode({
+        throwIfCancelled(signal);
+        const contRes = await withAbort(runFastMode({
       purpose: 'LEGAL_GENERATION' as const,
           systemPrompt,
           userMessage: continuationUserMessage,
@@ -1521,7 +1528,7 @@ export async function executeGenerationTask(
           ),
           maxProviderRetries: extendedContract ? 1 : undefined,
           ...caseProviderFlags(doc),
-        });
+        }), signal);
 
         const isLegalContinuation = Boolean(
           contRes.success &&
@@ -1603,6 +1610,7 @@ export async function executeGenerationTask(
       }
     }
   } catch (err: any) {
+    if (err instanceof GenerationCancelledError) throw err;
     fallbackUsed = true;
     task.status = 'failed';
     task.error = String(err?.message || err);
@@ -1661,7 +1669,8 @@ export async function executeGenerationTask(
       const prevBlockId = block.id;
       const revisionPrompt = buildTargetedRevisionPrompt(task, block, evaluation);
 
-      const revRes = await runFastMode({
+      throwIfCancelled(signal);
+      const revRes = await withAbort(runFastMode({
       purpose: 'LEGAL_GENERATION' as const,
         systemPrompt: revisionPrompt.systemInstruction,
         userMessage: revisionPrompt.userMessage,
@@ -1669,7 +1678,7 @@ export async function executeGenerationTask(
         maxTokens: task.tokenBudget,
         maxProviderRetries: extendedContract ? 1 : undefined,
         ...caseProviderFlags(doc),
-      });
+      }), signal);
 
       if (revRes.success && revRes.content) {
         sanitized = sanitizeGeneratedText(revRes.content.trim());
