@@ -310,13 +310,17 @@ test.describe('E2E-10 borrador y exportaciones reales con generación simulada',
     await page.getByRole('button', { name: 'Generar Escrito Inicial' }).click();
     await expect(page.getByText(/Faltan datos esenciales para generar: .*objetivo o pretensión/)).toBeVisible();
     expect(generationCalls()).toBe(0);
-    // El botón se rehabilita y nada de lo capturado se pierde.
-    await expect(page.getByRole('button', { name: 'Generar Escrito Inicial' })).toBeEnabled();
-    await expect(page.getByPlaceholder(/Énfasis en suplencia de la queja/)).toHaveValue(instructions);
-    await page.getByRole('button', { name: /Anterior/ }).click();
-    await page.getByRole('button', { name: /Anterior/ }).click();
+    // El asistente abre y señala el paso faltante (4 · ¿Qué solicitas?) sin perder nada de lo capturado.
+    await expect(page.getByTestId('initial-missing-step')).toBeVisible();
+    await expect(page.getByPlaceholder(/Indica qué solicitas/)).toBeVisible();
     await page.getByRole('button', { name: /Anterior/ }).click();
     await expect(page.getByPlaceholder(/Relata cronológicamente/)).toHaveValue('Hecho sintético que no debe perderse.');
+    await page.getByRole('button', { name: /Siguiente/ }).click();
+    await page.getByRole('button', { name: /Siguiente/ }).click();
+    await page.getByRole('button', { name: /Siguiente/ }).click();
+    await expect(page.getByPlaceholder(/Énfasis en suplencia de la queja/)).toHaveValue(instructions);
+    // El botón queda disponible para reintentar cuando el dato esencial se complete.
+    await expect(page.getByRole('button', { name: 'Generar Escrito Inicial' })).toBeEnabled();
   });
 
   test('Escritos Iniciales: un error del servicio de generación se informa y conserva lo capturado', async ({ page }) => {

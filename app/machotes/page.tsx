@@ -10,6 +10,7 @@ import { WritingAvailabilityNotice } from './components/WritingAvailabilityNotic
 import type { AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { LawyerStyleProfileCard } from './components/LawyerStyleProfileCard';
 import { GenerationStatusBar, GenerationStatusData } from './components/GenerationStatusBar';
+import { initialWritingStepForMissingEssential } from './initialWritingsFocus';
 type GenerationFlowLabel = 'documento' | 'contestacion' | 'recurso' | 'escrito_inicial' | 'universal';
 import { SaveCustomTemplateModal } from '@/components/machotes/SaveCustomTemplateModal';
 import { EditCustomTemplateModal } from '@/components/machotes/EditCustomTemplateModal';
@@ -677,6 +678,8 @@ export default function MachotesPage() {
   });
   const [initialViewMode, setInitialViewMode] = useState<'form' | 'editor'>('form');
   const [initialStep, setInitialStep] = useState(1);
+  // QA-F1: paso señalado cuando el intento de generar quedó bloqueado por datos esenciales faltantes.
+  const [initialIntakeFocus, setInitialIntakeFocus] = useState<{ step: number; missing: string[] } | null>(null);
   const [initialWritingsSessionDocIds, setInitialWritingsSessionDocIds] = useState<Set<string>>(new Set());
   // Meta de extensión compartida por Escritos iniciales, Universal y el modal (se envía en la solicitud).
   const [generationPageTarget, setGenerationPageTarget] = useState<PageTarget>(DEFAULT_PAGE_TARGET);
@@ -1421,6 +1424,29 @@ export default function MachotesPage() {
       notify('warning', 'Ya hay una generación en curso. Por favor espera.');
       return;
     }
+    // P0: sourceDocs aislados — si el payload trae lista explícita (incluso vacía), respetarla; no fallback a global contaminado
+    const effectiveSourceDocs = payload.writingMode && payload.writingMode !== 'analyze'
+      ? []
+      : ((payload as any).sourceDocs !== undefined ? (payload as any).sourceDocs as UploadedSourceDocument[] : uploadedSourceDocs);
+    const writingIntake: WritingIntake | null = effectiveSourceDocs.length === 0
+      ? analyzeWritingRequest(payload.userInstruction)
+      : null;
+    // QA-F1: validar los datos esenciales ANTES del consentimiento externo — no se autoriza un envío
+    // que no va a ocurrir por falta de datos. Una plantilla seleccionada ya aporta tipo/estructura y
+    // los faltantes quedan como pendientes del asunto, así que no bloquea.
+    if (writingIntake && writingIntake.readiness.status === 'BLOCKED' && !payload.selectedTemplate) {
+      const missing = writingIntake.readiness.missingEssential;
+      notify('warning', `Faltan datos esenciales para generar: ${missing.join(', ')}.`);
+      if (activeNavTab === 'initial_writings') {
+        // Llevar al abogado al paso exacto que falta y señalarlo ahí, no solo avisarle con un toast.
+        const step = initialWritingStepForMissingEssential(missing);
+        setInitialIntakeFocus({ step, missing });
+        setInitialStep(step);
+        setInitialViewMode('form');
+      }
+      return;
+    }
+    setInitialIntakeFocus(null);
     const externalProviderOptIn = await requestExternalProviderConsent();
     if (!externalProviderOptIn) {
       notify('warning', 'Generación no iniciada: elegiste no enviar el expediente a proveedores externos. No se envió ningún dato.');
@@ -1446,25 +1472,7 @@ export default function MachotesPage() {
     const effectiveCaseParties = payloadParties && payloadParties.length > 0
       ? payloadParties.filter((p) => p.name && String(p.name).trim()).map((p) => ({ role: p.role, name: String(p.name).trim(), source: (p as any).source || 'manual' }))
       : savedCaseParties.filter((p) => p.name && p.name.trim()).map((p) => ({ role: p.role, name: p.name.trim(), source: (p as any).source || 'manual' }));
-    // P0: sourceDocs aislados — si el payload trae lista explícita (incluso vacía), respetarla; no fallback a global contaminado
-    const effectiveSourceDocs = payload.writingMode && payload.writingMode !== 'analyze'
-      ? []
-      : ((payload as any).sourceDocs !== undefined ? (payload as any).sourceDocs as UploadedSourceDocument[] : uploadedSourceDocs);
     const payloadExpediente = (payload as any).expediente as string | undefined;
-    const writingIntake: WritingIntake | null = effectiveSourceDocs.length === 0
-      ? analyzeWritingRequest(payload.userInstruction)
-      : null;
-    // Una plantilla seleccionada ya aporta tipo/estructura; los datos faltantes
-    // deben quedar como pendientes en el nuevo asunto, no impedir que se genere
-    // el borrador reutilizable.
-    if (writingIntake && writingIntake.readiness.status === 'BLOCKED' && !payload.selectedTemplate) {
-      genIsGeneratingRef.current = false;
-      setIsUniversalGenerating(false);
-      generationOriginTabRef.current = null;
-      setActiveGenJob(null);
-      notify('warning', `Faltan datos esenciales para generar: ${writingIntake.readiness.missingEssential.join(', ')}.`);
-      return;
-    }
     const workflowSelection = payload.selectedTemplate && (payload.writingMode === 'template' || generationMode === 'personal_template')
       ? { mode: 'personal_template' as const, templateId: payload.selectedTemplate.id }
       : generationMode === 'reference_document' && payload.selectedTemplate
@@ -2756,12 +2764,21 @@ export default function MachotesPage() {
                         'Pruebas',
                         'Instrucciones IA',
                       ].map((label, idx) => (
-                        <div key={idx} className={`flex-1 text-center py-1 rounded-md border text-[10px] ${initialStep === idx+1 ? 'bg-[#0B2545] text-white border-[#0B2545]' : initialStep > idx+1 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-500 border-slate-200'}`}>
+                        <div key={idx} className={`flex-1 text-center py-1 rounded-md border text-[10px] ${initialStep === idx+1 ? 'bg-[#0B2545] text-white border-[#0B2545]' : initialStep > idx+1 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-500 border-slate-200'}${initialIntakeFocus?.step === idx+1 ? ' ring-2 ring-amber-400 ring-offset-1' : ''}`}>
                           <span className="hidden sm:inline">{idx+1}. {label}</span>
                           <span className="sm:hidden">{idx+1}</span>
                         </div>
                       ))}
                     </div>
+                    {initialIntakeFocus && (
+                      <p
+                        role="alert"
+                        data-testid="initial-missing-step"
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-900"
+                      >
+                        Faltan datos esenciales: {initialIntakeFocus.missing.join(', ')}. Completa el paso {initialIntakeFocus.step} y vuelve a generar.
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-3.5 text-xs text-slate-800">
@@ -2773,7 +2790,7 @@ export default function MachotesPage() {
                             label="Materia"
                             value={initialForm.materia}
                             options={MATTERS.map((m) => ({ value: m.value, label: m.label }))}
-                            onChange={(v) => setInitialForm((prev) => ({ ...prev, materia: v }))}
+                            onChange={(v) => { setInitialIntakeFocus(null); setInitialForm((prev) => ({ ...prev, materia: v })); }}
                             customValue={initialForm.materiaCustom}
                             onCustomChange={(v) => setInitialForm((prev) => ({ ...prev, materiaCustom: sanitizeCustomValue(v) || v.slice(0, CUSTOM_VALUE_MAX_LENGTH) }))}
                           />
@@ -2789,7 +2806,7 @@ export default function MachotesPage() {
                             label="Tipo de Escrito"
                             value={initialForm.tipoEscrito}
                             options={getInitialWritingDocumentOptions({ includeUncertifiedDrafts: showUncertifiedInitialTypes }).map((d) => ({ value: d.value, label: d.label }))}
-                        onChange={(v) => setInitialForm((prev) => ({ ...prev, tipoEscrito: v }))}
+                        onChange={(v) => { setInitialIntakeFocus(null); setInitialForm((prev) => ({ ...prev, tipoEscrito: v })); }}
                         customValue={initialForm.tipoEscritoCustom}
                         onCustomChange={(v) => setInitialForm((prev) => ({ ...prev, tipoEscritoCustom: sanitizeCustomValue(v) || v.slice(0, CUSTOM_VALUE_MAX_LENGTH) }))}
                       />
@@ -2863,7 +2880,7 @@ export default function MachotesPage() {
                           <textarea
                             rows={3}
                             value={initialForm.pretensiones}
-                            onChange={(e) => setInitialForm((prev) => ({ ...prev, pretensiones: e.target.value }))}
+                            onChange={(e) => { setInitialIntakeFocus(null); setInitialForm((prev) => ({ ...prev, pretensiones: e.target.value })); }}
                             placeholder="Indica qué solicitas o cuál es el acto impugnado..."
                             className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-[#0B2545]"
                           />
