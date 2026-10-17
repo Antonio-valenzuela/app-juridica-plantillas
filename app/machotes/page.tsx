@@ -3657,7 +3657,6 @@ export default function MachotesPage() {
                 onSelectSection={(sec) => setActiveSection(sec)}
                 isGenerating={isUniversalGenerating}
                 pipelineStageLabel={generatingStage ? `Fase: ${generatingStage.label}` : undefined}
-                onTriggerNewDraftModal={() => setIsDraftGeneratorOpen(true)}
                 onTriggerUpload={() => fileInputHiddenRef.current?.click()}
                 onFormatDocument={handleFormatDocument}
                 isFormatting={isFormatting}

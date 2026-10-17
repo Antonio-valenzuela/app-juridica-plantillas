@@ -26,7 +26,6 @@ interface WorkspaceDocumentEditorProps {
   onSelectTextHighlight?: (text: string) => void;
   isGenerating?: boolean;
   pipelineStageLabel?: string;
-  onTriggerNewDraftModal?: () => void;
   onTriggerUpload?: () => void;
   /** Acción global "Formatear documento" (vive en esta toolbar consolidada). */
   onFormatDocument?: () => void;
