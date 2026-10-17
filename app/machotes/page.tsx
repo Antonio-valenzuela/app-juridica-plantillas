@@ -2595,10 +2595,11 @@ export default function MachotesPage() {
       )}
 
       {/* BARRA GLOBAL DE GENERACIÓN — persiste al cambiar de pestaña (P6) */}
-      {(isUniversalGenerating || uploadProgress) && (
+      {/* QA-FUNCIONAL (cancelación): la barra también permanece montada para mostrar el estado «cancelled» antes de desmontarse (page.tsx 493-505). */}
+      {(isUniversalGenerating || uploadProgress || activeGenJob?.status === 'cancelled') && (
         <div className="sticky top-2 z-30 mx-4 mt-2">
           <GenerationStatusBar
-            job={isUniversalGenerating ? activeGenJob : uploadProgress}
+            job={isUniversalGenerating || activeGenJob?.status === 'cancelled' ? activeGenJob : uploadProgress}
             title={isUniversalGenerating ? 'Generando escrito jurídico…' : 'Procesando documento fuente…'}
             onCancel={isUniversalGenerating ? handleCancelGeneration : undefined}
             cancelling={isCancelling}
