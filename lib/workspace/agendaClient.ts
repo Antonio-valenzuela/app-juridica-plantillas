@@ -1,14 +1,9 @@
 'use client';
-import { extractAgendaEvents, hasDesktopWorkspaceCapability, readAgendaEvents, synchronizeDocumentAgenda, writeAgendaEvents,
+import { extractAgendaEvents, readAgendaEvents, synchronizeDocumentAgenda, writeAgendaEvents,
   AGENDA_CHANGED_EVENT, type AgendaExtractionOptions } from './agenda';
 
 /** Durable desktop agenda; WEB retains its existing browser contract. */
 export async function synchronizeWorkspaceAgenda(text: string, options: AgendaExtractionOptions): Promise<void> {
-  // QA-F405: agenda web no disponible — sin capacidad de escritorio solo se actualiza la copia local, sin llamar a la API.
-  if (!hasDesktopWorkspaceCapability()) {
-    writeAgendaEvents(synchronizeDocumentAgenda(readAgendaEvents(), options.documentId, extractAgendaEvents(text, options)));
-    return;
-  }
   const response = await fetch('/api/workspace/agenda', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'SYNC_DOCUMENT', text, ...options }) });
   if ([401, 405].includes(response.status)) {
