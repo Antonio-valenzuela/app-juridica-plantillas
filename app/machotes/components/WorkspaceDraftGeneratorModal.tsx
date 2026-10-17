@@ -118,6 +118,16 @@ export function WorkspaceDraftGeneratorModal({
     return () => { cancelled = true; };
   }, [isOpen]);
 
+  // Esc cierra igual que el botón ✕ (mismo contrato que «Opciones de redacción»).
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onCloseRef.current(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const presets =
@@ -186,38 +196,40 @@ export function WorkspaceDraftGeneratorModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[1001] flex items-center justify-center p-4 select-none">
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 font-sans">
-        {/* Cabecera del Modal */}
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-[#fbf9f5]">
+    <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="lex-modal" role="dialog" aria-modal="true" aria-labelledby="draft-generator-title">
+        {/* Cabecera del Modal: mismo estilo que «Opciones de redacción» */}
+        <header className="lex-modal-header">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-[#0B2545] text-white flex items-center justify-center text-xl shadow-md">
               {tabMode === 'initial_writings' ? '📝' : tabMode === 'responses_resources' ? '⚖️' : '⚙️'}
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-[#0B2545]">
+              <h2 id="draft-generator-title" className="lex-modal-title">
                 {tabMode === 'initial_writings'
                   ? 'Redactar Escrito Inicial / Demanda'
                   : tabMode === 'responses_resources'
                   ? 'Generar Contestación o Recurso'
                   : 'Motor Universal de Redacción Jurídica'}
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="lex-help">
                 Sube expediente → Selecciona estrategia y machote → Genera borrador adaptado
               </p>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-700 flex items-center justify-center font-bold text-sm"
+            className="lex-modal-close"
+            aria-label="Cerrar"
           >
-            ✕
+            ×
           </button>
-        </div>
+        </header>
 
         {/* Cuerpo del Modal */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+        <div className="lex-modal-body space-y-6">
           {aiDisclosure?.externalTransfer && (
             <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950">
               <p className="font-extrabold">Aviso operativo sobre proveedores de IA</p>
@@ -431,12 +443,13 @@ export function WorkspaceDraftGeneratorModal({
         </div>
 
         {/* Pie del Modal: progreso real + Botón Generar */}
-        <div className="p-5 border-t border-slate-100 bg-[#fbf9f5] space-y-3">
+        <footer className="lex-modal-footer lex-modal-footer-stack">
           <PageTargetSelector value={pageTarget} onChange={setPageTarget} disabled={isGenerating} />
           <div className="flex items-center justify-between">
           <button
+            type="button"
             onClick={onClose}
-            className="py-2 px-4 rounded-xl bg-white border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 transition"
+            className="lex-button lex-button-secondary"
           >
             Cancelar
           </button>
@@ -460,7 +473,7 @@ export function WorkspaceDraftGeneratorModal({
             )}
           </button>
           </div>
-        </div>
+        </footer>
       </div>
     </div>
   );

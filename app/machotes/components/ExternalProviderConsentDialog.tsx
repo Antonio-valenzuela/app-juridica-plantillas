@@ -84,13 +84,15 @@ function ExternalProviderConsentDialog({ onAnswer }: { onAnswer: (value: boolean
   const names = providers.map((id) => PROVIDER_NAMES[id] || id);
   const noRemote = check.status === 'ready' && providers.length === 0;
 
-  return <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/50 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onAnswer(false); }}>
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="external-consent-title" aria-describedby="external-consent-body" data-testid="external-provider-consent" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-      <p className="text-[11px] font-bold uppercase tracking-[.16em] text-[#B58A5A]">Privacidad del expediente</p>
-      <h2 id="external-consent-title" className="mt-1 !mb-0 !text-xl !leading-tight font-extrabold text-[#0B2545]">
+  return <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onAnswer(false); }}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="external-consent-title" aria-describedby="external-consent-body" data-testid="external-provider-consent" className="lex-modal">
+      <header className="lex-modal-header"><div>
+      <p className="lex-modal-eyebrow">Privacidad del expediente</p>
+      <h2 id="external-consent-title" className="lex-modal-title">
         {noRemote ? 'No hay IA en la nube configurada' : '¿Autorizas enviar el expediente a un proveedor externo?'}
       </h2>
-      <div id="external-consent-body" className="mt-3 space-y-2 text-sm leading-relaxed text-slate-700">
+      </div></header>
+      <div id="external-consent-body" className="lex-modal-body space-y-2 text-sm leading-relaxed text-slate-700">
         {check.status === 'loading' && <p aria-live="polite">Comprobando qué proveedores están configurados…</p>}
         {check.status === 'error' && <p role="alert">No se pudo comprobar qué proveedores están configurados. No se enviará nada; vuelve a intentarlo.</p>}
         {noRemote && <p data-testid="external-consent-no-remote">Si continúas, el borrador se arma solo con reglas locales: no se envía nada fuera de este equipo y lo que requiera redacción quedará marcado para tu revisión.</p>}
@@ -104,17 +106,17 @@ function ExternalProviderConsentDialog({ onAnswer }: { onAnswer: (value: boolean
           </ul>
         </>}
       </div>
-      <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <button ref={cancelRef} type="button" onClick={() => onAnswer(false)} className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-bold text-[#0B2545] hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">No enviar</button>
+      <footer className="lex-modal-footer">
+        <button ref={cancelRef} type="button" onClick={() => onAnswer(false)} className="lex-button lex-button-secondary">No enviar</button>
         <button
           type="button"
           disabled={check.status !== 'ready'}
           onClick={() => onAnswer(true, providers)}
-          className="min-h-11 rounded-xl bg-[#0B2545] px-4 text-sm font-bold text-white hover:bg-[#13335c] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="lex-button lex-button-primary"
         >
           {noRemote ? 'Continuar sin enviar' : 'Autorizar esta generación'}
         </button>
-      </div>
+      </footer>
     </div>
   </div>;
 }
