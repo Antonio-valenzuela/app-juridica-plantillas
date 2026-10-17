@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import type { WorkspaceCaseSummary } from '@/lib/workspace/cases';
 import type { AgendaEvent } from '@/lib/workspace/agenda';
+import { DetailDrawer } from './DetailDrawer';
 const field = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm';
 const button = 'rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-[#0B2545] disabled:opacity-50';
 async function send(url: string, method: string, body: unknown) {
@@ -17,7 +18,12 @@ function Fields({ definitions, form, onChange }: { definitions: InputDefinition[
       : <input className={field} type={item.type || 'text'} required={item.required} value={form[item.key] || ''} onChange={event => onChange(item.key, event.target.value)} />}
   </label>)}</>;
 }
-export function DesktopCaseManager({ selected, onSaved }: { selected: WorkspaceCaseSummary | null; onSaved: () => void | Promise<void> }) {
+/**
+ * `create`: solo «Nuevo expediente local», con el formulario en su propio panel lateral.
+ * `edit`: solo «Editar expediente…», con el formulario en línea (vive dentro de la ficha, que ya es un panel).
+ * Sin `variant`: ambos botones y formulario en línea, como antes.
+ */
+export function DesktopCaseManager({ selected, onSaved, variant }: { selected: WorkspaceCaseSummary | null; onSaved: () => void | Promise<void>; variant?: 'create' | 'edit' }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [draftIds, setDraftIds] = useState<string[]>([]);
@@ -38,11 +44,7 @@ export function DesktopCaseManager({ selected, onSaved }: { selected: WorkspaceC
     catch (error) { setError(error instanceof Error ? error.message : 'No se pudo guardar el expediente.'); }
     finally { setSaving(false); }
   }
-  return <div className="mb-4 rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap gap-2">
-    <button type="button" className={button} onClick={() => begin(false)}>Nuevo expediente local</button>
-    {selected?.kind === 'LOCAL_CASE' && <button type="button" className={button} onClick={() => begin(true)}>Editar expediente y asociar documentos</button>}</div>
-    {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
-    {editing && <form onSubmit={save} className="mt-4 grid gap-3 md:grid-cols-2">
+  const caseForm = <form onSubmit={save} className="mt-4 grid gap-3 md:grid-cols-2">
       <Fields form={form} onChange={(key, value) => setForm(current => ({ ...current, [key]: value }))} definitions={[
         { key: 'title', label: 'Título del expediente', required: true }, { key: 'expediente', label: 'Número de expediente' },
         { key: 'matter', label: 'Materia del expediente' }, { key: 'jurisdiction', label: 'Jurisdicción del expediente' },
@@ -50,7 +52,14 @@ export function DesktopCaseManager({ selected, onSaved }: { selected: WorkspaceC
       <label className="text-xs font-bold text-slate-600">Borradores asociados<select multiple className={field} value={draftIds}
         onChange={event => setDraftIds(Array.from(event.target.selectedOptions, option => option.value))}>{drafts.map(draft => <option key={draft.id} value={draft.id}>{draft.title}</option>)}</select></label>
       <div className="flex gap-2 md:col-span-2"><button className={button} disabled={saving} type="submit">{saving ? 'Guardando…' : 'Guardar expediente'}</button>
-        <button className={button} type="button" onClick={() => setEditing(false)}>Cancelar</button></div></form>}</div>;
+        <button className={button} type="button" onClick={() => setEditing(false)}>Cancelar</button></div></form>;
+  return <div className={variant === 'edit' ? '' : 'mb-4 rounded-xl border border-slate-200 p-4'}><div className="flex flex-wrap gap-2">
+    {variant !== 'edit' && <button type="button" className={button} onClick={() => begin(false)}>Nuevo expediente local</button>}
+    {variant !== 'create' && selected?.kind === 'LOCAL_CASE' && <button type="button" className={button} onClick={() => begin(true)}>Editar expediente y asociar documentos</button>}</div>
+    {error && !(variant === 'create' && editing) && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
+    {variant === 'create'
+      ? <DetailDrawer open={editing} eyebrow="Expediente local" title="Nuevo expediente local" onClose={() => setEditing(false)}>{error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}{caseForm}</DetailDrawer>
+      : editing && caseForm}</div>;
 }
 export function DesktopAgendaManager({ events, onSaved }: { events: AgendaEvent[]; onSaved: () => void | Promise<void> }) {
   const [editing, setEditing] = useState(false); const [id, setId] = useState<string | null>(null);

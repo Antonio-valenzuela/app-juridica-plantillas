@@ -6558,3 +6558,12 @@ textarea:disabled {
 .appshell-content .machotes-shell .grid {
   margin-bottom: revert-layer;
 }
+
+/* ── Panel lateral de detalle (DetailDrawer) ─────────────────────────────────
+   Mismo sistema visual que .lex-modal (Opciones de redacción); solo cambia la posición: anclado a la derecha. */
+.lex-modal-backdrop.lex-drawer-backdrop { justify-content: flex-end; align-items: stretch; padding: 0; }
+.lex-modal.lex-drawer { width: min(480px, 100%); height: 100dvh; max-height: none; border-width: 0 0 0 1px; border-radius: 0; }
+.lex-drawer .lex-modal-body { display: block; }
+.lex-drawer .lex-modal-body > p { margin: 6px 0 0; font-size: 13px; color: var(--ws-muted); }
+.lex-drawer .lex-modal-body > p:first-child { margin-top: 0; }
+.lex-drawer .lex-modal-body > .lex-button { margin-top: 18px; }

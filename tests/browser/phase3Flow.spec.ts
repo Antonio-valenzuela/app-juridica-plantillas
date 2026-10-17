@@ -297,6 +297,8 @@ test.describe('f. edición, guardado, reapertura y recuperación del borrador', 
     for (let index = 0; index < rows; index += 1) {
       await page.getByRole('row', { name: /Apelación para revisión/ }).nth(index).getByRole('button', { name: 'Abrir ficha' }).click();
       if (await page.getByText(`ID real: ${editedId}`).count()) break;
+      // La ficha es un panel modal (PATRON-DETALLE.md): se cierra antes de abrir la siguiente fila.
+      await page.keyboard.press('Escape');
     }
     await page.getByRole('button', { name: 'Abrir borrador asociado' }).click();
     await expect(page.getByText(/EDICION-E2E-UNO/).first()).toBeVisible({ timeout: 20_000 });
