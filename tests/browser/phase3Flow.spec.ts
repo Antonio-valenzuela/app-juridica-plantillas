@@ -74,6 +74,31 @@ async function openWithPdf(page: Page, buffer: Buffer = autoFamiliarPdf(44), nam
   await page.locator('input[type="file"]').first().setInputFiles({ name, mimeType: 'application/pdf', buffer });
   await expect(page.getByText(/44 páginas ·/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('page-target-selector')).toBeVisible({ timeout: 30_000 });
+  await confirmCaseDossierIfAsked(page);
+}
+
+/**
+ * Contrato vigente desde a4e6aa2: si el escrito exige representación, al cargar la fuente (o cambiar de actuación)
+ * se abre solo el diálogo «Confirma los datos del caso» y Generar queda bloqueado hasta confirmar la ficha.
+ * Se confirma como lo haría el abogado: elige una parte compatible con el rol del escrito y marca la confirmación;
+ * el diálogo se cierra solo al quedar confirmada.
+ */
+async function confirmCaseDossierIfAsked(page: Page) {
+  const dialog = page.getByTestId('requirements-dialog');
+  try { await dialog.waitFor({ state: 'visible', timeout: 5_000 }); } catch { return; }
+  const select = dialog.getByLabel('Parte que representas');
+  const confirm = dialog.getByLabel('Confirmar ficha del caso');
+  const detected = await select.locator('option').evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value).filter((value) => value && value !== '__otra__'));
+  for (const value of detected) {
+    await select.selectOption(value);
+    if (await confirm.isEnabled()) break;
+  }
+  if (!(await confirm.isEnabled())) {
+    await select.selectOption('__otra__');
+    await dialog.getByLabel('Nombre de la parte representada').fill('Parte Representada de Prueba');
+  }
+  await confirm.check();
+  await expect(dialog).toBeHidden();
 }
 
 /**
@@ -85,6 +110,7 @@ async function confirmProposedActuacion(page: Page) {
   await expect(confirm).toBeVisible({ timeout: 15_000 });
   await confirm.click();
   await expect(page.getByTestId('actuacion-confirmed')).toBeVisible();
+  await confirmCaseDossierIfAsked(page);
 }
 
 const docTypeSelect = (page: Page) => page.getByRole('combobox').filter({ has: page.locator('option[value="apelacion_civil"]') });
@@ -116,6 +142,7 @@ test.describe('b. actuación elegida y mensaje de compatibilidad (caso del auto 
     // El sistema sugiere la apelación familiar; elegir otra actuación no se revierte en silencio.
     await expect(select).toHaveValue('apelacion_familiar');
     await select.selectOption('apelacion_civil');
+    await confirmCaseDossierIfAsked(page);
     await expect(select).toHaveValue('apelacion_civil');
     const advisory = page.getByTestId('compatibility-advisory').filter({ hasText: /materia familiar/i });
     await expect(advisory).toBeVisible();
@@ -128,6 +155,7 @@ test.describe('b. actuación elegida y mensaje de compatibilidad (caso del auto 
 
     // Contestar exige la demanda: mensaje concreto de esa actuación y Generar deshabilitado.
     await select.selectOption('contestacion_demanda_civil');
+    await confirmCaseDossierIfAsked(page);
     await expect(select).toHaveValue('contestacion_demanda_civil');
     await expect(page.getByTestId('source-incompatible-notice')).toContainText(/resolución judicial, no una demanda/i);
     await expect(page.getByRole('button', { name: /^Generar contestación/ })).toBeDisabled();
@@ -136,6 +164,7 @@ test.describe('b. actuación elegida y mensaje de compatibilidad (caso del auto 
 
     // Volver a la variante familiar: sin aviso de materia y de nuevo habilitado.
     await select.selectOption('apelacion_familiar');
+    await confirmCaseDossierIfAsked(page);
     await expect(page.getByTestId('compatibility-advisory').filter({ hasText: /materia familiar/i })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Generar apelación/ })).toBeEnabled();
   });
@@ -166,7 +195,7 @@ test.describe('c. selector de extensión', () => {
     await openWithPdf(page);
 
     await pageTargetLabel(page, 'Personalizado').click();
-    const custom = page.getByLabel('Objetivo de páginas');
+    const custom = page.getByRole('spinbutton', { name: 'Objetivo de páginas' });
     await expect(custom).toBeVisible();
     for (const invalid of ['1', '100', '2.5']) {
       await custom.fill(invalid);
@@ -183,8 +212,9 @@ test.describe('c. selector de extensión', () => {
     await page.waitForTimeout(1500);
     await page.locator('input[type="file"]').first().setInputFiles({ name: 'auto-familiar-44.pdf', mimeType: 'application/pdf', buffer: autoFamiliarPdf(44) });
     await expect(page.getByTestId('page-target-selector')).toBeVisible({ timeout: 30_000 });
+    await confirmCaseDossierIfAsked(page);
     await expect(page.getByRole('radio', { name: /Personalizado/ })).toBeChecked();
-    await expect(page.getByLabel('Objetivo de páginas')).toHaveValue('33');
+    await expect(page.getByRole('spinbutton', { name: 'Objetivo de páginas' })).toHaveValue('33');
 
     // El parámetro viaja al servidor tal como se eligió.
     await confirmProposedActuacion(page);
