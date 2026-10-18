@@ -20,13 +20,13 @@ function makeDocument(extraFact?: string) {
     documentType: 'escrito_libre',
     documentTypeLabel: 'Escrito libre',
     sections: [
-      createDocumentNode({ id: 'proemio', title: 'PROEMIO Y COMPARECENCIA', type: 'identity', content: [block('b1', 'María López comparece en el expediente 812/2026 con la personalidad debidamente acreditada para exponer lo siguiente.')] }),
+      createDocumentNode({ id: 'proemio', order: 10, title: 'PROEMIO Y COMPARECENCIA', type: 'identity', content: [block('b1', 'María López comparece en el expediente 812/2026 con la personalidad debidamente acreditada para exponer lo siguiente.')] }),
       createDocumentNode({
-        id: 'hechos', title: 'HECHOS', type: 'facts',
+        id: 'hechos', order: 20, title: 'HECHOS', type: 'facts',
         content: [block('b2', 'El 3 de marzo de 2026 la actora entregó el inmueble arrendado a la demandada sin objeción alguna.'), ...(extraFact ? [block('b3', extraFact)] : [])],
       }),
-      createDocumentNode({ id: 'petitorios', title: 'PUNTOS PETITORIOS', type: 'petition', content: [block('b4', 'PRIMERO. Tenerme por presentado en tiempo y forma. SEGUNDO. Proveer de conformidad con lo solicitado.')] }),
-      createDocumentNode({ id: 'firma', title: 'FIRMA', type: 'signature', content: [block('b5', 'PROTESTO LO NECESARIO EN DERECHO. CIUDAD DE MÉXICO A LA FECHA DE SU PRESENTACIÓN.')] }),
+      createDocumentNode({ id: 'petitorios', order: 30, title: 'PUNTOS PETITORIOS', type: 'petition', content: [block('b4', 'PRIMERO. Tenerme por presentado en tiempo y forma. SEGUNDO. Proveer de conformidad con lo solicitado.')] }),
+      createDocumentNode({ id: 'firma', order: 40, title: 'FIRMA', type: 'signature', content: [block('b5', 'PROTESTO LO NECESARIO EN DERECHO. CIUDAD DE MÉXICO A LA FECHA DE SU PRESENTACIÓN.')] }),
     ],
     generationMetadata: { ...createEmptyDocument().generationMetadata, preflight: { status: 'READY', missingFields: [] } } as never,
   });
