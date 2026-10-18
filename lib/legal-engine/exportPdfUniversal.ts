@@ -17,6 +17,7 @@ import {
   markExportManifestRecorded,
 } from './exportArtifactTypes';
 import type { ExportArtifact } from './exportArtifactTypes';
+import type { MoldPdfSettings } from '../templates/docxMold';
 import type {
   ExportRenderModel,
   RenderParagraph,
@@ -736,6 +737,48 @@ export const exportUniversalToPdf = async (
   const artifact = await renderPdf(model, {
     format: 'pdf',
     pageProfile: resolvePdfPageProfile(),
+    lawyerProfile: DEFAULT_LAWYER_PROFILE,
+  });
+  if (trace) {
+    trace.exportManifest = markExportManifestRecorded(artifact.manifest);
+    recordExportWordCounts(trace, artifact.manifest);
+  }
+  return Buffer.from(artifact.bytes);
+};
+
+function withMoldTypography(model: ExportRenderModel, settings: MoldPdfSettings): ExportRenderModel {
+  const restyle = (paragraph: RenderParagraph): RenderParagraph => paragraph.role === 'HEADER' || paragraph.role === 'FOOTER'
+    ? paragraph
+    : {
+      ...paragraph,
+      style: {
+        ...paragraph.style,
+        fontSize: `${paragraph.role === 'TITLE' ? settings.fontSizePt + 1 : settings.fontSizePt}pt`,
+        lineHeight: String(settings.lineHeight),
+      },
+    };
+  return {
+    ...model,
+    header: model.header.map(restyle),
+    footer: model.footer.map(restyle),
+    sections: model.sections.map((section) => ({ ...section, paragraphs: section.paragraphs.map(restyle) })),
+  };
+}
+
+/** PDF aproximado: mismos márgenes, tamaño de letra e interlineado del molde del abogado. */
+export const exportUniversalToPdfWithMold = async (
+  docData: UniversalLegalDocument,
+  settings: MoldPdfSettings,
+  trace?: GenerationTrace,
+  exportOptions: PrepareUniversalDocumentForExportOptions = {},
+): Promise<Buffer> => {
+  const prepared = await prepareUniversalDocumentForExport(docData, exportOptions);
+  const exportValidation = validateForExport(prepared.document);
+  const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation, exportOptions);
+  const model = withMoldTypography(materializePreparedFinalDocument(verified), settings);
+  const artifact = await renderPdf(model, {
+    format: 'pdf',
+    pageProfile: resolvePdfPageProfile({ serverOption: settings.pageProfile }),
     lawyerProfile: DEFAULT_LAWYER_PROFILE,
   });
   if (trace) {

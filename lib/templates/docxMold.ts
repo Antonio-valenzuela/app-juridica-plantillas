@@ -411,15 +411,13 @@ export async function renderWithDocxMold(
 /* ── Perfil para el PDF aproximado ───────────────────────────────────────── */
 
 export interface MoldPdfSettings {
-  pageProfile: { id: string; unit: 'pt'; width: number; height: number; margins: { top: number; right: number; bottom: number; left: number }; source: 'SERVER_OPTION' };
+  /** Forma aceptada por resolvePdfPageProfile({ serverOption }). */
+  pageProfile: { id: string; unit: 'pt'; width: number; height: number; margins: { top: number; right: number; bottom: number; left: number } };
   fontSizePt: number;
   lineHeight: number;
-  family: 'serif' | 'sans';
   fidelity: 'EXACT' | 'APPROXIMATE';
   warnings: string[];
 }
-
-const SANS_FONTS = /(arial|helvetica|calibri|verdana|tahoma|segoe|open sans|roboto|aptos)/i;
 
 const pt = (twips: number) => Math.round((twips / 20) * 100) / 100;
 
@@ -427,9 +425,8 @@ const pt = (twips: number) => Math.round((twips / 20) * 100) / 100;
 export function moldPdfSettings(inspection: DocxMoldInspection, fidelity: 'EXACT' | 'APPROXIMATE' = 'APPROXIMATE'): MoldPdfSettings {
   const { page, typography } = inspection;
   const warnings = ['El PDF aproxima el diseño de tu plantilla: iguala tamaño de página, márgenes, tamaño de letra e interlineado.'];
-  const family: 'serif' | 'sans' = typography.fontName && SANS_FONTS.test(typography.fontName) ? 'sans' : 'serif';
-  if (typography.fontName) {
-    warnings.push(`El PDF usa ${family === 'sans' ? 'Helvetica' : 'Times'} en lugar de «${typography.fontName}».`);
+  if (typography.fontName && !/^times/i.test(typography.fontName)) {
+    warnings.push(`El PDF usa Times en lugar de «${typography.fontName}»; el Word sí conserva tu fuente.`);
   }
   if (inspection.hasHeaderFooterImages) warnings.push('El PDF no incluye las imágenes del membrete (logotipo) de tu plantilla; el Word sí las conserva.');
   return {
@@ -439,11 +436,9 @@ export function moldPdfSettings(inspection: DocxMoldInspection, fidelity: 'EXACT
       width: pt(page.width),
       height: pt(page.height),
       margins: { top: pt(page.margins.top), right: pt(page.margins.right), bottom: pt(page.margins.bottom), left: pt(page.margins.left) },
-      source: 'SERVER_OPTION',
     },
     fontSizePt: typography.fontSizePt,
     lineHeight: typography.lineHeight,
-    family,
     fidelity,
     warnings,
   };

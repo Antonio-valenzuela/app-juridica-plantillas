@@ -168,6 +168,40 @@ describe('motor universal de documentos', () => {
     expect(result.generationMetadata.provenance).toContain('TEMPLATE_STRUCTURE');
   });
 
+  it('redacta de nuevo las secciones sustantivas sin entregar el texto de la plantilla al generador', async () => {
+    const workflow = buildCaseWorkflow({
+      sourceDocuments: [fullSource],
+      analysis: { facts: [], missingData: [] },
+      generationMode: 'personal_template',
+      templateId: 'template-familiar',
+    });
+    const historicalTemplate = [
+      'CONTESTACIÓN FAMILIAR DE MODELO',
+      'HECHOS',
+      `El cliente histórico ${CANARY_CLIENTE}, expediente ${EXPEDIENTE_TEST_ID}, solicita alimentos.`,
+      'Desarrollo argumentativo del modelo para conservar su forma y extensión. '.repeat(12),
+      'PETITORIOS',
+      'PRIMERO. Tenerme por presentado y acordar de conformidad lo solicitado.',
+    ].join('\n');
+    const received: string[] = [];
+
+    await runGenerationPipeline({
+      workflow,
+      sourceDocuments: [fullSource],
+      referenceDocumentText: historicalTemplate,
+      documentTypeLabel: 'Contestación de Demanda',
+      userInstruction: 'Genera la contestación del caso nuevo',
+      generateSection: async ({ section }) => {
+        received.push(section.content.map((block) => block.text).join('\n'));
+        return 'Contenido del caso nuevo.';
+      },
+    });
+
+    expect(received.length).toBeGreaterThan(0);
+    expect(received.join('\n')).not.toContain(CANARY_CLIENTE);
+    expect(received.join('\n')).not.toContain(EXPEDIENTE_TEST_ID);
+  });
+
   it('transporta todos los hechos numerados al plan de redacción sin truncarlos', async () => {
     const result = await runGenerationPipeline({
       sourceDocuments: [fullSource],

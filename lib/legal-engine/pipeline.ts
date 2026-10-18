@@ -54,6 +54,7 @@ import { evaluateSourceOutputCompatibility, inferSourceOutputType, type SourceOu
 import type { InferredSourceDocumentType } from './sourceDocumentTypes';
 import { getDocumentTypeByValue, resolveMatterLabel, resolveJurisdictionLabel, resolveDocumentTypeLabel, serializeTaxonomyForPipeline } from '@/lib/legal-taxonomy';
 import { renderPersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
+import { resolveSectionKind, type TemplateSectionKind } from '@/lib/templates/sectionKind';
 import { buildCarryoverBlocklist, CARRYOVER_FINDING_CODE, describeCarryover, filterCarryoverText } from '@/lib/templates/carryoverFilter';
 import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
@@ -3307,7 +3308,32 @@ export async function generateSection(
   // its order, formulas and depth, replacing only semantic fields for the new
   // matter. The style profile remains the fallback for generated documents;
   // it must not overwrite an explicitly selected personal template.
-  if (doc.generationMetadata.generationMode === 'personal_template') {
+  const personalTemplateText = sec.content?.map((content) => content.text).join('\n\n') || '';
+  const personalSectionKind = doc.generationMetadata.generationMode === 'personal_template'
+    ? resolveSectionKind(
+      { title: sec.title, text: personalTemplateText, index: doc.sections.findIndex((s) => s.id === sectionId), total: doc.sections.length },
+      (doc.generationMetadata as { templateSectionKinds?: Record<string, TemplateSectionKind> }).templateSectionKinds,
+    )
+    : undefined;
+  // Sección sustantiva: el texto de la plantilla solo aporta forma; se redacta de nuevo con los datos
+  // del caso nuevo por la ruta normal (admisión, control fáctico y citas siguen aplicando).
+  if (personalSectionKind === 'SUSTANTIVA') {
+    const templateWords = personalTemplateText.split(/\s+/).filter(Boolean).length;
+    sec.content = [{
+      id: `blk-${sec.id}`,
+      text: '',
+      layer: 'GENERATED_ARGUMENT',
+      trustLevel: 'AI_INFERENCE',
+      provenance: 'AI_GENERATED',
+      generationStatus: 'pending',
+      generationRequirement: 'AI_REQUIRED',
+    }];
+    if (templateWords > 0) {
+      instruction = [instruction, `Estilo de la plantilla del abogado: extensión aproximada de ${templateWords} palabras; conserva su tono y estructura de párrafos. Usa únicamente los datos del caso nuevo.`]
+        .filter(Boolean).join('\n');
+    }
+  }
+  if (personalSectionKind === 'FORMULA' || (personalSectionKind === 'SUSTANTIVA' && customGenerator)) {
     if (customGenerator) {
       const customText = await customGenerator({ section: sec, doc });
       const sanitized = sanitizeGeneratedText(String(customText));
