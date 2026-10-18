@@ -166,3 +166,13 @@ Capturas antes/después a 1440 y 1024 px: `audit/patron-detalle/{lote-1,computo,
 **Fuera de alcance (hallazgos):**
 - `tests/browser/phase3Flow.spec.ts` (9 de 11 pruebas) ya fallaba **sin estos cambios**: tras subir el PDF se abre automáticamente `RequirementsDialog` («Confirma los datos del caso»), que intercepta los clics de la prueba. Se verificó ejecutando la prueba «44 páginas» con los archivos previos al lote.
 - Barra lateral inaccesible entre 981 y 1180 px: el diff propuesto está en `audit/barra-1180/nav.proposed.diff` y **no se aplicó**.
+
+## Expedientes: versiones agrupadas (solo presentación)
+
+- `app/machotes/lib/caseVersions.ts` (`groupCaseVersions`) agrupa los borradores que comparten el escrito (el título sin la fecha final), el expediente y la materia. La fila muestra la versión más reciente y la etiqueta «N versiones». Nunca agrupa borradores sin expediente ni expedientes locales.
+- Al abrir la ficha aparece «Versiones (N)», con fecha y hora de cada versión: «Ver ficha» cambia la ficha mostrada y «Abrir» abre ese borrador (`onOpenCase` con su ID). No se borra, une ni modifica ningún dato; el contador «N asuntos persistidos» sigue contando todos.
+- Con los datos actuales de `:3200`, 12 borradores quedan en 6 filas: 800/2024 con 5 versiones, 287/2007 con 2 y 1152/2013 con 2. Capturas en `audit/patron-detalle/versiones/` (antes y después, a 1440 y 1024 px).
+
+## phase3Flow
+
+Se actualizó la prueba, sin tocar la app. Ahora confirma «Confirma los datos del caso» tras cargar la fuente o cambiar de actuación, y localiza el campo numérico por rol, porque el radio «Personalizado» también menciona «objetivo de páginas». Resultado: 11/11.
