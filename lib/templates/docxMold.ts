@@ -41,8 +41,24 @@ export interface MoldTypography {
   lineHeight: number;
 }
 
+export interface MoldImage {
+  name: string;
+  data: Uint8Array;
+  mime: 'image/png' | 'image/jpeg';
+  widthPt: number;
+  heightPt: number;
+  align: 'left' | 'center' | 'right';
+}
+
 export interface DocxMoldInspection {
   page: MoldPage;
+  /** Distancia del encabezado/pie al borde de la hoja, en puntos. */
+  headerDistancePt: number;
+  footerDistancePt: number;
+  headerImages: MoldImage[];
+  footerImages: MoldImage[];
+  /** Imágenes de membrete en formatos que el PDF no puede incluir (EMF, GIF…). */
+  unsupportedImages: string[];
   typography: MoldTypography;
   headerTexts: string[];
   footerTexts: string[];
@@ -238,6 +254,82 @@ async function headerFooterTexts(zip: JSZip, kind: 'header' | 'footer'): Promise
   return { texts, images };
 }
 
+const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const DML = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const EMU_PER_PT = 12700;
+
+function relAttr(el: El, name: string): string | null {
+  return el.getAttributeNS(REL, name) ?? el.getAttribute(`r:${name}`);
+}
+
+async function relationshipTargets(zip: JSZip, relsPath: string): Promise<Map<string, string>> {
+  const targets = new Map<string, string>();
+  const rels = await readXml(zip, relsPath);
+  if (!rels) return targets;
+  for (const rel of Array.from(rels.getElementsByTagName('Relationship'))) {
+    const id = rel.getAttribute('Id');
+    const target = rel.getAttribute('Target');
+    if (id && target) targets.set(id, target);
+  }
+  return targets;
+}
+
+function resolvePart(base: string, target: string): string {
+  if (target.startsWith('/')) return target.slice(1);
+  const parts = base.split('/').slice(0, -1);
+  for (const segment of target.split('/')) {
+    if (segment === '..') parts.pop();
+    else if (segment && segment !== '.') parts.push(segment);
+  }
+  return parts.join('/');
+}
+
+async function readHeaderFooterImages(
+  zip: JSZip,
+  sectPr: El | null,
+  kind: 'header' | 'footer',
+  unsupported: string[],
+): Promise<MoldImage[]> {
+  if (!sectPr) return [];
+  const reference = children(sectPr, `${kind}Reference`).find((ref) => (attr(ref, 'type') || 'default') === 'default');
+  const relId = reference ? relAttr(reference, 'id') : null;
+  if (!relId) return [];
+  const documentTargets = await relationshipTargets(zip, 'word/_rels/document.xml.rels');
+  const target = documentTargets.get(relId);
+  if (!target) return [];
+  const partPath = resolvePart('word/document.xml', target);
+  const part = await readXml(zip, partPath);
+  if (!part) return [];
+  const partRels = await relationshipTargets(zip, `${partPath.replace(/[^/]+$/, '')}_rels/${partPath.split('/').pop()}.rels`);
+
+  const images: MoldImage[] = [];
+  for (const drawing of descendants(part, 'drawing')) {
+    const extent = drawing.getElementsByTagNameNS(WP, 'extent')[0] as El | undefined;
+    const blip = drawing.getElementsByTagNameNS(DML, 'blip')[0] as El | undefined;
+    const embed = blip ? relAttr(blip, 'embed') : null;
+    const imageTarget = embed ? partRels.get(embed) : undefined;
+    if (!extent || !imageTarget) continue;
+    const imagePath = resolvePart(partPath, imageTarget);
+    const extension = imagePath.split('.').pop()?.toLowerCase() || '';
+    const mime = extension === 'png' ? 'image/png' : extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : null;
+    const file = zip.file(imagePath);
+    if (!mime || !file) {
+      unsupported.push(imagePath.split('/').pop() || imagePath);
+      continue;
+    }
+    const widthPt = Number(extent.getAttribute('cx')) / EMU_PER_PT;
+    const heightPt = Number(extent.getAttribute('cy')) / EMU_PER_PT;
+    if (!Number.isFinite(widthPt) || !Number.isFinite(heightPt) || widthPt <= 0 || heightPt <= 0) continue;
+    let paragraph: Node | null = drawing.parentNode;
+    while (paragraph && (paragraph as El).localName !== 'p') paragraph = paragraph.parentNode;
+    const jc = paragraph ? attr(children(children(paragraph, 'pPr')[0] || (paragraph as El), 'jc')[0], 'val') : null;
+    const align = jc === 'center' ? 'center' : jc === 'right' || jc === 'end' ? 'right' : 'left';
+    images.push({ name: imagePath.split('/').pop() || imagePath, data: await file.async('uint8array'), mime, widthPt, heightPt, align });
+  }
+  return images;
+}
+
 export async function inspectDocxMold(bytes: Uint8Array | Buffer): Promise<DocxMoldInspection> {
   const mold = await loadMold(bytes);
   const pgSz = mold.sectPr ? children(mold.sectPr, 'pgSz')[0] : undefined;
@@ -246,7 +338,15 @@ export async function inspectDocxMold(bytes: Uint8Array | Buffer): Promise<DocxM
   const height = twipAttr(pgSz, 'h', 15840);
   const header = await headerFooterTexts(mold.zip, 'header');
   const footer = await headerFooterTexts(mold.zip, 'footer');
+  const unsupportedImages: string[] = [];
+  const headerImages = await readHeaderFooterImages(mold.zip, mold.sectPr, 'header', unsupportedImages);
+  const footerImages = await readHeaderFooterImages(mold.zip, mold.sectPr, 'footer', unsupportedImages);
   return {
+    headerDistancePt: twipAttr(pgMar, 'header', 720) / 20,
+    footerDistancePt: twipAttr(pgMar, 'footer', 720) / 20,
+    headerImages,
+    footerImages,
+    unsupportedImages,
     page: {
       width,
       height,
@@ -410,25 +510,61 @@ export async function renderWithDocxMold(
 
 /* ── Perfil para el PDF aproximado ───────────────────────────────────────── */
 
+export type PdfFontFamily = 'serif' | 'sans' | 'mono';
+
 export interface MoldPdfSettings {
   /** Forma aceptada por resolvePdfPageProfile({ serverOption }). */
   pageProfile: { id: string; unit: 'pt'; width: number; height: number; margins: { top: number; right: number; bottom: number; left: number } };
   fontSizePt: number;
   lineHeight: number;
+  /** Familia estándar del PDF (Times, Helvetica o Courier) más cercana a la fuente de la plantilla. */
+  family: PdfFontFamily;
+  headerImages: MoldImage[];
+  footerImages: MoldImage[];
+  headerDistancePt: number;
+  footerDistancePt: number;
   fidelity: 'EXACT' | 'APPROXIMATE';
   warnings: string[];
 }
 
 const pt = (twips: number) => Math.round((twips / 20) * 100) / 100;
 
-/** Márgenes, tamaño, tipografía e interlineado del molde para el renderer PDF; avisa lo que no puede igualar. */
+const STANDARD_FONTS: Array<{ pattern: RegExp; family: PdfFontFamily; label: string }> = [
+  { pattern: /^(times new roman|times)$/i, family: 'serif', label: 'Times' },
+  { pattern: /^(arial|helvetica)$/i, family: 'sans', label: 'Helvetica' },
+  { pattern: /^(courier new|courier)$/i, family: 'mono', label: 'Courier' },
+];
+const SERIF_HINT = /(garamond|georgia|cambria|book antiqua|palatino|century|minion|baskerville|bookman|serif|didot|caslon|constantia)/i;
+const MONO_HINT = /(consolas|mono|lucida console|menlo|monaco|courier)/i;
+const SANS_HINT = /(calibri|verdana|tahoma|segoe|open sans|roboto|aptos|trebuchet|lato|gill sans|franklin|sans|helvetica|arial)/i;
+
+const FAMILY_LABEL: Record<PdfFontFamily, string> = { serif: 'Times', sans: 'Helvetica', mono: 'Courier' };
+
+/** Fuente estándar exacta, o la familia más cercana (serif equivalente para Garamond, etc.). */
+export function pdfFontFor(fontName: string | null): { family: PdfFontFamily; exact: boolean } {
+  if (!fontName) return { family: 'serif', exact: true };
+  const standard = STANDARD_FONTS.find((font) => font.pattern.test(fontName.trim()));
+  if (standard) return { family: standard.family, exact: true };
+  if (MONO_HINT.test(fontName)) return { family: 'mono', exact: false };
+  if (SERIF_HINT.test(fontName)) return { family: 'serif', exact: false };
+  if (SANS_HINT.test(fontName)) return { family: 'sans', exact: false };
+  return { family: 'serif', exact: false };
+}
+
+/** Márgenes, tipografía, interlineado e imágenes del molde para el renderer PDF; avisa lo que no puede igualar. */
 export function moldPdfSettings(inspection: DocxMoldInspection, fidelity: 'EXACT' | 'APPROXIMATE' = 'APPROXIMATE'): MoldPdfSettings {
   const { page, typography } = inspection;
-  const warnings = ['El PDF aproxima el diseño de tu plantilla: iguala tamaño de página, márgenes, tamaño de letra e interlineado.'];
-  if (typography.fontName && !/^times/i.test(typography.fontName)) {
-    warnings.push(`El PDF usa Times en lugar de «${typography.fontName}»; el Word sí conserva tu fuente.`);
+  const warnings = ['El PDF aproxima el diseño de tu plantilla: iguala tamaño de página, márgenes, tamaño de letra, interlineado e imágenes del membrete.'];
+  const font = pdfFontFor(typography.fontName);
+  if (typography.fontName && !font.exact) {
+    warnings.push(`El PDF usa ${FAMILY_LABEL[font.family]} (la fuente estándar más cercana) en lugar de «${typography.fontName}»; el Word sí conserva tu fuente.`);
   }
-  if (inspection.hasHeaderFooterImages) warnings.push('El PDF no incluye las imágenes del membrete (logotipo) de tu plantilla; el Word sí las conserva.');
+  if (inspection.unsupportedImages.length > 0) {
+    warnings.push(`El PDF no incluye estas imágenes del membrete por su formato: ${inspection.unsupportedImages.join(', ')}; el Word sí las conserva.`);
+  }
+  if (inspection.headerTexts.length > 0 || inspection.footerTexts.length > 0) {
+    warnings.push('El PDF no reproduce el texto del encabezado y pie de tu plantilla (solo sus imágenes); el Word sí lo conserva.');
+  }
   return {
     pageProfile: {
       id: 'pdf-lawyer-mold',
@@ -439,6 +575,11 @@ export function moldPdfSettings(inspection: DocxMoldInspection, fidelity: 'EXACT
     },
     fontSizePt: typography.fontSizePt,
     lineHeight: typography.lineHeight,
+    family: font.family,
+    headerImages: inspection.headerImages,
+    footerImages: inspection.footerImages,
+    headerDistancePt: inspection.headerDistancePt,
+    footerDistancePt: inspection.footerDistancePt,
     fidelity,
     warnings,
   };

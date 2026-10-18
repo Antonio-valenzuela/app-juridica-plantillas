@@ -7,15 +7,16 @@ const PIXEL = Buffer.from(
 );
 
 /** Plantilla .docx sintética (sin datos reales) con membrete, márgenes y estilos propios. */
-export async function buildSyntheticLawyerTemplate(): Promise<Buffer> {
+export async function buildSyntheticLawyerTemplate(options: { font?: string } = {}): Promise<Buffer> {
+  const font = options.font ?? 'Garamond';
   const doc = new Document({
     creator: 'Despacho Sintético',
     title: 'Contestación Juan Pérez',
     styles: {
-      default: { document: { run: { font: 'Garamond', size: 26 }, paragraph: { spacing: { line: 360 } } } },
+      default: { document: { run: { font, size: 26 }, paragraph: { spacing: { line: 360 } } } },
       paragraphStyles: [
-        { id: 'TituloLex', name: 'TituloLex', basedOn: 'Normal', run: { bold: true, size: 28, font: 'Garamond' }, paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 240, after: 120 } } },
-        { id: 'CuerpoLex', name: 'CuerpoLex', basedOn: 'Normal', run: { size: 26, font: 'Garamond' }, paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { firstLine: 709 } } },
+        { id: 'TituloLex', name: 'TituloLex', basedOn: 'Normal', run: { bold: true, size: 28, font }, paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 240, after: 120 } } },
+        { id: 'CuerpoLex', name: 'CuerpoLex', basedOn: 'Normal', run: { size: 26, font }, paragraph: { alignment: AlignmentType.JUSTIFIED, indent: { firstLine: 709 } } },
       ],
     },
     sections: [{

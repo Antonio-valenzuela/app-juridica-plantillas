@@ -158,8 +158,9 @@ export async function POST(req: NextRequest) {
         if (source?.kind === 'docx' && source.bytes) {
           try {
             const settings = moldPdfSettings(await inspectDocxMold(source.bytes));
-            pdfBuffer = await exportUniversalToPdfWithMold(docForPdf, settings, undefined, exportOptions);
-            templateNotices.push(...settings.warnings);
+            const imageNotices: string[] = [];
+            pdfBuffer = await exportUniversalToPdfWithMold(docForPdf, settings, undefined, exportOptions, imageNotices);
+            templateNotices.push(...settings.warnings, ...imageNotices);
             templateDesign = 'APPROXIMATE';
           } catch (error) {
             console.warn('[export/pdf] no se pudo aplicar el diseño de la plantilla:', error instanceof Error ? error.message : 'unknown');
