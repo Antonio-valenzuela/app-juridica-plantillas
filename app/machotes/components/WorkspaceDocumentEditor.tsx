@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
 import { createPortal } from 'react-dom';
 import type { UniversalLegalDocument, DocumentNode, ContentBlock, BlockStyle } from '@/lib/legal-engine/types';
 import { runQualityGateCheck, QualityGateResult } from '@/lib/legal-engine/qualityGate';
@@ -762,10 +763,10 @@ export function WorkspaceDocumentEditor({
                 <button
                   onClick={() => onGenerateFromMachote(document)}
                   className="py-1.5 px-3.5 rounded-xl bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-extrabold shadow-sm transition flex items-center gap-1.5"
-                  title="Redactar un nuevo escrito basado en la estructura de este machote"
+                  title="Redactar un nuevo escrito con la estructura y las fórmulas de este escrito; no se copia ningún dato de él"
                 >
                   <span>⚡</span>
-                  <span>Generar con Machote</span>
+                  <span>{USE_MY_TEMPLATE_LABEL}</span>
                 </button>
               )}
             </div>

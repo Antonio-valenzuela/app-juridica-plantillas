@@ -13,6 +13,7 @@ import { GenerationStatusBar, GenerationStatusData } from './components/Generati
 import { initialWritingStepForMissingEssential } from './initialWritingsFocus';
 type GenerationFlowLabel = 'documento' | 'contestacion' | 'recurso' | 'escrito_inicial' | 'universal';
 import { SaveCustomTemplateModal } from '@/components/machotes/SaveCustomTemplateModal';
+import { documentAsTemplateSource } from '@/lib/templates/documentAsTemplate';
 import { EditCustomTemplateModal } from '@/components/machotes/EditCustomTemplateModal';
 
 import type {
@@ -1341,9 +1342,11 @@ export default function MachotesPage() {
 
   /* ── Generar Escrito Basado en este Machote ────────────────────────────── */
   const handleGenerateFromMachote = (doc: UniversalLegalDocument) => {
-    const fullText = doc.sections.map((s) => s.content.map((b) => b.text).join('\n\n')).join('\n\n');
-    setSelectedTemplateRefText(fullText);
-    setGenerationMode('reference_document');
+    // Misma experiencia que una plantilla guardada: aviso, vista previa de secciones y anti-arrastre.
+    const source = documentAsTemplateSource(doc);
+    setSelectedTemplate(source.item as TemplateItem);
+    setSelectedTemplateRefText(source.text);
+    setGenerationMode('personal_template');
     setIsDraftGeneratorOpen(true);
   };
 
