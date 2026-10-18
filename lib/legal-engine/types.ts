@@ -161,6 +161,8 @@ export interface CaseWorkflowSelection {
   mode: GenerationMode;
   templateId?: string;
   referenceDocumentId?: string;
+  /** Correcciones del abogado a qué secciones de su plantilla se conservan (FORMULA) o se reescriben (SUSTANTIVA). */
+  sectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
 }
 
 export interface SourceReference {
@@ -517,6 +519,7 @@ export interface GenerationMetadata {
   factResponseMatrix?: import('./legalDocumentPlan').FactResponseMatrix;
   draftContentStopReason?: 'TARGET_REACHED' | 'CONTENT_LIMIT_REACHED' | 'COVERAGE_COMPLETE' | 'PROVIDER_UNAVAILABLE' | 'REPETITION_BLOCKED' | 'RESOURCE_LIMIT' | 'ATTORNEY_INPUT_REQUIRED';
   selectedTemplateId?: string | null;
+  templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
   referenceDocumentId?: string | null;
   referenceDocumentLifecycle?: DocumentLifecycleMetadata;
   provenance?: ProvenanceKind[];

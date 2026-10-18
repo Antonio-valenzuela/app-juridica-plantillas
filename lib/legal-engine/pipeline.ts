@@ -55,6 +55,7 @@ import type { InferredSourceDocumentType } from './sourceDocumentTypes';
 import { getDocumentTypeByValue, resolveMatterLabel, resolveJurisdictionLabel, resolveDocumentTypeLabel, serializeTaxonomyForPipeline } from '@/lib/legal-taxonomy';
 import { renderPersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
 import { resolveSectionKind, type TemplateSectionKind } from '@/lib/templates/sectionKind';
+import { sanitizeSectionKinds } from '@/lib/templates/templatePreview';
 import { buildCarryoverBlocklist, CARRYOVER_FINDING_CODE, describeCarryover, filterCarryoverText } from '@/lib/templates/carryoverFilter';
 import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
@@ -3312,7 +3313,7 @@ export async function generateSection(
   const personalSectionKind = doc.generationMetadata.generationMode === 'personal_template'
     ? resolveSectionKind(
       { title: sec.title, text: personalTemplateText, index: doc.sections.findIndex((s) => s.id === sectionId), total: doc.sections.length },
-      (doc.generationMetadata as { templateSectionKinds?: Record<string, TemplateSectionKind> }).templateSectionKinds,
+      doc.generationMetadata.templateSectionKinds as Record<string, TemplateSectionKind> | undefined,
     )
     : undefined;
   // Sección sustantiva: el texto de la plantilla solo aporta forma; se redacta de nuevo con los datos
@@ -4573,6 +4574,7 @@ export async function runGenerationPipeline(
     const workflowMode: GenerationMode = input.workflow?.selection.mode || 'automatic';
     doc.generationMetadata.generationMode = workflowMode;
     doc.generationMetadata.selectedTemplateId = input.workflow?.selection.templateId || null;
+    doc.generationMetadata.templateSectionKinds = sanitizeSectionKinds(input.workflow?.selection.sectionKinds);
     doc.generationMetadata.referenceDocumentId = input.workflow?.selection.referenceDocumentId || input.referenceDocumentId || null;
     doc.generationMetadata.provenance = [
       ...(workflowMode === 'automatic' ? [] : ['TEMPLATE_STRUCTURE' as const]),

@@ -72,7 +72,7 @@ describe('redacción con la plantilla del abogado', () => {
     const upload = vi.fn();
     renderWith(demandToText(CIVIL_ARRENDAMIENTO_DEMAND), { onUploadTemplate: upload });
     fireEvent.click(screen.getByRole('radio', { name: 'Usar mi plantilla (diseño y estructura)' }));
-    expect(screen.getByTestId('template-design-notice').textContent).toMatch(/Se conserva.*Se reescribe.*No se copia ningún dato/s);
+    expect(screen.getByTestId('template-design-notice').textContent).toMatch(/Se conserva[\s\S]*Se reescribe[\s\S]*No se copia ningún dato/);
     fireEvent.click(screen.getByRole('button', { name: 'Subir plantilla' }));
     expect(upload).toHaveBeenCalledOnce();
   });

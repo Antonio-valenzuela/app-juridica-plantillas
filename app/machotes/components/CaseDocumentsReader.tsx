@@ -52,6 +52,8 @@ export interface CaseDocumentsReaderProps {
     /** Ficha del caso confirmada por el abogado (con la parte que representa). */
     caseDossier?: CaseDossier;
     uncertifiedDraftAcknowledged?: boolean;
+    /** Correcciones del abogado: qué secciones de su plantilla se conservan o se reescriben. */
+    templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
   }) => void;
   onOpenEditor?: () => void;
   isGenerating?: boolean;
@@ -291,6 +293,7 @@ export function CaseDocumentsReader({
   // Actuación que el abogado eligió o confirmó expresamente (no la preseleccionada por el sistema).
   const [confirmedActuacion, setConfirmedActuacion] = useState<string | null>(null);
   const [generationMode, setGenerationMode] = useState<'automatic' | 'personal_template' | 'reference_document'>('automatic');
+  const [templateSectionKinds, setTemplateSectionKinds] = useState<Record<string, 'FORMULA' | 'SUSTANTIVA'>>({});
   // Extensión del escrito: se recuerda por expediente (y por sesión si aún no hay expediente).
   const pageTargetStorageKey = `lex:page-target:${String(caseFicha?.expediente || '').trim().toLowerCase().replace(/\s+/g, '') || 'sesion'}`;
   const [pageTarget, setPageTarget] = useState<PageTarget>(DEFAULT_PAGE_TARGET);
@@ -711,6 +714,7 @@ export function CaseDocumentsReader({
       ...(showCaseDossier && dossierState.dossier ? { caseDossier: dossierState.dossier } : {}),
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
+      ...(generationMode === 'personal_template' && Object.keys(templateSectionKinds).length > 0 ? { templateSectionKinds } : {}),
     });
   };
 
@@ -1058,7 +1062,9 @@ export function CaseDocumentsReader({
             onPageTargetChange={changePageTarget}
             customTemplates={customTemplates}
             selectedTemplateId={selectedMachoteId}
-            onSelectTemplateId={setSelectedMachoteId}
+            onSelectTemplateId={(id) => { setSelectedMachoteId(id); setTemplateSectionKinds({}); }}
+            templateSectionKinds={templateSectionKinds}
+            onTemplateSectionKindsChange={setTemplateSectionKinds}
             userInstructions={customPrompt}
             onUserInstructionsChange={setCustomPrompt}
             disabled={isGenerating}

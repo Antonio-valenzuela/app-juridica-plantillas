@@ -8,6 +8,7 @@ import type { PageTarget } from '@/lib/legal-engine/pageTarget';
 import { PageTargetSelector } from './PageTargetSelector';
 import type { TemplateItem } from './TemplateLibraryManager';
 import { TemplateDesignNotice } from '@/components/machotes/TemplateDesignNotice';
+import { TemplateSectionPreview } from '@/components/machotes/TemplateSectionPreview';
 import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
 
 interface ContestacionesConfigPanelProps {
@@ -29,6 +30,9 @@ interface ContestacionesConfigPanelProps {
   onShowUncertifiedDraftsChange?: (value: boolean) => void;
   /** Abre el modal para subir y guardar una plantilla (machote) del abogado. */
   onUploadTemplate?: () => void;
+  /** Correcciones del abogado a qué secciones de su plantilla se conservan o se reescriben. */
+  templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
+  onTemplateSectionKindsChange?: (kinds: Record<string, 'FORMULA' | 'SUSTANTIVA'>) => void;
 }
 
 /**
@@ -55,6 +59,8 @@ export function ContestacionesConfigPanel({
   showUncertifiedDrafts,
   onShowUncertifiedDraftsChange,
   onUploadTemplate,
+  templateSectionKinds = {},
+  onTemplateSectionKindsChange,
 }: ContestacionesConfigPanelProps) {
   const isAppeal = isCivilFamilyAppeal(selectedDocumentType);
   const title = isAppeal
@@ -139,6 +145,14 @@ export function ContestacionesConfigPanel({
                 El borrador conserva la estructura, encabezados y estilo de tu plantilla y sustituye su contenido por la contestación del caso.
               </p>
             </div>
+          )}
+          {usesTemplate && onTemplateSectionKindsChange && (
+            <TemplateSectionPreview
+              templateText={customTemplates.find((tpl) => tpl.id === selectedTemplateId)?.content || ''}
+              overrides={templateSectionKinds}
+              onChange={onTemplateSectionKindsChange}
+              disabled={disabled}
+            />
           )}
         </fieldset>
       </div>

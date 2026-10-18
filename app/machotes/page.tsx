@@ -1474,7 +1474,7 @@ export default function MachotesPage() {
       : savedCaseParties.filter((p) => p.name && p.name.trim()).map((p) => ({ role: p.role, name: p.name.trim(), source: (p as any).source || 'manual' }));
     const payloadExpediente = (payload as any).expediente as string | undefined;
     const workflowSelection = payload.selectedTemplate && (payload.writingMode === 'template' || generationMode === 'personal_template')
-      ? { mode: 'personal_template' as const, templateId: payload.selectedTemplate.id }
+      ? { mode: 'personal_template' as const, templateId: payload.selectedTemplate.id, sectionKinds: (payload as { templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'> }).templateSectionKinds }
       : generationMode === 'reference_document' && payload.selectedTemplate
         ? { mode: 'reference_document' as const, referenceDocumentId: payload.selectedTemplate.id }
         : { mode: 'automatic' as const };
@@ -1750,6 +1750,7 @@ export default function MachotesPage() {
     pageTarget?: { preset?: string; pages?: number };
     caseDossier?: CaseDossier;
     uncertifiedDraftAcknowledged?: boolean;
+    templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
   }) => {
     const userInstructions = typeof request === 'string' ? request : request.userInstructions;
     const selectedDocumentTypeFromUi = typeof request === 'string' ? undefined : request.selectedDocumentType;
@@ -1840,7 +1841,7 @@ export default function MachotesPage() {
           workflow: {
             ...buildContestacionesWorkflowPayload(
               effectiveGenMode === 'personal_template' && effectiveRefId
-                ? { mode: 'personal_template', templateId: effectiveRefId }
+                ? { mode: 'personal_template', templateId: effectiveRefId, sectionKinds: typeof request === 'string' ? undefined : request.templateSectionKinds }
                 : effectiveGenMode === 'reference_document'
                   ? { mode: 'reference_document', referenceDocumentId: effectiveRefId || 'machote-contestacion-amparo' }
                   : { mode: 'automatic' },

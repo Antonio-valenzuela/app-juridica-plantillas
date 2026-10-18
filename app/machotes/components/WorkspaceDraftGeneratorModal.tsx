@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
 import { TemplateDesignNotice } from '@/components/machotes/TemplateDesignNotice';
+import { TemplateSectionPreview } from '@/components/machotes/TemplateSectionPreview';
 import type { UploadedSourceDocument, TemplateVersion } from '@/lib/legal-engine/types';
 import type { TemplateItem } from './TemplateLibraryManager';
 import { type GenerationStatusData } from './GenerationStatusBar';
@@ -23,6 +24,7 @@ interface WorkspaceDraftGeneratorModalProps {
     selectedTemplate?: TemplateItem | null;
     templateRefText?: string;
     writingMode?: 'analyze' | 'new' | 'template' | 'continue';
+    templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
     pageTarget?: PageTarget;
   }) => Promise<void | boolean>;
   templates: TemplateItem[];
@@ -90,6 +92,7 @@ export function WorkspaceDraftGeneratorModal({
   const [templateRefText, setTemplateRefText] = useState<string>('');
   const [activeStep, setActiveStep] = useState<1 | 2 | 3 | 4>(1);
   const [writingMode, setWritingMode] = useState<'analyze' | 'new' | 'template' | 'continue'>('analyze');
+  const [templateSectionKinds, setTemplateSectionKinds] = useState<Record<string, 'FORMULA' | 'SUSTANTIVA'>>({});
   const [aiDisclosure, setAiDisclosure] = useState<{ externalTransfer: boolean; contentNotice: string; retentionNotice: string; providers: Array<{ provider: string; mode: string; configured: boolean; active: boolean; functions: string[] }> } | null>(null);
   const [disclosureAcknowledged, setDisclosureAcknowledged] = useState(false);
 
@@ -166,6 +169,7 @@ export function WorkspaceDraftGeneratorModal({
 
   const handleSelectTemplate = async (tpl: TemplateItem) => {
     setSelectedTpl(tpl);
+    setTemplateSectionKinds({});
     setSelectedDocumentType(tpl.documentType);
     try {
       const res = await fetch(`/api/templates/custom/${tpl.id}`);
@@ -189,6 +193,7 @@ export function WorkspaceDraftGeneratorModal({
         selectedTemplate: selectedTpl,
         templateRefText: templateRefText || undefined,
         writingMode,
+        ...(writingMode === 'template' && Object.keys(templateSectionKinds).length > 0 ? { templateSectionKinds } : {}),
         pageTarget,
       });
       if (result !== false) onClose();
@@ -406,6 +411,13 @@ export function WorkspaceDraftGeneratorModal({
             </div>
 
             {writingMode === 'template' && <TemplateDesignNotice />}
+            {writingMode === 'template' && selectedTpl && (
+              <TemplateSectionPreview
+                templateText={templateRefText}
+                overrides={templateSectionKinds}
+                onChange={setTemplateSectionKinds}
+              />
+            )}
             {templates.length === 0 ? (
               <div className="p-4 border border-dashed border-slate-300 rounded-xl text-center text-xs text-slate-500 space-y-1.5">
                 <p>No tienes machotes personalizados guardados.</p>
