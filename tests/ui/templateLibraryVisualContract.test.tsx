@@ -21,7 +21,7 @@ describe('Mis Plantillas — acciones visibles y accesibles', () => {
       onCreateNewTemplate: vi.fn(),
     }));
 
-    expect(markup.includes('Usar plantilla')).toBe(true);
+    expect(markup.includes('Usar mi plantilla (diseño y estructura)')).toBe(true);
     expect(markup.includes('Editar Contestación civil de prueba')).toBe(true);
     expect(markup.includes('Eliminar Contestación civil de prueba')).toBe(true);
     expect(/[▤▥◷⚡✎🗑⌕]/u.test(markup)).toBe(false);

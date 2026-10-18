@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
+import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
+import { TemplateDesignNotice } from '@/components/machotes/TemplateDesignNotice';
 import type { UploadedSourceDocument, TemplateVersion } from '@/lib/legal-engine/types';
 import type { TemplateItem } from './TemplateLibraryManager';
 import { type GenerationStatusData } from './GenerationStatusBar';
@@ -322,7 +324,7 @@ export function WorkspaceDraftGeneratorModal({
                 {([
                   ['analyze', 'Analizar expediente'],
                   ['new', 'Crear desde cero'],
-                  ['template', 'Usar plantilla'],
+                  ['template', USE_MY_TEMPLATE_LABEL],
                   ['continue', 'Continuar borrador'],
                 ] as const).map(([value, label]) => (
                   <button
@@ -403,6 +405,7 @@ export function WorkspaceDraftGeneratorModal({
               </button>
             </div>
 
+            {writingMode === 'template' && <TemplateDesignNotice />}
             {templates.length === 0 ? (
               <div className="p-4 border border-dashed border-slate-300 rounded-xl text-center text-xs text-slate-500 space-y-1.5">
                 <p>No tienes machotes personalizados guardados.</p>

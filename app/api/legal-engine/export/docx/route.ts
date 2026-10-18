@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
+import { exportUniversalToDocx, exportUniversalToDocxWithMold, TemplateCarryoverExportError } from '@/lib/legal-engine/exportDocxUniversal';
+import { caseValuesOfDocument, loadLawyerTemplateSource } from '@/lib/templates/templateMoldSource';
 import { UniversalLegalDocument } from '@/lib/legal-engine/types';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
 import { isExportGuardError, prepareUniversalDocumentForExport } from '@/lib/legal-engine/exportGuards';
@@ -132,7 +133,52 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(finalExportBlockedBody(finalAuthorization), { status: finalAuthorization.status });
     }
 
-    const buffer = await exportUniversalToDocx(sanitized, undefined, sanitized.generationMetadata.auditTrace, exportOptions);
+    // «Usar mi plantilla (diseño y estructura)»: si el escrito nació de una plantilla .docx del abogado,
+    // se exporta sobre su diseño. Si no se puede, se usa el diseño estándar y se avisa.
+    const templateNotices: string[] = [];
+    let templateDesign: 'EXACT' | 'STANDARD' | undefined;
+    let buffer: Buffer | undefined;
+    const templateId = sanitized.generationMetadata.generationMode === 'personal_template' && body.useTemplateDesign !== false
+      ? sanitized.generationMetadata.selectedTemplateId
+      : null;
+    if (templateId) {
+      const source = await loadLawyerTemplateSource({
+        templateId,
+        organizationId: principal?.organizationId,
+        userId: principal?.userId,
+        local: Boolean(local?.ok),
+      });
+      if (source?.kind === 'docx' && source.bytes) {
+        try {
+          const molded = await exportUniversalToDocxWithMold(
+            sanitized,
+            { templateBytes: source.bytes, templateText: source.originalText, caseValues: caseValuesOfDocument(sanitized) },
+            sanitized.generationMetadata.auditTrace,
+            exportOptions,
+          );
+          buffer = molded.buffer;
+          templateNotices.push(...molded.warnings);
+          templateDesign = 'EXACT';
+        } catch (error) {
+          if (error instanceof TemplateCarryoverExportError) {
+            return NextResponse.json({
+              ok: false,
+              error: 'TEMPLATE_CARRYOVER_BLOCKED',
+              friendlyMessage: 'El escrito conserva datos de la plantilla anterior. Revisa el anexo de revisión antes de exportarlo como FINAL.',
+              details: error.blocked,
+            }, { status: 422 });
+          }
+          console.warn('[export/docx] no se pudo aplicar el diseño de la plantilla:', error instanceof Error ? error.message : 'unknown');
+        }
+      }
+      if (!buffer) {
+        templateDesign = 'STANDARD';
+        templateNotices.push(source?.kind === 'other'
+          ? 'Tu plantilla no es un archivo .docx: no se pudo copiar su diseño y se usó el diseño estándar.'
+          : 'No se pudo leer el archivo de tu plantilla: se usó el diseño estándar.');
+      }
+    }
+    buffer ??= await exportUniversalToDocx(sanitized, undefined, sanitized.generationMetadata.auditTrace, exportOptions);
 
     // Validación de archivo REAL
     if (!buffer || buffer.length < 500) {
@@ -150,6 +196,7 @@ export async function POST(req: NextRequest) {
         'Content-Disposition': buildDownloadContentDisposition(`${fileName}.docx`),
         'Content-Length': String(buffer.length),
         'X-Export-Mode': exportMode,
+        ...(templateDesign ? { 'X-Template-Design': templateDesign, 'X-Template-Notices': encodeURIComponent(JSON.stringify(templateNotices)) } : {}),
         ...(unsavedDraftRequested ? { 'X-Export-Persistence': 'UNSAVED_LOCAL_DRAFT' } : {}),
         'X-Sanitize-Report': JSON.stringify({ removedPrompts: report.removedPrompts, removedCrypto: report.removedCrypto, placeholders: report.placeholdersFound.length }),
         ...(exportMode === 'DRAFT' ? { 'X-Export-Review-Override': 'true' } : {}),

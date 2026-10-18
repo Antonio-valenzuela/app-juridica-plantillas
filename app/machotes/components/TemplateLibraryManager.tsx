@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
 import { LEGAL_MATTERS_CATALOG } from '@/lib/catalog/legalCatalog';
 import { TemplateVersion } from '@/lib/legal-engine/types';
 import type { PersonalTemplateStructure, PersonalTemplateVariable } from '@/lib/templates/personalTemplateBuilder';
@@ -272,7 +273,7 @@ export function TemplateLibraryManager({
                   <div className="templates-row-actions">
                     <p className="templates-row-summary">{tpl.description?.trim() || `Documento ${matterStyle.tag.toLowerCase()} reutilizable.`}</p>
                     <div className="templates-action-buttons">
-                      <button type="button" onClick={() => onUseTemplate(tpl)} className="templates-use-button"><LexIcon name="document" size={15} /><span>Usar plantilla</span></button>
+                      <button type="button" onClick={() => onUseTemplate(tpl)} className="templates-use-button"><LexIcon name="document" size={15} /><span>{USE_MY_TEMPLATE_LABEL}</span></button>
                       <button type="button" onClick={() => onEditTemplate(tpl)} className="templates-icon-button" title="Editar plantilla" aria-label={`Editar ${tpl.name}`}>Editar</button>
                       <button type="button" onClick={() => handleDelete(tpl.id, tpl.name)} disabled={deletingId === tpl.id} className="templates-icon-button templates-delete-button" title="Eliminar plantilla" aria-label={`Eliminar ${tpl.name}`}>Eliminar</button>
                     </div>

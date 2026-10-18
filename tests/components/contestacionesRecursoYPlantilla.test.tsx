@@ -56,7 +56,7 @@ describe('redacción con la plantilla del abogado', () => {
     const template = { id: 'tpl-propia', name: 'Mi machote', category: 'Laboral', matterId: 'laboral', content: 'ESTRUCTURA PROPIA DEL DESPACHO' };
     renderWith(demandToText(CIVIL_ARRENDAMIENTO_DEMAND), { onGenerateResponse: generate, customTemplates: [template] });
     chooseType('contestacion_demanda_civil');
-    fireEvent.click(screen.getByRole('radio', { name: 'Con mi plantilla' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Usar mi plantilla (diseño y estructura)' }));
     fireEvent.change(screen.getByLabelText('Plantilla (machote)'), { target: { value: 'tpl-propia' } });
     confirmCaseDossierInUi();
     fireEvent.click(screen.getByRole('button', { name: /Generar contestación/ }));
@@ -71,7 +71,8 @@ describe('redacción con la plantilla del abogado', () => {
   it('ofrece subir una plantilla desde la configuración', () => {
     const upload = vi.fn();
     renderWith(demandToText(CIVIL_ARRENDAMIENTO_DEMAND), { onUploadTemplate: upload });
-    fireEvent.click(screen.getByRole('radio', { name: 'Con mi plantilla' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Usar mi plantilla (diseño y estructura)' }));
+    expect(screen.getByTestId('template-design-notice').textContent).toMatch(/Se conserva.*Se reescribe.*No se copia ningún dato/s);
     fireEvent.click(screen.getByRole('button', { name: 'Subir plantilla' }));
     expect(upload).toHaveBeenCalledOnce();
   });

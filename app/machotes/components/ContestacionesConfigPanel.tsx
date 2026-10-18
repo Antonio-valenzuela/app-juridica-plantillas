@@ -7,6 +7,8 @@ import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
 import type { PageTarget } from '@/lib/legal-engine/pageTarget';
 import { PageTargetSelector } from './PageTargetSelector';
 import type { TemplateItem } from './TemplateLibraryManager';
+import { TemplateDesignNotice } from '@/components/machotes/TemplateDesignNotice';
+import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
 
 interface ContestacionesConfigPanelProps {
   selectedDocumentType: string;
@@ -94,7 +96,7 @@ export function ContestacionesConfigPanel({
           <div className="lex-segmented lex-segmented-full" role="radiogroup" aria-label="Cómo redactar">
             {([
               { value: 'automatic', label: 'Automáticamente' },
-              { value: 'personal_template', label: 'Con mi plantilla' },
+              { value: 'personal_template', label: USE_MY_TEMPLATE_LABEL },
             ] as const).map((option) => (
               <label key={option.value} className={generationMode === option.value ? 'is-active' : undefined}>
                 <input
@@ -110,6 +112,7 @@ export function ContestacionesConfigPanel({
             ))}
           </div>
 
+          {usesTemplate && <TemplateDesignNotice />}
           {usesTemplate && (
             <div className="lex-template-picker">
               <label htmlFor="contestaciones-template" className="lex-field-label">Plantilla (machote)</label>

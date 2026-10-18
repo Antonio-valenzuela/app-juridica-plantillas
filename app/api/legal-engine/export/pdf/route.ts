@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
-import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
+import { exportUniversalToPdf, exportUniversalToPdfWithMold } from '@/lib/legal-engine/exportPdfUniversal';
+import { loadLawyerTemplateSource } from '@/lib/templates/templateMoldSource';
+import { inspectDocxMold, moldPdfSettings } from '@/lib/templates/docxMold';
 import { isExportGuardError, prepareUniversalDocumentForExport } from '@/lib/legal-engine/exportGuards';
 import { UniversalLegalDocument } from '@/lib/legal-engine/types';
 import { resolveDocumentOutputFilename, buildDownloadContentDisposition } from '@/lib/legal-engine/outputFilename';
@@ -139,7 +141,36 @@ export async function POST(req: NextRequest) {
     // No hay fallback a HTML/Chromium: si falla el exporter binario, se devuelve
     // un error honesto y no se utiliza renderedSections como bypass.
     try {
-      const pdfBuffer = await exportUniversalToPdf(docForPdf, undefined, exportOptions);
+      // «Usar mi plantilla»: PDF aproximado con página, márgenes, letra e interlineado de la plantilla .docx.
+      const templateNotices: string[] = [];
+      let templateDesign: 'APPROXIMATE' | 'STANDARD' | undefined;
+      let pdfBuffer: Buffer | undefined;
+      const templateId = docForPdf.generationMetadata.generationMode === 'personal_template' && body.useTemplateDesign !== false
+        ? docForPdf.generationMetadata.selectedTemplateId
+        : null;
+      if (templateId) {
+        const source = await loadLawyerTemplateSource({
+          templateId,
+          organizationId: principal?.organizationId,
+          userId: principal?.userId,
+          local: Boolean(local?.ok),
+        });
+        if (source?.kind === 'docx' && source.bytes) {
+          try {
+            const settings = moldPdfSettings(await inspectDocxMold(source.bytes));
+            pdfBuffer = await exportUniversalToPdfWithMold(docForPdf, settings, undefined, exportOptions);
+            templateNotices.push(...settings.warnings);
+            templateDesign = 'APPROXIMATE';
+          } catch (error) {
+            console.warn('[export/pdf] no se pudo aplicar el diseño de la plantilla:', error instanceof Error ? error.message : 'unknown');
+          }
+        }
+        if (!pdfBuffer) {
+          templateDesign = 'STANDARD';
+          templateNotices.push('No se pudo copiar el diseño de tu plantilla (solo los .docx lo permiten): el PDF usa el diseño estándar.');
+        }
+      }
+      pdfBuffer ??= await exportUniversalToPdf(docForPdf, undefined, exportOptions);
       if (pdfBuffer && pdfBuffer.length > 500 && pdfBuffer.subarray(0, 4).toString() === '%PDF') {
         return new NextResponse(new Uint8Array(pdfBuffer), {
           headers: {
@@ -148,6 +179,7 @@ export async function POST(req: NextRequest) {
             'Content-Length': String(pdfBuffer.length),
             'X-Export-Method': 'pdf',
             'X-Export-Mode': exportMode,
+            ...(templateDesign ? { 'X-Template-Design': templateDesign, 'X-Template-Notices': encodeURIComponent(JSON.stringify(templateNotices)) } : {}),
             ...(unsavedDraftRequested ? { 'X-Export-Persistence': 'UNSAVED_LOCAL_DRAFT' } : {}),
             ...(exportMode === 'DRAFT' ? { 'X-Export-Review-Override': 'true' } : {}),
           },
