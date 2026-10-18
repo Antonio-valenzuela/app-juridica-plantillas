@@ -30,7 +30,7 @@ function makeDocument(extraFact?: string) {
     ],
     generationMetadata: { ...createEmptyDocument().generationMetadata, preflight: { status: 'READY', missingFields: [] } } as never,
   });
-  doc.intake = { request: 'caso sintético' } as never;
+  doc.intake = { request: `caso sintético María López 812/2026 3 de marzo de 2026 ${extraFact || ''}` } as never;
   doc.missingFields = [];
   doc.anonymizedFields = [];
   doc.validation = { isValid: true, errors: [], warnings: [] };
