@@ -6,7 +6,7 @@ import { buildSyntheticLawyerTemplate } from '../helpers/syntheticLawyerTemplate
 
 const newContent = [
   { role: 'title' as const, text: 'CONTESTACIÓN DE DEMANDA' },
-  { role: 'body' as const, text: 'María López comparece en el expediente 812/2026 para manifestar lo siguiente.' },
+  { role: 'body' as const, text: 'María López comparece en el expediente 995/2099 para manifestar lo siguiente.' },
   { role: 'heading' as const, text: 'HECHOS', sectionTitle: 'HECHOS' },
   { role: 'body' as const, text: '1. El 3 de marzo de 2026 la actora entregó el inmueble.\nSe adjunta constancia.', sectionTitle: 'HECHOS' },
   { role: 'closing' as const, text: 'PROTESTO LO NECESARIO' },
@@ -29,7 +29,7 @@ describe('molde visual DOCX', () => {
 
   it('conserva márgenes, estilos, header y footer, y solo contiene el texto nuevo', async () => {
     const template = await buildSyntheticLawyerTemplate();
-    const blocklist = buildCarryoverBlocklist('C. Juan Pérez, expediente 345/2022. $85,000.00', ['María López', '812/2026']);
+    const blocklist = buildCarryoverBlocklist('C. Juan Pérez, expediente 345/2022. $85,000.00', ['María López', '995/2099']);
     const out = await renderWithDocxMold(template, newContent, { blocklist });
 
     const before = await JSZip.loadAsync(template);

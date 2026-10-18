@@ -20,7 +20,7 @@ async function main() {
   console.log('================================================================');
 
   const repoRoot = process.cwd();
-  const manifestPath = path.resolve(repoRoot, 'audit/final-legal-readiness-2026/selected-cases.json');
+  const manifestPath = path.resolve(repoRoot, 'audit/banco-prueba/selected-cases.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const case01 = manifest.cases.find((c: any) => c.caseNumber === '01');
   if (!case01) throw new Error('Case 01 not found in manifest');

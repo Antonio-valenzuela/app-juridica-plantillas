@@ -148,7 +148,7 @@ describe('LOOP 8J — Trámites Generales de Juzgado (25 Tipos)', () => {
           id: 'src-tramite-1',
           name: 'acuerdo_prevencion.txt',
           type: 'txt',
-          content: 'Juzgado Décimo Quinto de Distrito en Materia Civil. Expediente número 894/2024. Promovente Roberto Gómez Bolaños. Se requiere al promovente para que en el término de tres días exhiba copias de traslado del escrito inicial.',
+          content: 'Juzgado Décimo Quinto de Distrito en Materia Civil. Expediente número 993/2099. Promovente Roberto Gómez Bolaños. Se requiere al promovente para que en el término de tres días exhiba copias de traslado del escrito inicial.',
           uploadedAt: new Date().toISOString(),
         } as any,
       ];
@@ -158,7 +158,7 @@ describe('LOOP 8J — Trámites Generales de Juzgado (25 Tipos)', () => {
           autoridadResponsable: 'Juzgado Décimo Quinto de Distrito en Materia Civil',
         },
         caseNumbers: {
-          principal: '894/2024',
+          principal: '993/2099',
         },
         facts: [
           { id: '1', number: '1', text: 'Se notificó proveído requiriendo exhibición de copias de traslado.' },
@@ -170,7 +170,7 @@ describe('LOOP 8J — Trámites Generales de Juzgado (25 Tipos)', () => {
       expect(ctx.tramiteGeneral).toBeDefined();
       expect(ctx.tramiteGeneral?.documentType).toBe('desahogo_prevencion');
       expect(ctx.tramiteGeneral?.promovente.value).toBe('Roberto Gómez Bolaños');
-      expect(ctx.tramiteGeneral?.numeroExpediente?.value).toBe('894/2024');
+      expect(ctx.tramiteGeneral?.numeroExpediente?.value).toBe('993/2099');
       expect(ctx.tramiteGeneral?.juzgadoOTribunal?.value).toMatch(/Juzgado Décimo Quinto/i);
       expect(ctx.tramiteGeneral?.peticionOObjeto?.value).toBeDefined();
     });
@@ -181,7 +181,7 @@ describe('LOOP 8J — Trámites Generales de Juzgado (25 Tipos)', () => {
       const sourceDoc = createSourceDocument({
         id: `source-${docType}`,
         filename: `${docType}_auto.txt`,
-        content: `Juzgado Quinto de lo Civil. Expediente 456/2023. Actor: Juan Pérez Martínez. Demandado: Pedro López Hernández. Se promueve ${docType} para los efectos legales conducentes.`,
+        content: `Juzgado Quinto de lo Civil. Expediente 992/2099. Actor: Juan Pérez Martínez. Demandado: Pedro López Hernández. Se promueve ${docType} para los efectos legales conducentes.`,
         sourceValidated: true,
       });
 

@@ -10,7 +10,7 @@ function appealDocument(): UniversalLegalDocument {
     id: 'depth-appeal', documentType: 'apelacion_civil', documentTypeLabel: 'recurso de apelación civil',
     matter: 'civil', jurisdiction: 'local civil', flow: 'DOCUMENT_ANALYSIS',
   });
-  doc.caseRefs = { ...doc.caseRefs, expediente: '1152/2013' };
+  doc.caseRefs = { ...doc.caseRefs, expediente: '998/2099' };
   doc.sections = CANONICAL_APPEAL_CIVIL_TEST_SECTIONS.map((section, index) => ({
     id: section.id,
     type: section.type,

@@ -30,7 +30,7 @@ const sentenceSource = createSourceDocument({
       page: 1,
       text: [
         'SENTENCIA DE AMPARO DIRECTO.',
-        'AMPARO DIRECTO: 800/2024.',
+        'AMPARO DIRECTO: 999/2099.',
         'QUEJOSO: ***** ******* ********* *****.',
         'Segundo Tribunal Colegiado en Materia de Trabajo del Tercer Circuito.',
       ].join('\n'),
@@ -158,13 +158,13 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
       matter: 'constitucional',
       jurisdiction: 'federal',
       parties: { quejoso: 'Parte promovente confirmada', autoridadResponsable: 'Tribunal Colegiado' },
-      caseRefs: { expediente: '800/2024', amparo: '800/2024', tribunal: 'Segundo Tribunal Colegiado' },
+      caseRefs: { expediente: '999/2099', amparo: '999/2099', tribunal: 'Segundo Tribunal Colegiado' },
       sourceDocuments: [sentenceSource],
       legalBasis: ['Fundamento confirmado'],
       caseAnalysis: {
         parties: { quejoso: 'Parte promovente confirmada' },
         authorities: ['Segundo Tribunal Colegiado'],
-        caseNumbers: { principal: '800/2024' },
+        caseNumbers: { principal: '999/2099' },
         proceduralTimeline: [],
         challengedActs: [{ authority: 'Segundo Tribunal Colegiado', actDescription: 'Sentencia de amparo directo', page: 1, excerpt: 'SENTENCIA DE AMPARO DIRECTO' }],
         claims: [],
@@ -227,13 +227,13 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
       documentType: TARGET_ID,
       documentTypeLabel: TARGET_LABEL,
       parties: { quejoso: 'Parte confirmada', autoridadResponsable: 'Tribunal Colegiado' },
-      caseRefs: { expediente: '800/2024', tribunal: 'Tribunal Colegiado' },
+      caseRefs: { expediente: '999/2099', tribunal: 'Tribunal Colegiado' },
       sourceDocuments: [sentenceSource],
       legalBasis: ['Fundamento confirmado'],
     });
     const analysis = {
       authorities: ['Tribunal Colegiado'],
-      caseNumbers: { principal: '800/2024' },
+      caseNumbers: { principal: '999/2099' },
       challengedActs: [{ authority: 'Tribunal Colegiado', actDescription: 'Sentencia de amparo directo' }],
       proceduralTimeline: [],
       citations: [],
@@ -313,7 +313,7 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
     expect(() => markDocumentAsFinal(doc, { explicit: true })).toThrow(/incompleto|pendiente|final/i);
   });
 
-  it('genera un borrador útil del caso sanitizado 800/2024 sin cambiarlo a demanda', async () => {
+  it('genera un borrador útil del caso sanitizado 999/2099 sin cambiarlo a demanda', async () => {
     const doc = await runGenerationPipeline({
       selectedDocumentType: TARGET_ID,
       documentTypeLabel: TARGET_LABEL,
@@ -328,7 +328,7 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
 
     expect(doc.documentType).toBe(TARGET_ID);
     expect(doc.templateId).toBe(TARGET_ID);
-    expect(doc.caseAnalysis?.caseNumbers.principal).toBe('800/2024');
+    expect(doc.caseAnalysis?.caseNumbers.principal).toBe('999/2099');
     expect(doc.proceduralIdentity?.sourceDocumentType).toBe('SENTENCIA_O_RESOLUCION');
     expect((doc.generationMetadata as any).routing).toMatchObject({
       selectedDocumentType: TARGET_ID,
@@ -357,7 +357,7 @@ describe('Loop 3 — estrategia de contestación/revisión extraordinaria de amp
 
   // Fase 2 (2026-10-13): este test fijaba que el PDF público real se clasificaba como
   // DEMANDA_AMPARO_DIRECTO. Era un defecto, no un contrato: el PDF es una SENTENCIA de un
-  // Tribunal Colegiado («V I S T O, para resolver el juicio de amparo directo 800/2024»,
+  // Tribunal Colegiado («V I S T O, para resolver el juicio de amparo directo 999/2099»,
   // «R E S U L T A N D O»), y la frase «promovió demanda de amparo contra…» envuelta a
   // inicio de línea activaba la regla multilínea /^\s*demanda/im sobre TODO el documento.
   // Se corrigió la causa (el título de una demanda se busca solo al inicio). Ahora la

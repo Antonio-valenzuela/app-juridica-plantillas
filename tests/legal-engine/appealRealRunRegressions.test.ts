@@ -5,7 +5,7 @@ import { DEFAULT_LAWYER_PROFILE } from '@/lib/workspace/lawyerProfileTypes';
 import type { LegalBlock } from '@/lib/legal-engine/blockPlanner';
 
 /**
- * Regresiones detectadas en la generación real de la apelación 1152/2013 con
+ * Regresiones detectadas en la generación real de la apelación 998/2099 con
  * proveedor externo (ver audit/legal-generation-quality-recovery/real-appeal-1152-2013):
  *  - AGRAVIOS emitía vocabulario constitucional en un recurso civil.
  *  - RESOLUCIÓN RECURRIDA, RESOLUCIÓN IMPUGNADA y ANTECEDENTES PROCESALES
@@ -16,7 +16,7 @@ function civilAppeal(matter = 'civil', jurisdiction = 'local civil') {
     id: 'appeal-real-regression', documentType: 'apelacion_civil',
     documentTypeLabel: 'recurso de apelación civil', matter, jurisdiction, flow: 'DOCUMENT_ANALYSIS',
   });
-  doc.caseRefs = { ...doc.caseRefs, expediente: '1152/2013' };
+  doc.caseRefs = { ...doc.caseRefs, expediente: '998/2099' };
   doc.parties = {
     ...doc.parties,
     actor: 'JUAN PÉREZ SÁNCHEZ',
@@ -47,7 +47,7 @@ const PLAN_SEED = 'AGRAVIOS: desarrollar los agravios individualizados conforme 
 
 const CONSTITUTIONAL = /tutela judicial efectiva|derechos fundamentales|marco de derechos humanos|debido proceso|constitucional/i;
 
-describe('regresiones de la generación real de la apelación 1152/2013', () => {
+describe('regresiones de la generación real de la apelación 998/2099', () => {
   it('AGRAVIOS de una apelación civil no redacta en lenguaje constitucional', async () => {
     for (const matter of ['civil', 'Civil', 'federal', 'amparo']) {
       const text = await render(civilAppeal(matter), 'AGRAVIOS', 'argument', `ag-${matter}`);

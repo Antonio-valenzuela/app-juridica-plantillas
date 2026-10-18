@@ -229,13 +229,13 @@ test.describe('E2E-07 importador local', () => {
       }
       const body = route.request().postDataJSON() as { action?: string };
       if (body.action === 'analyze') {
-        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, scanId: 'scan-e2e', source: { kind: 'ZIP', name: 'Datos.zip', limited: false }, summary: { analyzed: 1, importable: 1, duplicates: 0, excluded: 0, damaged: 0, review: 0, unclassified: 0, categoryCounts: { ACUERDO: 1 }, matterCounts: { CIVIL: 1 } }, records: [record] }) });
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, scanId: 'scan-e2e', source: { kind: 'ZIP', name: 'banco-de-pruebas.zip', limited: false }, summary: { analyzed: 1, importable: 1, duplicates: 0, excluded: 0, damaged: 0, review: 0, unclassified: 0, categoryCounts: { ACUERDO: 1 }, matterCounts: { CIVIL: 1 } }, records: [record] }) });
       } else {
         await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, imported: [{ ...record, imported: true }], skipped: [] }) });
       }
     });
     await page.goto('/machotes?tab=biblioteca');
-    await page.getByLabel('Ruta local de carpeta o ZIP').fill('C:\\Users\\yahir\\Desktop\\Datos.zip');
+    await page.getByLabel('Ruta local de carpeta o ZIP').fill('RUTA_LOCAL');
     await page.getByRole('button', { name: 'Analizar fuente local' }).click();
     await expect(page.getByText('Importables', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Seleccionar importables' }).click();

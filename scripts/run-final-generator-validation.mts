@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // ─── LEER MANIFIESTO ────────────────────────────────────────────────────────
-  const manifestPath = path.resolve(repoRoot, 'audit/final-legal-readiness-2026/selected-cases.json');
+  const manifestPath = path.resolve(repoRoot, 'audit/banco-prueba/selected-cases.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
     productionDatabaseExcluded: boolean;
     cases: Array<{

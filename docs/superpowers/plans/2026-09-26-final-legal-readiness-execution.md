@@ -14,7 +14,7 @@
 
 - Preserve the current working tree and existing changes; no commit, push, reset, or destructive checkout.
 - Do not add multi-user roles, billing, collaboration, Windows packaging, installers, or case-specific hardcodes.
-- `Datos.zip` is test input only; it must not become production data.
+- `banco-de-pruebas.zip` is test input only; it must not become production data.
 - No invented names, dates, facts, parties, authorities, statutes, jurisprudence, procedural acts, or client positions.
 - Keep `REQUIERE_REVISIÓN`, readiness, quality, provenance, manual-edit, and export guards fail-closed.
 - Use PowerShell for the real run and retain exact commands, timings, warnings, errors, provider metadata, output hashes, and render evidence.
@@ -27,8 +27,8 @@
 **Files:**
 - Read: `package.json`, `.env.example`, `prisma/schema.prisma`, `AGENTS.md`, `CLAUDE.md`
 - Read: `scripts/trace-real-appeal.ps1`, `scripts/validate-e2e-real.mts`, `scripts/release-gate.mjs`
-- Create: `audit/final-legal-readiness-2026/baseline/README.md`
-- Create: `audit/final-legal-readiness-2026/baseline/environment.json`
+- Create: `audit/banco-prueba/baseline/README.md`
+- Create: `audit/banco-prueba/baseline/environment.json`
 
 **Interfaces:**
 - Consumes: current checkout, package scripts, environment variable names only.
@@ -39,7 +39,7 @@
 Run from PowerShell:
 
 ```powershell
-Set-Location 'C:\Users\yahir\Desktop\APP-plantillas'
+Set-Location 'RUTA_LOCAL'
 git status --short --branch
 git log -5 --oneline --decorate
 node --version
@@ -72,12 +72,12 @@ Save command, timestamp, exit code, warning count, error count, and notes in `ba
 
 **Files:**
 - Create: `scripts/select-final-legal-readiness-cases.ps1`
-- Create: `audit/final-legal-readiness-2026/selection-manifest.json`
-- Create: `audit/final-legal-readiness-2026/cases/01..06/source/`
+- Create: `audit/banco-prueba/selection-manifest.json`
+- Create: `audit/banco-prueba/cases/01..06/source/`
 - Test: `tests/integration/finalLegalReadinessManifest.test.ts`
 
 **Interfaces:**
-- Consumes: `C:\Users\yahir\Desktop\Datos.zip` central directory.
+- Consumes: `RUTA_LOCAL` central directory.
 - Produces: six source manifests with archive-relative paths, extensions, sizes, hashes after extraction, and selection rationale.
 
 - [ ] **Step 1: Add a manifest-contract test**
@@ -111,10 +111,10 @@ For each selected source, record format, page count, extracted text length, extr
 ### Task 3: Distill the two supplied DOCX references and unblock rendering
 
 **Files:**
-- Read: `C:\Users\yahir\Downloads\Recurso_Apelacion_Actualizado_2026_Galarza_Meza.docx`
-- Read: `C:\Users\yahir\Downloads\Recurso_de_Apelacion_Galarza_Meza_actualizado.docx`
-- Create: `audit/final-legal-readiness-2026/reference-comparison/`
-- Create: `audit/final-legal-readiness-2026/reference-comparison/reference-style.md`
+- Read: `RUTA_LOCAL`
+- Read: `RUTA_LOCAL`
+- Create: `audit/banco-prueba/reference-comparison/`
+- Create: `audit/banco-prueba/reference-comparison/reference-style.md`
 
 **Interfaces:**
 - Consumes: reference DOCX files, bundled documents runtime, and a supported renderer.
@@ -143,7 +143,7 @@ Document actual margins, typeface, title hierarchy, header/footer, numbering, pa
 **Files:**
 - Modify: `scripts/trace-real-appeal.ps1` only if the existing trace is generalizable; otherwise create `scripts/trace-final-legal-readiness.ps1`
 - Create: `scripts/final-legal-readiness-run.mts` only if existing `validate-e2e-real.mts` cannot be parameterized safely
-- Create: `audit/final-legal-readiness-2026/run-summary.json`
+- Create: `audit/banco-prueba/run-summary.json`
 - Test: `tests/integration/finalLegalReadinessEvidence.test.ts`
 
 **Interfaces:**
@@ -181,9 +181,9 @@ Run the focused test and a dry-run manifest validation. Do not call the provider
 ### Task 5: Execute the six real E2E cases and classify failures
 
 **Files:**
-- Create: `audit/final-legal-readiness-2026/cases/01..06/analysis.json`
-- Create: `audit/final-legal-readiness-2026/cases/01..06/logs/powershell.log`
-- Create: `audit/final-legal-readiness-2026/cases/01..06/case-report.md`
+- Create: `audit/banco-prueba/cases/01..06/analysis.json`
+- Create: `audit/banco-prueba/cases/01..06/logs/powershell.log`
+- Create: `audit/banco-prueba/cases/01..06/case-report.md`
 - Read-only review: upload, generation, status, review, DOCX, and PDF routes.
 
 **Interfaces:**
@@ -247,9 +247,9 @@ Confirm the real evidence changed at the causal boundary and that no source/prov
 ### Task 7: Export, render, and inspect six DOCX/PDF pairs
 
 **Files:**
-- Create: `audit/final-legal-readiness-2026/cases/01..06/outputs/`
-- Create: `audit/final-legal-readiness-2026/cases/01..06/renders/`
-- Create: `audit/final-legal-readiness-2026/cases/01..06/validation.json`
+- Create: `audit/banco-prueba/cases/01..06/outputs/`
+- Create: `audit/banco-prueba/cases/01..06/renders/`
+- Create: `audit/banco-prueba/cases/01..06/validation.json`
 - Test: existing export acceptance suites plus any focused regression from Task 6.
 
 **Interfaces:**
@@ -284,8 +284,8 @@ Keep the reference and final package inventories. Do not silently change page pr
 - Create: `FINAL_LEGAL_READINESS_REPORT.md`
 - Create: `FINAL_LEGAL_READINESS_REPORT.docx`
 - Create: `FINAL_LEGAL_READINESS_REPORT.pdf`
-- Create: `audit/final-legal-readiness-2026/report-source.md`
-- Create: `audit/final-legal-readiness-2026/report-renders/`
+- Create: `audit/banco-prueba/report-source.md`
+- Create: `audit/banco-prueba/report-renders/`
 
 **Interfaces:**
 - Consumes: baseline, selection manifest, six case reports, reference comparison, tests, build output, and render observations.

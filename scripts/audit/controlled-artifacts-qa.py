@@ -13,7 +13,7 @@ parser.add_argument('--inspected-pdf', action='append', default=[], choices=['co
                     help='Record only after a human/agent has inspected every page of the current render.')
 args = parser.parse_args()
 root = Path('audit/final-pre-windows-readiness')
-poppler = Path(r'C:\Users\yahir\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\poppler\Library\bin\pdftoppm.exe')
+poppler = Path(r'RUTA_LOCAL')
 results = []
 for case in ['contestacion', 'apelacion', 'amparo', 'penal']:
     directory = root / 'controlled-cases' / case

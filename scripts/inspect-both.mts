@@ -61,7 +61,7 @@ async function main() {
   const doc1Path = path.resolve('data/uploads/templates/1787377633126-Recurso_Revision_Amparo_Directo_800-2024_Version_Ampliada__1_.pdf');
   const doc2Path = path.resolve('data/uploads/templates/1787377598439-0129000036717288006AST.PDF');
 
-  await inspectDoc(doc1Path, 'Interponer recurso de revisión contra la sentencia dictada en el amparo directo', 'DOC 1: RECURSO REVISIÓN 800/2024');
+  await inspectDoc(doc1Path, 'Interponer recurso de revisión contra la sentencia dictada en el amparo directo', 'DOC 1: RECURSO REVISIÓN 999/2099');
   await inspectDoc(doc2Path, 'Contestar requerimiento o demanda laboral / administrativa', 'DOC 2: 0129000036717288006AST.PDF');
 }
 

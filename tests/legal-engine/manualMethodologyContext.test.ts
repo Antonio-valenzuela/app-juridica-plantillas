@@ -36,7 +36,7 @@ function appealFixture() {
     matter: 'civil', jurisdiction: 'local civil', flow: 'DOCUMENT_ANALYSIS',
   });
   doc.generationMetadata.externalProviderOptIn = true;
-  doc.caseRefs = { ...doc.caseRefs, expediente: '1152/2013' };
+  doc.caseRefs = { ...doc.caseRefs, expediente: '998/2099' };
   const block = {
     id: 'sec-agravios', kind: 'argument', sectionType: 'argument', title: 'AGRAVIOS', level: 1, order: 11,
     text: 'AGRAVIOS: desarrollar los agravios individualizados conforme al expediente.',

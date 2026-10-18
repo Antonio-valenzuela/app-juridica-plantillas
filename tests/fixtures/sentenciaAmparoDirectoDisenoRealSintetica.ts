@@ -15,13 +15,13 @@ export const MASKED_NAME = '***** ******* ********* *****';
 export const SENTENCIA_DISENO_REAL_PAGES = [
   [
     '- 1 -',
-    'AMPARO DIRECTO: 800/2024',
+    'AMPARO DIRECTO: 999/2099',
     'QUEJOSO:',
     MASKED_NAME,
     'MAGISTRADA PONENTE: MARTA SINTÉTICA OROZCO',
     'SECRETARIO: ELÍAS SINTÉTICO PRADO',
     'Zapopan, Jalisco. Acuerdo del Segundo Tribunal Colegiado en Materia de Trabajo del Tercer Circuito, correspondiente a la sesión de quince de abril de dos mil veintiséis.',
-    '(1) V I S T O, para resolver el juicio de amparo directo 800/2024.',
+    '(1) V I S T O, para resolver el juicio de amparo directo 999/2099.',
     '(2) R E S U L T A N D O:',
     'PRIMERO. Presentación de la demanda. Mediante escrito presentado el dos de mayo de dos mil veinticuatro, la parte quejosa solicitó el amparo contra el laudo de diez de abril de dos mil veinticuatro.',
     '(3) En la demanda de amparo se señaló lo siguiente:',

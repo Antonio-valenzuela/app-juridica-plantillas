@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$popplerRoot = 'C:\Users\yahir\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\poppler\Library\bin'
+$popplerRoot = 'RUTA_LOCAL'
 $pdfInfo = Join-Path $popplerRoot 'pdfinfo.exe'
 $pdfToPpm = Join-Path $popplerRoot 'pdftoppm.exe'
 $inputPath = [System.IO.Path]::GetFullPath($InputRoot)

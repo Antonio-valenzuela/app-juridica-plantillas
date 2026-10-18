@@ -6,13 +6,13 @@ import { PDFParse } from 'pdf-parse';
 
 /**
  * Verificación EN VIVO de la meta de 40 páginas (2026-10-16). NO es una prueba de regresión:
- * usa un documento real del cliente (copia de Datos.zip) y la IA configurada en el `.env` del servidor
+ * usa un documento real del cliente (copia de banco-de-pruebas.zip) y la IA configurada en el `.env` del servidor
  * aislado (:3201, base y almacenamiento temporales). Sin rutas interceptadas ni fixtures.
  * Solo corre con LIVE_PAGE_TARGET_40=1 y autorización expresa del titular.
  *   LIVE_PAGE_TARGET_40=1 E2E_BASE_URL=http://localhost:3201 npx playwright test -c playwright.phase3.config.ts phase3LivePageTarget40
  */
 const LIVE = process.env.LIVE_PAGE_TARGET_40 === '1';
-const SOURCE = process.env.LIVE_SOURCE || 'audit/final-legal-readiness-2026/cases/02/source/DEMANDA LABORAL DE NOE C4.docx';
+const SOURCE = process.env.LIVE_SOURCE || 'audit/banco-prueba/cases/02/source/DEMANDA LABORAL DE Actor Sintético C4.docx';
 const OUT = path.join(process.cwd(), 'audit', 'page-target-40-live', new Date().toISOString().replace(/[:.]/g, '-'));
 const EDIT_MARK = 'Nota de revisión del abogado añadida en el editor antes de exportar (verificación de integridad).';
 

@@ -6,7 +6,7 @@ describe('final legal readiness manifest', () => {
     const result = validateFinalLegalReadinessManifest({
       cases: Array.from({ length: 5 }, (_, index) => ({
         caseNumber: String(index + 1).padStart(2, '0'),
-        sourceRelativePath: `Datos/case-${index + 1}.docx`,
+        sourceRelativePath: `banco/caso-${index + 1}.docx`,
         sourceSha256: `hash-${index + 1}`,
         sourceBytes: 1000,
       })),
@@ -20,7 +20,7 @@ describe('final legal readiness manifest', () => {
     const result = validateFinalLegalReadinessManifest({
       cases: Array.from({ length: 6 }, (_, index) => ({
         caseNumber: '01',
-        sourceRelativePath: index === 0 ? 'data/uploads/production.docx' : 'Datos/case.docx',
+        sourceRelativePath: index === 0 ? 'data/uploads/production.docx' : 'banco/caso-.docx',
         sourceSha256: index === 0 ? 'same' : 'same',
         sourceBytes: 1000,
       })),

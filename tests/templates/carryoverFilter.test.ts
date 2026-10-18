@@ -20,7 +20,7 @@ Prueba 3: contrato de arrendamiento firmado.
 PROTESTO LO NECESARIO
 `;
 
-const caso = ['María López', 'Constructora Norte', '812/2026', 'Juzgado Segundo Civil de Zapopan', '3 de marzo de 2026'];
+const caso = ['María López', 'Constructora Norte', '995/2099', 'Juzgado de Prueba', '3 de marzo de 2026'];
 
 describe('filtro anti-arrastre', () => {
   const blocklist = buildCarryoverBlocklist(template, caso);
@@ -63,7 +63,7 @@ describe('filtro anti-arrastre', () => {
   it('no bloquea lo que el caso nuevo comparte ni datos legítimos nuevos', () => {
     const shared = buildCarryoverBlocklist(template, ['Juan Pérez', 'Juzgado Primero Civil de Guadalajara', '345/2022']);
     expect(findCarryover('Juan Pérez comparece en el expediente 345/2022.', shared)).toEqual([]);
-    expect(findCarryover('Expediente 812/2026, el 3 de marzo de 2026, por $12,500.', blocklist)).toEqual([]);
+    expect(findCarryover('Expediente 995/2099, el 3 de marzo de 2026, por $12,500.', blocklist)).toEqual([]);
     expect(findCarryover('Conforme al artículo 2398 del Código Civil.', blocklist)).toEqual([]);
   });
 

@@ -15,7 +15,7 @@ const appealFromAmparoSentence = () => {
     id: 'apelacion-from-amparo', documentType: 'apelacion_civil', documentTypeLabel: 'recurso de apelación civil',
     matter: 'amparo', jurisdiction: 'local civil', flow: 'DOCUMENT_ANALYSIS',
   });
-  doc.caseRefs = { ...doc.caseRefs, expediente: '1152/2013' };
+  doc.caseRefs = { ...doc.caseRefs, expediente: '998/2099' };
   doc.parties = {
     ...doc.parties,
     actor: 'JUAN PÉREZ SÁNCHEZ',

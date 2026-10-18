@@ -34,7 +34,7 @@ Pestañas encontradas en la barra lateral: **12** (Inicio, Motor Jurídico, Escr
 
 ## Expedientes duplicados
 
-Son **borradores distintos** (IDs distintos), no filas duplicadas en la base. Hoy la API devuelve 5 con `800/2024` (la tabla muestra 3 en la primera pantalla) y 2 con `1152/2013`:
+Son **borradores distintos** (IDs distintos), no filas duplicadas en la base. Hoy la API devuelve 5 con `999/2099` (la tabla muestra 3 en la primera pantalla) y 2 con `998/2099`:
 
 | Título | ID | Creado (UTC) |
 |---|---|---|
@@ -171,7 +171,7 @@ Capturas antes/después a 1440 y 1024 px: `audit/patron-detalle/{lote-1,computo,
 
 - `app/machotes/lib/caseVersions.ts` (`groupCaseVersions`) agrupa los borradores que comparten el escrito (el título sin la fecha final), el expediente y la materia. La fila muestra la versión más reciente y la etiqueta «N versiones». Nunca agrupa borradores sin expediente ni expedientes locales.
 - Al abrir la ficha aparece «Versiones (N)», con fecha y hora de cada versión: «Ver ficha» cambia la ficha mostrada y «Abrir» abre ese borrador (`onOpenCase` con su ID). No se borra, une ni modifica ningún dato; el contador «N asuntos persistidos» sigue contando todos.
-- Con los datos actuales de `:3200`, 12 borradores quedan en 6 filas: 800/2024 con 5 versiones, 287/2007 con 2 y 1152/2013 con 2. Capturas en `audit/patron-detalle/versiones/` (antes y después, a 1440 y 1024 px).
+- Con los datos actuales de `:3200`, 12 borradores quedan en 6 filas: 999/2099 con 5 versiones, 994/2099 con 2 y 998/2099 con 2. Capturas en `audit/patron-detalle/versiones/` (antes y después, a 1440 y 1024 px).
 
 ## phase3Flow
 

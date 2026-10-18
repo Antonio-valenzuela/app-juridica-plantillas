@@ -18,7 +18,7 @@ beforeAll(() => {
 });
 
 const SYNTHETIC_LEGAL_TEXT = [
-  'EXPEDIENTE: 800/2024',
+  'EXPEDIENTE: 999/2099',
   '',
   'ACTOR: JUAN PÉREZ',
   'DEMANDADO: EMPRESA DEMO S.A.',
@@ -169,7 +169,7 @@ describe('FRONTEND REGRESSION — PDF UPLOAD → EXTRACCIÓN → UI', () => {
   // Test 4 — selected document identity (multi-document)
   it('Test4: multi-document — IDs, preview, metadata no se mezclan', () => {
     const textA = SYNTHETIC_LEGAL_TEXT;
-    const textB = SYNTHETIC_LEGAL_TEXT.replace('800/2024', '801/2024').replace('JUAN PÉREZ', 'ANA GARCÍA');
+    const textB = SYNTHETIC_LEGAL_TEXT.replace('999/2099', '801/2024').replace('JUAN PÉREZ', 'ANA GARCÍA');
 
     const srcA = createSourceFromText(textA, 'doc-A', 'A-800.pdf');
     const srcB = createSourceFromText(textB, 'doc-B', 'B-801.pdf');
@@ -219,7 +219,7 @@ describe('FRONTEND REGRESSION — PDF UPLOAD → EXTRACCIÓN → UI', () => {
     // caseAnalysis per-doc should be distinct (expediente)
     const analysisA = reconstructCaseAnalysis([srcA], '');
     const analysisB = reconstructCaseAnalysis([srcB], '');
-    expect(analysisA.caseNumbers.principal).toBe('800/2024');
+    expect(analysisA.caseNumbers.principal).toBe('999/2099');
     expect(analysisB.caseNumbers.principal).toBe('801/2024');
     expect(analysisA.caseNumbers.principal).not.toBe(analysisB.caseNumbers.principal);
     // Evidence should be present for both and distinct in content due to different expediente context? At least not mixed

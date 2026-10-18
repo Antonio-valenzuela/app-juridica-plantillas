@@ -22,7 +22,7 @@ const document_ = () => {
     documentTypeLabel: 'recurso de apelación civil', matter: 'civil',
     jurisdiction: 'local civil', flow: 'DOCUMENT_ANALYSIS',
   });
-  doc.caseRefs = { ...doc.caseRefs, expediente: '1152/2013' };
+  doc.caseRefs = { ...doc.caseRefs, expediente: '998/2099' };
   doc.parties = {
     ...doc.parties,
     actor: 'JUAN PÉREZ SÁNCHEZ',
@@ -35,7 +35,7 @@ const document_ = () => {
 const CANDIDATES: Array<{ title: string; sectionType: string; text: string }> = [
   {
     title: 'RESOLUCIÓN RECURRIDA', sectionType: 'background',
-    text: 'La resolución recurrida fue dictada dentro del expediente 1152/2013 por el Juzgado de Primera Instancia competente en materia civil. La parte apelante sostiene que dicha resolución no tomó en cuenta el contrato de arrendamiento que obra en autos. De las constancias se advierte que el contrato fue presentado oportunamente.',
+    text: 'La resolución recurrida fue dictada dentro del expediente 998/2099 por el Juzgado de Primera Instancia competente en materia civil. La parte apelante sostiene que dicha resolución no tomó en cuenta el contrato de arrendamiento que obra en autos. De las constancias se advierte que el contrato fue presentado oportunamente.',
   },
   {
     title: 'ANTECEDENTES PROCESALES', sectionType: 'background',
@@ -107,7 +107,7 @@ function metricsFor(admission: typeof admissionBefore | typeof admissionAfter, d
   };
 }
 
-describe('REPLAY OFFLINE de la regresión de generación — Apelación Civil 1152/2013', () => {
+describe('REPLAY OFFLINE de la regresión de generación — Apelación Civil 998/2099', () => {
   const doc = document_();
   const before = metricsFor(admissionBefore, doc as any);
   const after = metricsFor(admissionAfter, doc as any);
@@ -158,7 +158,7 @@ describe('REPLAY OFFLINE de la regresión de generación — Apelación Civil 11
     mkdirSync('audit/legal-generation-quality-recovery/appeal-replay', { recursive: true });
     writeFileSync('audit/legal-generation-quality-recovery/appeal-replay/report.json', JSON.stringify({
       scope: 'OFFLINE_REPLAY_NOT_GENERATION',
-      expediente: '1152/2013', documentType: 'apelacion_civil',
+      expediente: '998/2099', documentType: 'apelacion_civil',
       before, after, identitySections: report,
     }, null, 2));
 

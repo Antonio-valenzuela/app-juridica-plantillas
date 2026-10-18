@@ -61,7 +61,7 @@ type CaseResult = {
 };
 
 const repoRoot = process.cwd();
-const auditRoot = path.resolve(repoRoot, 'audit/final-legal-readiness-2026');
+const auditRoot = path.resolve(repoRoot, 'audit/banco-prueba');
 const manifestPath = path.join(auditRoot, 'selected-cases.json');
 
 function nowIso(): string {

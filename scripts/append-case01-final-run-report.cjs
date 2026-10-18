@@ -84,7 +84,7 @@ El pipeline terminó, pero el preflight DRAFT rechazó la exportación porque fa
 | Texto extraído | ${report.sourceAnalysis.extractedCharacters.toLocaleString('es-MX')} caracteres |
 | Hechos / pretensiones / pruebas extraídas | ${report.sourceAnalysis.facts} / ${report.sourceAnalysis.claims} / ${report.sourceAnalysis.evidence} |
 
-${source}-Manifiesto de casos: \`audit/final-legal-readiness-2026/selected-cases.json\`.
+${source}-Manifiesto de casos: \`audit/banco-prueba/selected-cases.json\`.
 - Base productiva: excluida por el manifiesto; el ZIP de pruebas no se incorporó a Prisma.
 - Consentimiento para esta prueba externa: \`privateCaseContext=${report.meta.privateCaseContext}\`, \`externalProviderOptIn=${report.meta.externalProviderOptIn}\`.
 

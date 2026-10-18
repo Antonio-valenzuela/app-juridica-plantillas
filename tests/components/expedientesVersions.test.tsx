@@ -14,10 +14,10 @@ const draft = (id: string, title: string, expediente: string | null, updatedAt: 
   ({ ...base, id, title, expediente, matter, createdAt: updatedAt, updatedAt });
 
 const cases = [
-  draft('rev-3', 'Recurso de Revisión en Amparo Directo - 16/10/2026', '800/2024', '2026-10-17T03:48:58.801Z'),
-  draft('rev-2', 'Recurso de Revisión en Amparo Directo - 16/10/2026', '800/2024', '2026-10-17T03:47:48.878Z'),
-  draft('otro', 'Contestación de Demanda Civil - 16/10/2026', '287/2007', '2026-10-16T10:00:00.000Z', 'Civil'),
-  draft('rev-1', 'Recurso de Revisión en Amparo Directo - 14/10/2026', '800/2024', '2026-10-14T16:10:40.322Z'),
+  draft('rev-3', 'Recurso de Revisión en Amparo Directo - 16/10/2026', '999/2099', '2026-10-17T03:48:58.801Z'),
+  draft('rev-2', 'Recurso de Revisión en Amparo Directo - 16/10/2026', '999/2099', '2026-10-17T03:47:48.878Z'),
+  draft('otro', 'Contestación de Demanda Civil - 16/10/2026', '994/2099', '2026-10-16T10:00:00.000Z', 'Civil'),
+  draft('rev-1', 'Recurso de Revisión en Amparo Directo - 14/10/2026', '999/2099', '2026-10-14T16:10:40.322Z'),
   draft('sin-exp-a', 'Contestación de Demanda Laboral - 16/10/2026', null, '2026-10-16T09:00:00.000Z', 'Laboral'),
   draft('sin-exp-b', 'Contestación de Demanda Laboral - 16/10/2026', null, '2026-10-16T08:00:00.000Z', 'Laboral'),
 ];
@@ -30,7 +30,7 @@ describe('groupCaseVersions (solo presentación)', () => {
   it('agrupa mismo escrito + expediente + materia, la más reciente al frente, sin perder ni alterar ningún borrador', () => {
     const snapshot = JSON.stringify(cases);
     const groups = groupCaseVersions(cases);
-    const amparo = groups.find((group) => group.latest.expediente === '800/2024')!;
+    const amparo = groups.find((group) => group.latest.expediente === '999/2099')!;
     expect(amparo.versions.map((item) => item.id)).toEqual(['rev-3', 'rev-2', 'rev-1']);
     expect(amparo.latest.id).toBe('rev-3');
     expect(groups.flatMap((group) => group.versions).map((item) => item.id).sort()).toEqual(cases.map((item) => item.id).sort());

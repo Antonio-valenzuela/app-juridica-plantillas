@@ -81,8 +81,8 @@ describe('«Generar con Machote» usa «Usar mi plantilla (diseño y estructura)
 
   it('el texto del escrito abierto alimenta el filtro anti-arrastre', () => {
     const source = documentAsTemplateSource(openDocument);
-    const blocklist = buildCarryoverBlocklist(source.text, ['María López', '812/2026']);
+    const blocklist = buildCarryoverBlocklist(source.text, ['María López', '995/2099']);
     expect(findCarryover('Juan Pérez reclama $85,000 en el expediente 345/2022.', blocklist).length).toBeGreaterThan(0);
-    expect(findCarryover('María López reclama el pago en el expediente 812/2026.', blocklist)).toEqual([]);
+    expect(findCarryover('María López reclama el pago en el expediente 995/2099.', blocklist)).toEqual([]);
   });
 });

@@ -22,9 +22,9 @@ async function main() {
   const provider = createDefaultResearchProviderRouter();
   const doc = await runGenerationPipeline({
     sourceDocuments: [sourceDoc],
-    userInstruction: 'Interponer recurso de revisión amparo directo 800/2024',
+    userInstruction: 'Interponer recurso de revisión amparo directo 999/2099',
     legalResearchProvider: provider,
-    expediente: '800/2024',
+    expediente: '999/2099',
     generationExtension: {
       generationMode: 'extended',
       targetPages: 40,

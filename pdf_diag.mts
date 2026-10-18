@@ -13,7 +13,7 @@ function stats(doc: any, label: string) {
   return blocks;
 }
 
-const HEADER = 'SUPREMA CORTE DE JUSTICIA DE LA NACIÓN\nP R E S E N T E\n\nJUAN PÉREZ GARCÍA, por mi propio derecho.\n\nEXPEDIENTE: AMPARO DIRECTO 800/2024\n\nRECURSO DE REVISIÓN EN AMPARO DIRECTO';
+const HEADER = 'SUPREMA CORTE DE JUSTICIA DE LA NACIÓN\nP R E S E N T E\n\nJUAN PÉREZ GARCÍA, por mi propio derecho.\n\nEXPEDIENTE: AMPARO DIRECTO 999/2099\n\nRECURSO DE REVISIÓN EN AMPARO DIRECTO';
 const BODY_BLOCK = 'XVI. CONSIDERANDO SOBRE LA VALORACIÓN PROBATIVA\n\nLa autoridad responsable omitió valorar la prueba documental conforme al principio de exhaustividad, transgrediendo los artículos 14, 16 y 17 constitucionales y la jurisprudencia 1a./J. 43/2014 de la Primera Sala.';
 const CLOSING = 'PETITORIOS\n\nPRIMERO. Tenerme por presentado oportunamente.\nSEGUNDO. Declarar fundados los agravios.\nTERCERO. Sin condena en costas.\n\nPROTESTO LO NECESARIO.\n\nCiudad de México, a 15 de marzo de 2024.\n\nJUAN PÉREZ GARCÍA\nQUEJOSO / RECURRENTE';
 const LONG_TEXT = [HEADER, ...Array.from({ length: 22 }, () => BODY_BLOCK), CLOSING].join('\n\n');

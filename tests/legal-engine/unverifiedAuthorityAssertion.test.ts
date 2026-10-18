@@ -4,7 +4,7 @@ import { evaluateGeneratedLegalAdmission } from '@/lib/legal-engine/generatedLeg
 import { createEmptyDocument } from '@/lib/legal-engine/types';
 
 /**
- * Regresiones observadas en la generación real de la apelación 1152/2013
+ * Regresiones observadas en la generación real de la apelación 998/2099
  * (audit/legal-generation-quality-recovery/real-appeal-1152-2013):
  *  - "[NO VERIFICADO: tesis X] ... establece que ..." se leía como derecho cierto.
  *  - Una afirmación de competencia se afirmaba sin verificación.

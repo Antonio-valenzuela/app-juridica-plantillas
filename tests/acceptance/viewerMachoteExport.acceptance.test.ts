@@ -224,7 +224,7 @@ describe('Quality Gate, Ciclo de Vida y Export Guards', () => {
               id: 'b-proemio',
               layer: 'USER_POSITION',
               trustLevel: 'VERIFIED',
-              text: 'EXPEDIENTE: 800/2024. H. TRIBUNAL COLEGIADO DE CIRCUITO. El suscrito quejoso comparece a interponer formal recurso de revisión.',
+              text: 'EXPEDIENTE: 999/2099. H. TRIBUNAL COLEGIADO DE CIRCUITO. El suscrito quejoso comparece a interponer formal recurso de revisión.',
             },
           ],
         }),
@@ -294,7 +294,7 @@ describe('Quality Gate, Ciclo de Vida y Export Guards', () => {
   it('exporta exitosamente a DOCX y PDF real cuando el documento está en READY_TO_EXPORT', async () => {
     const doc = createEmptyDocument({
       id: 'doc-export-test',
-      title: 'Recurso de Revisión Sintético 800/2024',
+      title: 'Recurso de Revisión Sintético 999/2099',
       matter: 'amparo',
       documentType: 'amparo_directo_revision',
       documentTypeLabel: 'Recurso de Revisión en Amparo Directo',
@@ -308,7 +308,7 @@ describe('Quality Gate, Ciclo de Vida y Export Guards', () => {
               id: 'b-proemio',
               layer: 'USER_POSITION',
               trustLevel: 'VERIFIED',
-              text: 'EXPEDIENTE 800/2024. ANTE EL H. TRIBUNAL COLEGIADO DE CIRCUITO COMPAREZCO CON DEBIDA PERSONALIDAD.',
+              text: 'EXPEDIENTE 999/2099. ANTE EL H. TRIBUNAL COLEGIADO DE CIRCUITO COMPAREZCO CON DEBIDA PERSONALIDAD.',
             },
           ],
         }),

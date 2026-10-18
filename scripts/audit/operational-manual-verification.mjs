@@ -18,7 +18,7 @@ const sample = index.pages.flatMap(p => {
   return fragments.length ? [fragments[0],fragments[Math.floor(fragments.length/2)],fragments.at(-1)] : [];
 }).filter((f,i,a) => a.findIndex(v => v.stableRuleId === f.stableRuleId) === i);
 const evidence = {manifest:index.manifest,
-  hashes:{original:sha('C:/Users/yahir/Downloads/LEX_PLANTILLAS_MANUAL_OPERATIVO.pdf'),copy:sha('data/documents/operational-manual/v1.0/LEX_PLANTILLAS_MANUAL_OPERATIVO.pdf')},
+  hashes:{original:sha('RUTA_LOCAL'),copy:sha('data/documents/operational-manual/v1.0/LEX_PLANTILLAS_MANUAL_OPERATIVO.pdf')},
   reconstructedPages:index.pages.filter(p => index.fragments.filter(f=>f.physicalPage===p.physicalPage).map(f=>f.originalText).join('')===p.text).length,
   totalFragments:index.fragments.length, unclassifiedCount:unclassified.length,
   sampleCount:sample.length,sample,

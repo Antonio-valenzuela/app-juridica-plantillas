@@ -103,10 +103,10 @@ function findMissing(original: string, extracted: string): string[] {
 
 describe('Exportación PDF — texto REAL, cp1252, multipágina e integridad', () => {
   it('emite cada línea con espaciado tipográfico natural, sin posicionar cada palabra con una estimación', async () => {
-    const buffer = await exportUniversalToPdf(makeDoc('HOSPITAL CIVIL DE ORIENTE'));
+    const buffer = await exportUniversalToPdf(makeDoc('HOSPITAL DE PRUEBA'));
     const rawPdf = buffer.toString('latin1');
 
-    expect(rawPdf).toContain('(HOSPITAL CIVIL DE ORIENTE) Tj');
+    expect(rawPdf).toContain('(HOSPITAL DE PRUEBA) Tj');
   });
 
   it('caracteres acentados y símbolos cp1252 (— “ ” ¿ ¡) sobreviven la exportación', async () => {

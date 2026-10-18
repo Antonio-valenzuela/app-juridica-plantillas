@@ -20,11 +20,11 @@ function createTestSentenciaSourceDocument() {
       chars: 600,
       text: [
         'SEGUNDO TRIBUNAL COLEGIADO EN MATERIA ADMINISTRATIVA DEL TERCER CIRCUITO',
-        'AMPARO DIRECTO 800/2024',
+        'AMPARO DIRECTO 999/2099',
         'QUEJOSO: EMPRESA DEMANDANTE S.A. DE C.V.',
         'SENTENCIA DEFINITIVA',
         'ANTECEDENTES',
-        'El 3 de enero de 2024 se presentó demanda de amparo directo en el expediente AMPARO DIRECTO 800/2024.',
+        'El 3 de enero de 2024 se presentó demanda de amparo directo en el expediente AMPARO DIRECTO 999/2099.',
         'El 10 de febrero de 2024 se dictó la sentencia definitiva recurrida.',
         'El 15 de marzo de 2024 se interpuso en tiempo el presente recurso de revisión.',
       ].join('\n'),
@@ -91,7 +91,7 @@ describe('FALLBACK E2E — Deterministic Fallback Delivery Across All Sections',
     // 3. ANTECEDENTES proviene determinísticamente de la fuente
     const antecedentesText = getSectionContent(result, /antecedente/i);
     expect(antecedentesText).toMatch(/3 de enero de 2024|se presentó demanda/i);
-    expect(result.caseRefs.expediente).toBe('800/2024');
+    expect(result.caseRefs.expediente).toBe('999/2099');
 
     // 4. Secciones sustantivas clave tienen desarrollo sustantivo y fondo jurídico real
     const interesText = getSectionContent(result, /inter[eé]s\s+excepcional/i);

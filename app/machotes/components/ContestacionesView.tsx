@@ -945,67 +945,6 @@ export function ContestacionesView({
                         </button>
                       </td>
                     </tr>
-
-                    {/* Fila Modelo EXP-800/2024 */}
-                    <tr className="hover:bg-surface-container-low transition-colors bg-surface-container-lowest">
-                      <td className="py-3 px-4 align-top">
-                        <div className="flex items-start gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-secondary mt-1.5 shrink-0" />
-                          <div>
-                            <div className="font-code-sm text-xs font-bold text-on-surface flex items-center gap-1.5">
-                              <span>EXP. 800/2024</span>
-                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-semibold uppercase">
-                                Perentorio
-                              </span>
-                            </div>
-                            <div className="font-body-sm text-[11px] text-on-surface-variant mt-0.5">
-                              Juzgado 14° Civil de Proceso Escrito CDMX
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 align-top">
-                        <div className="max-w-[210px]">
-                          <div className="font-semibold text-xs text-on-surface truncate">
-                            Inmobiliaria del Norte S.A.
-                          </div>
-                          <div className="font-body-sm text-[11px] text-on-surface-variant truncate mt-0.5">
-                            vs. Desarrollos Civiles MX
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 align-top">
-                        <div className="max-w-[230px]">
-                          <span className="font-semibold text-xs text-on-surface block truncate">
-                            Contestación con Reconvención
-                          </span>
-                          <p className="font-body-sm text-xs text-on-surface-variant line-clamp-1 italic mt-0.5 font-serif">
-                            Exceptio non adimpleti contractus y Plus Petitio
-                          </p>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 align-top text-center">
-                        <span className="font-code-sm text-xs text-on-surface-variant px-2 py-0.5 rounded bg-surface-container">
-                          18 fs.
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 align-top">
-                        <div className="flex items-center gap-1 text-primary font-semibold text-xs">
-                          <span className="material-symbols-outlined text-[16px]">priority_high</span>
-                          <span>Vence en 3 días</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 align-top text-right">
-                        <button
-                          type="button"
-                          onClick={() => setViewMode('workspace')}
-                          className="h-8 px-3 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold text-xs transition-colors inline-flex items-center gap-1 border border-outline-variant/30"
-                        >
-                          <span className="material-symbols-outlined text-[15px]">visibility</span>
-                          <span>Consultar</span>
-                        </button>
-                      </td>
-                    </tr>
                   </tbody>
                 </table>
               </div>

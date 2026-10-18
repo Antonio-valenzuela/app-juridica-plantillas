@@ -27,10 +27,10 @@ export const BYTES = 'b5 ac 60 8f 31 34 2c 3f 7a d6 63 16 89 d8 03 8b 4c 21 9e 7
 
 export const SENTENCIA_VERSION_PUBLICA = [
   [
-    '- 1 -', '\t', 'AMPARO DIRECTO:', '800/2024', 'QUEJOSO:', '***** ******* ********* *****',
+    '- 1 -', '\t', 'AMPARO DIRECTO:', '999/2099', 'QUEJOSO:', '***** ******* ********* *****',
     'MAGISTRADO PONENTE:', PONENTE, 'SECRETARIA:', SECRETARIA,
     'Zapopan, Jalisco. Acuerdo del Tribunal Colegiado en Materia de Trabajo del Tercer Circuito, correspondiente a la sesión de quince de abril de dos mil veintiséis.',
-    '(1) V I S T O, para resolver el juicio de amparo directo 800/2024.',
+    '(1) V I S T O, para resolver el juicio de amparo directo 999/2099.',
     '(2) R E S U L T A N D O:',
     'PRIMERO. Presentación de la demanda. Mediante escrito presentado el dos de mayo de dos mil veinticuatro, la parte quejosa solicitó el amparo contra el laudo de diez de abril de dos mil veinticuatro, dictado por el Pleno del Tribunal de Arbitraje y Escalafón del Estado de Jalisco en el juicio laboral 120/2022.',
     '(3) El trabajador reclamó la reinstalación, el pago de salarios caídos y el de horas extras, por un despido que calificó de injustificado.',

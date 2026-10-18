@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js/TypeScript, Vitest, generación jurídica existente, exportadores DOCX/PDF actuales.
 
-**Spec:** `C:/Users/yahir/.codex/attachments/c805d0e6-148d-46b7-a20b-12c999e7ccd3/Texto pegado.txt`
+**Spec:** `RUTA_LOCAL pegado.txt`
 
 ## Global Constraints
 

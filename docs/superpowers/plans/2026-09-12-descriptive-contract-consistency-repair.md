@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Vitest, Next.js legal-engine modules, NVIDIA provider seam, PowerShell verification.
 
-**Spec:** `C:/Users/yahir/.codex/attachments/acf35a15-be0d-4fc3-bcde-4d9554addd9f/pasted-text.txt`
+**Spec:** `RUTA_LOCAL`
 
 ## Global Constraints
 

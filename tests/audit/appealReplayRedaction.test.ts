@@ -4,10 +4,10 @@ import { redactAppealReplayText } from '@/scripts/audit/appealReplayRedaction';
 describe('appeal real replay redaction', () => {
   it('redacts confirmed party names despite a one-character OCR error', () => {
     const result = redactAppealReplayText(
-      'Se absuelve a Person0 Alfa Ochoa y se agrega la constancia.',
-      ['Persona Alfa Ochoa'],
+      'Se absuelve a Person0 Alfa Sintética y se agrega la constancia.',
+      ['Persona Alfa Sintética'],
     );
-    expect(result).not.toMatch(/Person0|Persona Alfa Ochoa/i);
+    expect(result).not.toMatch(/Person0|Persona Alfa Sintética/i);
     expect(result).toContain('[PARTE]');
   });
 

@@ -44,7 +44,7 @@ describe('source document classifier precedence and matter context', () => {
 
   it('preserves a real amparo-direct judgment as SENTENCIA_AMPARO_DIRECTO', () => {
     const document = source([
-      'AMPARO DIRECTO 800/2024',
+      'AMPARO DIRECTO 999/2099',
       'VISTOS para resolver.',
       'RESULTANDO',
       'CONSIDERANDO',

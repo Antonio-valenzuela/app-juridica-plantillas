@@ -58,7 +58,7 @@ it('escritorio: «Nuevo expediente local» abre su propio panel lateral y Esc lo
   expect(create).toHaveFocus();
 });
 it('web: la ficha abre en el panel lateral sin controles de escritorio', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true, cases: [{ id: 'cweb1', title: 'ASUNTO WEB', expediente: '800/2024', jurisdiction: 'federal', sourceCount: 1, updatedAt: '2026-10-17T00:00:00.000Z' }] })));
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true, cases: [{ id: 'cweb1', title: 'ASUNTO WEB', expediente: '999/2099', jurisdiction: 'federal', sourceCount: 1, updatedAt: '2026-10-17T00:00:00.000Z' }] })));
   render(<WorkspaceModulesView mode="expedientes" onNavigate={() => undefined} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Abrir ficha' }));
   const dialog = screen.getByRole('dialog', { name: 'ASUNTO WEB' });

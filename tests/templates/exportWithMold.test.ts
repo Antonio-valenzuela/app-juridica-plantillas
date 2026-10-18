@@ -20,7 +20,7 @@ function makeDocument(extraFact?: string) {
     documentType: 'escrito_libre',
     documentTypeLabel: 'Escrito libre',
     sections: [
-      createDocumentNode({ id: 'proemio', order: 10, title: 'PROEMIO Y COMPARECENCIA', type: 'identity', content: [block('b1', 'María López comparece en el expediente 812/2026 con la personalidad debidamente acreditada para exponer lo siguiente.')] }),
+      createDocumentNode({ id: 'proemio', order: 10, title: 'PROEMIO Y COMPARECENCIA', type: 'identity', content: [block('b1', 'María López comparece en el expediente 995/2099 con la personalidad debidamente acreditada para exponer lo siguiente.')] }),
       createDocumentNode({
         id: 'hechos', order: 20, title: 'HECHOS', type: 'facts',
         content: [block('b2', 'El 3 de marzo de 2026 la actora entregó el inmueble arrendado a la demandada sin objeción alguna.'), ...(extraFact ? [block('b3', extraFact)] : [])],
@@ -30,7 +30,7 @@ function makeDocument(extraFact?: string) {
     ],
     generationMetadata: { ...createEmptyDocument().generationMetadata, preflight: { status: 'READY', missingFields: [] } } as never,
   });
-  doc.intake = { request: `caso sintético María López 812/2026 3 de marzo de 2026 ${extraFact || ''}` } as never;
+  doc.intake = { request: `caso sintético María López 995/2099 3 de marzo de 2026 ${extraFact || ''}` } as never;
   doc.missingFields = [];
   doc.anonymizedFields = [];
   doc.validation = { isValid: true, errors: [], warnings: [] };
@@ -38,7 +38,7 @@ function makeDocument(extraFact?: string) {
   return markDocumentAsReadyToExport(doc, { explicit: true });
 }
 
-const caseValues = ['María López', '812/2026', '3 de marzo de 2026'];
+const caseValues = ['María López', '995/2099', '3 de marzo de 2026'];
 
 describe('exportación con el diseño de la plantilla del abogado', () => {
   it('DOCX: conserva el diseño y solo contiene el escrito nuevo', async () => {

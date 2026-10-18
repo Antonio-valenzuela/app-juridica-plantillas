@@ -4,7 +4,7 @@ import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
 import type { UniversalLegalDocument } from '@/lib/legal-engine/types';
 
-const AUDIT_ROOT = path.resolve(process.cwd(), 'audit/final-legal-readiness-2026');
+const AUDIT_ROOT = path.resolve(process.cwd(), 'audit/banco-prueba');
 
 export interface ReexportResult {
   caseNumber: string;

@@ -83,13 +83,13 @@ async function run() {
   console.log('\n[2. CASE ANALYSIS & ISSUES] Analizando caso jurídico...');
   const caseAnalysis = reconstructCaseAnalysis(
     [sourceDoc],
-    'Interponer recurso de revisión contra la sentencia del Tribunal Colegiado en el amparo directo 800/2024',
+    'Interponer recurso de revisión contra la sentencia del Tribunal Colegiado en el amparo directo 999/2099',
   );
 
   const docTemplate = getDocumentTemplate('recurso_revision_amparo_directo') || getDocumentTemplate('universal');
   const baseDoc = markDocumentAsDraft({
     ...createEmptyDocument(),
-    title: 'Recurso de Revisión en Amparo Directo 800/2024',
+    title: 'Recurso de Revisión en Amparo Directo 999/2099',
     documentType: 'recurso_revision_amparo_directo',
     userInstruction: 'Interponer recurso de revisión en amparo directo',
   });

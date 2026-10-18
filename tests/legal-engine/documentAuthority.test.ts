@@ -160,7 +160,7 @@ describe('document authority validation', () => {
 
   it('does not classify expediente numbers, dates, or page counts as legal authorities', () => {
     const findings = validateDocumentAuthorities(authorityInput({
-      text: 'Expediente 800/2024; fecha 29/09/2026; consta de 14 páginas.',
+      text: 'Expediente 999/2099; fecha 29/09/2026; consta de 14 páginas.',
       authorityIds: [],
     }));
 

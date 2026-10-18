@@ -10,7 +10,7 @@ const appealDocument = () => {
     id: 'apelacion-proemio', documentType: 'apelacion_civil', documentTypeLabel: 'recurso de apelación civil',
     matter: 'civil', jurisdiction: 'local civil', flow: 'DOCUMENT_ANALYSIS',
   });
-  doc.caseRefs = { ...doc.caseRefs, expediente: '1152/2013' };
+  doc.caseRefs = { ...doc.caseRefs, expediente: '998/2099' };
   doc.parties = {
     ...doc.parties,
     actor: 'JUAN PÉREZ SÁNCHEZ',
@@ -63,7 +63,7 @@ describe('cada sección de identidad cumple una función distinta', () => {
 
   it('IDENTIFICACIÓN DEL ASUNTO fija expediente y tipo de promoción, no comparecencia', async () => {
     const asunto = await renderIdentity('IDENTIFICACIÓN DEL ASUNTO', 'sec-apelacion-asunto');
-    expect(asunto).toContain('1152/2013');
+    expect(asunto).toContain('998/2099');
     expect(asunto.toLowerCase()).toContain('apelaci');
     expect(asunto).not.toContain('comparezco a exponer');
   });
@@ -72,7 +72,7 @@ describe('cada sección de identidad cumple una función distinta', () => {
     const comparecencia = await renderIdentity('COMPARECENCIA Y PERSONALIDAD', 'sec-apelacion-comparecencia');
     expect(comparecencia).toContain('JUAN PÉREZ SÁNCHEZ');
     expect(comparecencia.toLowerCase()).toContain('personalidad');
-    expect(comparecencia).not.toContain('1152/2013');
+    expect(comparecencia).not.toContain('998/2099');
   });
 
   it('PROEMIO enuncia el propósito del escrito y no se confunde con la comparecencia', async () => {
