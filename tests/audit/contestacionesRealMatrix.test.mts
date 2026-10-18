@@ -1,4 +1,5 @@
 /** Explicit opt-in: one real pipeline invocation per synthetic fixture, no rerolls. */
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { it } from 'vitest';
 import { loadEnvConfig } from '@next/env';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -12,7 +13,7 @@ import { exportUniversalToDocx } from '@/lib/legal-engine/exportDocxUniversal';
 import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
 
 const enabled = process.env.RUN_CONTESTACIONES_REAL_MATRIX === '1';
-it.skipIf(!enabled)('one real generation per supported synthetic matter, with guarded DRAFT exports', async () => {
+it.skipIf(!LIVE_PROVIDER_TESTS || (!enabled))('one real generation per supported synthetic matter, with guarded DRAFT exports', async () => {
   loadEnvConfig(process.cwd()); // Read current configuration; never override keys, chain or models.
   const root = resolve('audit/final-contestaciones-validation', `run-${new Date().toISOString().replace(/[:.]/g, '-')}`);
   mkdirSync(root, { recursive: true });

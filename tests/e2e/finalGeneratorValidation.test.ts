@@ -14,6 +14,7 @@
  *   CASE=01 DEPTH=EXTENSIVE_40 npx vitest run tests/e2e/finalGeneratorValidation.test.ts
  */
 
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { describe, it, expect } from 'vitest';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -73,7 +74,7 @@ async function writeJson(filePath: string, val: unknown): Promise<void> {
 
 // ─── Test ─────────────────────────────────────────────────────────────────────
 
-describe('FINAL GENERATOR VALIDATION — E2E con providers reales', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('FINAL GENERATOR VALIDATION — E2E con providers reales', () => {
   const caseArg = process.env.CASE || '01';
   const depthArg = (process.env.DEPTH || 'EXTENSIVE_40') as DraftDepth;
 
@@ -107,7 +108,7 @@ describe('FINAL GENERATOR VALIDATION — E2E con providers reales', () => {
       console.log(`[VALIDATION] privateCaseContext=${PRIVATE_CASE_CONTEXT} externalProviderOptIn=${EXTERNAL_PROVIDER_OPT_IN}`);
 
       // ── Leer manifiesto ──────────────────────────────────────────────────────
-      const manifestPath = path.resolve(repoRoot, 'audit/final-legal-readiness-2026/selected-cases.json');
+      const manifestPath = path.resolve(repoRoot, 'audit/banco-prueba/selected-cases.json');
       const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
         productionDatabaseExcluded: boolean;
         cases: Array<{

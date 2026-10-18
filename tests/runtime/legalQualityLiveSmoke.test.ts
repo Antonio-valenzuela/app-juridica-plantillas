@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { it, expect } from 'vitest';
 import nextEnv from '@next/env';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import { auditLegalArgumentStructure } from '@/lib/legal-engine/legalArgumentCon
 import { createDocumentNode } from '@/lib/legal-engine/types';
 
 // Explicit opt-in; excluded from ordinary deterministic verification.
-it.skipIf(process.env.LEGAL_QUALITY_LIVE_SMOKE !== 'true')('one sanitized legal-contract smoke per type with unchanged router', async () => {
+it.skipIf(!LIVE_PROVIDER_TESTS || (process.env.LEGAL_QUALITY_LIVE_SMOKE !== 'true'))('one sanitized legal-contract smoke per type with unchanged router', async () => {
   nextEnv.loadEnvConfig(process.cwd(), false);
   const { defaultProviderRouter } = await import('@/lib/ai/providerRouter');
   const { getProviderChain } = await import('@/lib/ai/providerChain');

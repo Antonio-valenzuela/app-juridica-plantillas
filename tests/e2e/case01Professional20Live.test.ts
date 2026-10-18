@@ -1,9 +1,10 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { describe, it, expect } from 'vitest';
 import { runSingleCaseDepth } from '../../scripts/audit/run-professional-drafting-phase3';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-describe.skipIf(process.env.RUN_LIVE_PROVIDER_TESTS !== 'true')('Caso 01 — Generación Controlada PROFESSIONAL_20 con Proveedor Real', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('Caso 01 — Generación Controlada PROFESSIONAL_20 con Proveedor Real', () => {
   it('ejecuta Caso 01 en PROFESSIONAL_20 con proveedores reales y produce borrador sustantivo', async () => {
     process.env.PHASE3_USE_CONFIGURED_PROVIDERS = 'true';
     process.env.GEMINI_MODEL = 'gemini-flash-lite-latest';

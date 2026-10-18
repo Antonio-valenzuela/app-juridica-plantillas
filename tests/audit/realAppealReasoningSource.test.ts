@@ -1,11 +1,12 @@
 import { expect, it } from 'vitest';
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 import { extractAppealResolutionReview, extractAppealReasoningCandidates, lineView } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { redactAppealReplayText } from '@/scripts/audit/appealReplayRedaction';
 const pdfPath = process.env.APPEAL_SOURCE_PDF, cachePath = process.env.APPEAL_OCR_CACHE;
-const available = Boolean(pdfPath && cachePath && existsSync(pdfPath) && existsSync(cachePath));
+const available = LIVE_PROVIDER_TESTS && Boolean(pdfPath && cachePath && existsSync(pdfPath) && existsSync(cachePath));
 if (!available) console.warn('SKIP realAppealReasoningSource: faltan APPEAL_SOURCE_PDF / APPEAL_OCR_CACHE o sus archivos; no se ejecutó replay de fase 2b.');
   it.skipIf(!available)('replays real heading-delimited reasoning blocks offline, preserving originals and never verifying cited authorities', () => {
   const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');

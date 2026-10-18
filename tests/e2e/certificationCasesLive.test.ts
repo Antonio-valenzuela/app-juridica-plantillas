@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { describe, it, expect } from 'vitest';
 import { runSingleCaseDepth } from '../../scripts/audit/run-professional-drafting-phase3';
 import { readFile } from 'node:fs/promises';
@@ -13,9 +14,9 @@ function setupEnvironment() {
   process.env.AI_PROVIDER_RETRIES = '1';
 }
 
-describe.skipIf(process.env.RUN_LIVE_PROVIDER_TESTS !== 'true')('Certificación de Generador Jurídico — Casos Reales 01 a 06', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('Certificación de Generador Jurídico — Casos Reales 01 a 06', () => {
   // Caso 02
-  describe('Caso 02: Laboral (Noé C4 vs Ayuntamiento)', () => {
+  describe('Caso 02: Laboral (Actor Sintético C4 vs Ayuntamiento)', () => {
     it('ejecuta Caso 02 en EXTENSIVE_40 con calidad certificada', async () => {
       setupEnvironment();
       console.log('>>> EJECUTANDO CASO 02 EXTENSIVE_40 <<<');

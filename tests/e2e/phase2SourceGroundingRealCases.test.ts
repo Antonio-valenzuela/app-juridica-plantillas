@@ -1,7 +1,8 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { describe, expect, it } from 'vitest';
 import { runPhase2SourceGrounding } from '../../scripts/audit/run-phase2-source-grounding';
 
-describe.sequential('FASE 2 E2E source grounding with six real sources', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('FASE 2 E2E source grounding with six real sources', () => {
   it('runs SOURCE -> CLASSIFICATION -> ROUTING -> GENERATION without expected-type injection', async () => {
     const summary = await runPhase2SourceGrounding() as any;
 

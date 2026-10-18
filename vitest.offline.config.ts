@@ -15,7 +15,8 @@ import base from './vitest.config';
  */
 export default mergeConfig(base, defineConfig({
   test: {
-    setupFiles: ['tests/setup/offlineNetworkGuard.ts'],
+    // La config base ya instala la guarda; aquí se asegura incluso con LIVE_PROVIDER_TESTS=1.
+    setupFiles: process.env.LIVE_PROVIDER_TESTS === '1' ? ['tests/setup/offlineNetworkGuard.ts'] : [],
     exclude: [
       'tests/e2e/**',
       'tests/acceptance/**',
