@@ -54,6 +54,7 @@ import { evaluateSourceOutputCompatibility, inferSourceOutputType, type SourceOu
 import type { InferredSourceDocumentType } from './sourceDocumentTypes';
 import { getDocumentTypeByValue, resolveMatterLabel, resolveJurisdictionLabel, resolveDocumentTypeLabel, serializeTaxonomyForPipeline } from '@/lib/legal-taxonomy';
 import { renderPersonalTemplateText } from '@/lib/templates/personalTemplateBuilder';
+import { buildCarryoverBlocklist, CARRYOVER_FINDING_CODE, describeCarryover, filterCarryoverText } from '@/lib/templates/carryoverFilter';
 import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { getDocumentStrategy } from './documentStrategies';
@@ -5616,6 +5617,28 @@ export async function runGenerationPipeline(
     } catch (e: any) {
       if (String(e?.message || '').includes('DOCUMENT_CONTEXT_MISMATCH')) throw e;
       console.warn('[pipeline:validation] Error en validación semántica final (no bloqueante):', e?.message);
+    }
+
+    // Filtro anti-arrastre: con plantilla personal, ningún párrafo puede conservar datos del caso anterior.
+    if (doc.generationMetadata.generationMode === 'personal_template' && input.referenceDocumentText?.trim()) {
+      const caseValues: string[] = [
+        ...Object.values(doc.parties || {}),
+        ...Object.values(doc.caseRefs || {}),
+        ...Object.values((doc.intake as Record<string, unknown> | undefined) || {}),
+        ...Object.values(doc.variables || {}).map((variable: any) => variable?.value),
+        ...((caseAnalysis?.facts || []).map((fact: any) => fact?.text)),
+      ].filter((value): value is string => typeof value === 'string');
+      const carryoverBlocklist = buildCarryoverBlocklist(input.referenceDocumentText, caseValues);
+      for (const section of doc.sections) {
+        for (const block of section.content || []) {
+          const filtered = filterCarryoverText(block.text || '', carryoverBlocklist);
+          if (filtered.blocked.length === 0) continue;
+          block.text = filtered.text;
+          for (const blocked of filtered.blocked) {
+            reviewAnnex.unresolvedFindings.push({ code: CARRYOVER_FINDING_CODE, section: section.title, message: describeCarryover(blocked) });
+          }
+        }
+      }
     }
 
     // Segunda pasada (idempotente): las etapas posteriores pueden haber reintroducido notas o marcadores.
