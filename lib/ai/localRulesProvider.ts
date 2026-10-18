@@ -2,7 +2,7 @@ import type { LegalAiAnalysis, LegalAiInput } from "./types";
 import { sanitizeLegalAiAnalysis } from "./types";
 
 /**
- * Fallback determinístico local — NVIDIA ONLY: solo se usa cuando NVIDIA no está disponible.
+ * Fallback determinístico local: último recurso cuando ningún proveedor de la cadena está disponible.
  * No simula IA externa, solo reglas locales.
  */
 export async function analyzeWithLocalRules(input: LegalAiInput): Promise<LegalAiAnalysis> {

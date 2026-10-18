@@ -1,5 +1,5 @@
 import { renderPdf } from './exportPdfUniversal';
-import { resolvePdfPageProfile } from './exportPageProfiles';
+import { resolveDocxPageProfile, resolvePdfPageProfile } from './exportPageProfiles';
 import { materializeDocumentForPageMeasurement } from './finalDocumentMaterialization';
 import { DEFAULT_LAWYER_PROFILE } from '../workspace/lawyerProfileTypes';
 import type { UniversalLegalDocument } from './types';
@@ -57,4 +57,22 @@ export async function measureRenderedDocumentPages(
     characterCount: text.length,
     pdfBytes: bytes.byteLength,
   };
+}
+
+/**
+ * ESTIMACIÓN de páginas del DOCX a partir de las medidas del PDF renderizado.
+ *
+ * Word/LibreOffice no están disponibles sin conexión, así que el DOCX no se puede paginar aquí.
+ * El PDF y el DOCX se generan del mismo modelo con perfiles de página distintos (el DOCX usa
+ * margen izquierdo de 1,2"); se escala por la relación de área útil. No es una medición: el
+ * resultado real depende de la tipografía que aplique Word.
+ */
+export function estimateDocxPages(pdfPages: number): number {
+  const pdf = resolvePdfPageProfile();
+  const docx = resolveDocxPageProfile();
+  const pdfArea = (pdf.width - pdf.margins.left - pdf.margins.right) * (pdf.height - pdf.margins.top - pdf.margins.bottom);
+  const docxArea = ((docx.width - docx.margins.left - docx.margins.right) * (docx.height - docx.margins.top - docx.margins.bottom)) / 20; // twips → puntos (1 pt = 20 twips) en cada eje
+  // Área en twips²: convertir ambos ejes a puntos.
+  const docxAreaPoints = docxArea / 20;
+  return Math.max(1, Math.ceil(pdfPages * (pdfArea / docxAreaPoints)));
 }

@@ -6,14 +6,12 @@ import { reconstructCaseAnalysis } from '../../lib/legal-engine/caseAnalysis';
 import { buildContestacionSkeleton, resolveContestacionRoles } from '../../lib/legal-engine/contestacionStructure';
 import { createEmptyDocument, type UploadedSourceDocument } from '../../lib/legal-engine/types';
 
-describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', () => {
-  const docxPath = 'C:/Users/yahir/Desktop/BECA/DEMANDA DE LA FAMILIA GALARZA/NULIDAD DE TESTAMENTO/DEMANDA DE NULIDAD DEL TESTAMENTO.docx';
+describe('Contestación de Demanda de Nulidad de Testamento - Familia de Prueba', () => {
+  // Historical contract has no approved equivalent fixture. Never read a personal case.
+  // NOT_REPRODUCIBLE_WITH_APPROVED_FIXTURES; retain >=6 until equivalence is established.
+  const docxPath = path.resolve('tests/fixtures/testamento-historical-contract.docx');
 
-  it('1. Extrae correctamente los hechos y partes de DEMANDA DE NULIDAD DEL TESTAMENTO.docx sin contaminar con jurisprudencia', async () => {
-    if (!fs.existsSync(docxPath)) {
-      console.warn('Documento no encontrado en ruta local, saltando test:', docxPath);
-      return;
-    }
+  it.skip('1. NOT_REPRODUCIBLE_WITH_APPROVED_FIXTURES: historical extraction contract', async () => {
     const buffer = fs.readFileSync(docxPath);
     const extracted = await extractDocument({
       buffer,
@@ -39,7 +37,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
 
     const caseAnalysis = reconstructCaseAnalysis(
       [sourceDoc],
-      'Contestar la demanda de nulidad de testamento a favor de Patricia Ochoa Galarza, expediente 1152/2013'
+      'Contestar la demanda de nulidad de testamento a favor de Persona Sintética Dos, expediente 998/2099'
     );
 
 
@@ -57,8 +55,8 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
     }
 
     // Verificación de partes
-    expect(caseAnalysis.parties.demandado).toMatch(/Patricia Ochoa Galarza/i);
-    expect(caseAnalysis.parties.actor).toMatch(/Galarza Meza/i);
+    expect(caseAnalysis.parties.demandado).toMatch(/Persona Sintética Dos/i);
+    expect(caseAnalysis.parties.actor).toMatch(/Actor Sintético Uno/i);
 
     // Verificación de expediente: no debe ser nombre de archivo .docx
     const exp = caseAnalysis.caseNumbers?.principal || '';
@@ -73,11 +71,11 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
       title: 'Contestación de Demanda de Nulidad de Testamento',
       documentType: 'contestacion_demanda',
       parties: {
-        actor: 'J. Guadalupe, Ramón, Antonio y J. Jesús Galarza Meza',
-        demandado: 'Patricia Ochoa Galarza',
+        actor: 'J. Guadalupe, Ramón, Antonio y Actor Sintético Uno',
+        demandado: 'Persona Sintética Dos',
       },
       caseRefs: {
-        expediente: '1152/2013',
+        expediente: '998/2099',
       },
     };
 
@@ -116,11 +114,11 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
       title: 'Contestación de Demanda',
       documentType: 'contestacion_demanda',
       parties: {
-        actor: 'J. Guadalupe, Ramón, Antonio y J. Jesús Galarza Meza',
-        demandado: 'Patricia Ochoa Galarza',
+        actor: 'J. Guadalupe, Ramón, Antonio y Actor Sintético Uno',
+        demandado: 'Persona Sintética Dos',
       },
       caseRefs: {
-        expediente: '1152/2013',
+        expediente: '998/2099',
       },
     };
 
@@ -139,8 +137,8 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
       ...createEmptyDocument(),
       documentType: 'contestacion_demanda',
       parties: {
-        actor: 'J. Guadalupe, Ramón, Antonio y J. Jesús Galarza Meza',
-        demandado: 'Patricia Ochoa Galarza',
+        actor: 'J. Guadalupe, Ramón, Antonio y Actor Sintético Uno',
+        demandado: 'Persona Sintética Dos',
       },
       caseRefs: {
         expediente: 'CONTESTACION_DEMANDA_NULIDAD_TESTAMENTO_GALARZA.docx', // Simular error
@@ -160,11 +158,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
     expect(fullText).not.toMatch(/DESARROLLO F[ÁA]CTICO:/);
   });
 
-  it('5. E2E: Genera la Contestación completa de 11 secciones canónicas y exporta DOCX para el caso Familia Galarza (evitando PDF)', async () => {
-    if (!fs.existsSync(docxPath)) {
-      console.warn('Documento no encontrado en ruta local, saltando test:', docxPath);
-      return;
-    }
+  it.skip('5. NOT_REPRODUCIBLE_WITH_APPROVED_FIXTURES: historical document contract', async () => {
 
     const { exportUniversalToDocx } = await import('../../lib/legal-engine/exportDocxUniversal');
     const buffer = fs.readFileSync(docxPath);
@@ -189,7 +183,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
 
     const caseAnalysis = reconstructCaseAnalysis(
       [sourceDoc],
-      'Contestar la demanda de nulidad de testamento a favor de Patricia Ochoa Galarza, expediente 1152/2013'
+      'Contestar la demanda de nulidad de testamento a favor de Persona Sintética Dos, expediente 998/2099'
     );
 
     expect(caseAnalysis.facts.length).toBeGreaterThanOrEqual(6);
@@ -200,11 +194,11 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
       documentType: 'contestacion_demanda_civil',
       matter: 'civil',
       parties: {
-        actor: caseAnalysis.parties.actor || 'J. Guadalupe, Ramón, Antonio y J. Jesús Galarza Meza',
-        demandado: caseAnalysis.parties.demandado || 'Patricia Ochoa Galarza',
+        actor: caseAnalysis.parties.actor || 'J. Guadalupe, Ramón, Antonio y Actor Sintético Uno',
+        demandado: caseAnalysis.parties.demandado || 'Persona Sintética Dos',
       },
       caseRefs: {
-        expediente: '1152/2013',
+        expediente: '998/2099',
         juzgado: 'JUZGADO PRIMERO DE LO CIVIL DEL PRIMER PARTIDO JUDICIAL DEL ESTADO DE JALISCO',
         juicio: 'ORDINARIO CIVIL (NULIDAD DE TESTAMENTO)',
       },
@@ -222,7 +216,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
           content: [
             {
               id: `${sec.id}-b1`,
-              text: `PATRICIA OCHOA GALARZA\nVS\nJ. GUADALUPE, RAMÓN, ANTONIO Y J. JESÚS GALARZA MEZA\nJUICIO ORDINARIO CIVIL (NULIDAD DE TESTAMENTO)\nEXPEDIENTE NÚMERO: 1152/2013\n\nC. JUEZ PRIMERO DE LO CIVIL DEL PRIMER PARTIDO JUDICIAL EN TURNO DEL ESTADO DE JALISCO\nP R E S E N T E.`,
+              text: `PATRICIA OCHOA SINTÉTICO\nVS\nJ. GUADALUPE, RAMÓN, ANTONIO Y J. JESÚS Actor Sintético Uno\nJUICIO ORDINARIO CIVIL (NULIDAD DE TESTAMENTO)\nEXPEDIENTE NÚMERO: 998/2099\n\nC. JUEZ PRIMERO DE LO CIVIL DEL PRIMER PARTIDO JUDICIAL EN TURNO DEL ESTADO DE JALISCO\nP R E S E N T E.`,
               layer: 'USER_POSITION',
               trustLevel: 'VERIFIED',
             },
@@ -235,7 +229,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
           content: [
             {
               id: `${sec.id}-b1`,
-              text: `PATRICIA OCHOA GALARZA, por mi propio derecho y en mi carácter de demandada dentro de los autos del juicio al rubro indicado, señalando como domicilio procesal el ubicado en la finca marcada con el número 45 de la calle Josefa Ortiz de Domínguez, Colonia Santa Anita, Tlaquepaque, Jalisco, y autorizando en los más amplios términos del artículo 42 del Código de Enjuiciamiento Civil del Estado de Jalisco al profesionista que al calce suscribe, con cédula profesional legalmente expedida y registrada ante el Supremo Tribunal de Justicia del Estado, ante Usted, con el debido respeto, comparezco a exponer:`,
+              text: `PATRICIA OCHOA SINTÉTICO, por mi propio derecho y en mi carácter de demandada dentro de los autos del juicio al rubro indicado, señalando como domicilio procesal el ubicado en la finca marcada con el número 45 de la calle Josefa Ortiz de Domínguez, Colonia Santa Anita, Tlaquepaque, Jalisco, y autorizando en los más amplios términos del artículo 42 del Código de Enjuiciamiento Civil del Estado de Jalisco al profesionista que al calce suscribe, con cédula profesional legalmente expedida y registrada ante el Supremo Tribunal de Justicia del Estado, ante Usted, con el debido respeto, comparezco a exponer:`,
               layer: 'USER_POSITION',
               trustLevel: 'VERIFIED',
             },
@@ -248,7 +242,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
           content: [
             {
               id: `${sec.id}-b1`,
-              text: `Que encontrándome en tiempo y forma legales, vengo a DAR CONTESTACIÓN A LA INFUNDADA DEMANDA promovida en mi contra por los señores J. GUADALUPE, RAMÓN, ANTONIO y J. JESÚS de apellidos GALARZA MEZA, oponiéndome categóricamente a todas y cada una de sus prestaciones, negando los hechos que no son propios y contradiciendo frontalmente los que pretenden imputarme, haciendo valer las excepciones y defensas que más adelante se pormenorizan, a efecto de que seguido el juicio por sus trámites legales se dicte sentencia definitiva absolutoria que desestime por completo sus pretensiones.`,
+              text: `Que encontrándome en tiempo y forma legales, vengo a DAR CONTESTACIÓN A LA INFUNDADA DEMANDA promovida en mi contra por los señores J. GUADALUPE, RAMÓN, ANTONIO y J. JESÚS de apellidos Actor Sintético Uno, oponiéndome categóricamente a todas y cada una de sus prestaciones, negando los hechos que no son propios y contradiciendo frontalmente los que pretenden imputarme, haciendo valer las excepciones y defensas que más adelante se pormenorizan, a efecto de que seguido el juicio por sus trámites legales se dicte sentencia definitiva absolutoria que desestime por completo sus pretensiones.`,
               layer: 'USER_POSITION',
               trustLevel: 'VERIFIED',
             },
@@ -261,7 +255,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
           content: [
             {
               id: `${sec.id}-b1`,
-              text: `A LAS PRESTACIONES RECLAMADAS:\n\n1. En cuanto a la prestación correlativa a la pretendida declaración de nulidad del testamento público abierto número 9,816, otorgado el día 09 de noviembre de 2006 ante la fe del Licenciado José Gustavo Chávez Lozano, Notario Público número 13 de Zapopan, Jalisco, SE NIEGA SU PROCEDENCIA en virtud de que dicho instrumento público fue formalizado con estricto apego a todas y cada una de las solemnidades y requisitos de validez ordenados por los artículos 2829, 2834, 2841, 2842 y 2847 del Código Civil del Estado de Jalisco, gozando de plena validez jurídica y presunción legal de autenticidad.\n\n2. En cuanto a la prestación consistente en la cancelación de la inscripción en la Dirección del Archivo de Instrumentos Públicos del Estado de Jalisco, SE NIEGA ROTUNDAMENTE SU PROCEDENCIA por ser accesoria e infundada, toda vez que al subsistir incólume la validez del acto testamentario, no ha lugar a cancelar asiento registral alguno.\n\n3. Por lo que ve al reclamo de costas y gastos judiciales, SE RECHAZA DE MANERA TAJANTE, debiendo ser condenada la parte actora al pago de costas por litigar sin derecho y con notoria temeridad procesal.`,
+              text: `A LAS PRESTACIONES RECLAMADAS:\n\n1. En cuanto a la prestación correlativa a la pretendida declaración de nulidad del testamento público abierto número 9,816, otorgado el día 09 de noviembre de 2006 ante la fe del Licenciado José Gustavo Sintético Cuatro, Notario Público número 13 de Zapopan, Jalisco, SE NIEGA SU PROCEDENCIA en virtud de que dicho instrumento público fue formalizado con estricto apego a todas y cada una de las solemnidades y requisitos de validez ordenados por los artículos 2829, 2834, 2841, 2842 y 2847 del Código Civil del Estado de Jalisco, gozando de plena validez jurídica y presunción legal de autenticidad.\n\n2. En cuanto a la prestación consistente en la cancelación de la inscripción en la Dirección del Archivo de Instrumentos Públicos del Estado de Jalisco, SE NIEGA ROTUNDAMENTE SU PROCEDENCIA por ser accesoria e infundada, toda vez que al subsistir incólume la validez del acto testamentario, no ha lugar a cancelar asiento registral alguno.\n\n3. Por lo que ve al reclamo de costas y gastos judiciales, SE RECHAZA DE MANERA TAJANTE, debiendo ser condenada la parte actora al pago de costas por litigar sin derecho y con notoria temeridad procesal.`,
               layer: 'USER_POSITION',
               trustLevel: 'VERIFIED',
             },
@@ -324,7 +318,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
             {
               id: `${sec.id}-b1`,
               text: `PRUEBAS PROPIAS DE LA PARTE DEMANDADA:\n\n` +
-                `1. DOCUMENTAL PÚBLICA DE ACTUACIONES.- Consistente en el primer testimonio de la Escritura Pública número 9,816 de fecha 09 de noviembre de 2006, pasada ante la fe del Licenciado José Gustavo Chávez Lozano, Notario Público 13 de Zapopan, Jalisco, que contiene el testamento público abierto otorgado por la de cujus SEBASTIANA MEZA GONZÁLEZ.\n\n` +
+                `1. DOCUMENTAL PÚBLICA DE ACTUACIONES.- Consistente en el primer testimonio de la Escritura Pública número 9,816 de fecha 09 de noviembre de 2006, pasada ante la fe del Licenciado José Gustavo Sintético Cuatro, Notario Público 13 de Zapopan, Jalisco, que contiene el testamento público abierto otorgado por la de cujus SEBASTIANA MEZA GONZÁLEZ.\n\n` +
                 `2. INSTRUMENTAL DE ACTUACIONES.- Consistente en todo lo actuado en el presente juicio en cuanto favorezca a mis legítimos intereses.\n\n` +
                 `3. PRESUNCIONAL LEGAL Y HUMANA.- En su doble aspecto, en todo lo que beneficie a la suscrita demandada y confirme la plena validez del acto jurídico testamentario.`,
               layer: 'USER_POSITION',
@@ -355,7 +349,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
             {
               id: `${sec.id}-b1`,
               text: `Por lo anteriormente expuesto y fundado, a Usted C. Juez atentamente pido:\n\n` +
-                `PRIMERO.- Tenerme por presentada en tiempo y forma legales con este escrito dando contestación a la infundada demanda entablada en mi contra por los señores J. GUADALUPE, RAMÓN, ANTONIO y J. JESÚS GALARZA MEZA.\n\n` +
+                `PRIMERO.- Tenerme por presentada en tiempo y forma legales con este escrito dando contestación a la infundada demanda entablada en mi contra por los señores J. GUADALUPE, RAMÓN, ANTONIO y J. JESÚS Actor Sintético Uno.\n\n` +
                 `SEGUNDO.- Tener por opuestas las excepciones y defensas que se hacen valer, así como por objetadas las pruebas de la contraria.\n\n` +
                 `TERCERO.- Tener por ofrecidas y admitidas en su momento procesal oportuno las pruebas de mi parte que se relacionan en el capítulo correspondiente.\n\n` +
                 `CUARTO.- Seguido el juicio en sus etapas procesales, dictar sentencia definitiva absolutoria, declarando la plena validez del testamento público abierto número 9,816 y condenando a los actores al pago de gastos y costas judiciales.`,
@@ -371,7 +365,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
           content: [
             {
               id: `${sec.id}-b1`,
-              text: `PROTESTO LO NECESARIO\n\nGuadalajara, Jalisco; a la fecha de su presentación.\n\n\n_____________________________________\nPATRICIA OCHOA GALARZA\n(Parte Demandada)\n\n\n_____________________________________\nLICENCIADO EN DERECHO\nAbogado Patrono\nCédula Profesional Núm. 4589211`,
+              text: `PROTESTO LO NECESARIO\n\nGuadalajara, Jalisco; a la fecha de su presentación.\n\n\n_____________________________________\nPATRICIA OCHOA SINTÉTICO\n(Parte Demandada)\n\n\n_____________________________________\nLICENCIADO EN DERECHO\nAbogado Patrono\nCédula Profesional Núm. 4589211`,
               layer: 'USER_POSITION',
               trustLevel: 'VERIFIED',
             },
@@ -397,7 +391,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
         ],
       },
       intake: {
-        request: 'Contestar la demanda de nulidad de testamento a favor de Patricia Ochoa Galarza, expediente 1152/2013',
+        request: 'Contestar la demanda de nulidad de testamento a favor de Persona Sintética Dos, expediente 998/2099',
       },
       sections: populatedSections,
       caseContext: {
@@ -466,7 +460,7 @@ describe('Contestación de Demanda de Nulidad de Testamento - Familia Galarza', 
     expect(docxBuffer.subarray(0, 2).toString()).toBe('PK');
 
     // Guardar en la carpeta de destino del caso
-    const exportOutputDir = 'C:/Users/yahir/Desktop/BECA/DEMANDA DE LA FAMILIA GALARZA';
+    const exportOutputDir = 'RUTA_LOCAL DE LA Familia de Prueba';
     const exportOutputPath = path.join(exportOutputDir, 'CONTESTACION_DEMANDA_NULIDAD_TESTAMENTO_PATRICIA_OCHOA.docx');
     fs.writeFileSync(exportOutputPath, docxBuffer);
 

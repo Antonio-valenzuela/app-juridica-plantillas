@@ -90,6 +90,9 @@ export function reconcileDocumentCoverage(input: DocumentCoverageInput): Coverag
   }
 
   for (const coverageItem of input.coverageMatrix.items) {
+    // Compatibility aliases remain available to legacy consumers, but they
+    // are not independent rich requirements and must not create blockers.
+    if (coverageItem.metadata?.compatibilityAlias === true) continue;
     const finalBlocks = blocksForCoverage(input.assembly, coverageItem.id);
     const finalBlockIds = finalBlocks.map((block) => block.id);
     const finalSectionIds = sectionIdsForBlocks(input.assembly, finalBlocks);

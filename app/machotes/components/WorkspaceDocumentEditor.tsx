@@ -1,12 +1,16 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
+import { createPortal } from 'react-dom';
 import type { UniversalLegalDocument, DocumentNode, ContentBlock, BlockStyle } from '@/lib/legal-engine/types';
 import { runQualityGateCheck, QualityGateResult } from '@/lib/legal-engine/qualityGate';
 import { normalizeUnresolvedFieldMarkers, extractUnresolvedFieldMarkers } from '@/lib/legal-engine/pendingFields';
 import { readDocumentExportReadiness, markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import { buildWorkspacePageModel } from '@/lib/legal-engine/generationUi';
 import type { ExportMode } from '@/lib/legal-engine/exportModes';
+import { canExportDocumentFinal, getFunctionalDocumentStatus } from '@/lib/catalog/legalCatalog';
+import { LexIcon } from '@/components/layout/LexIcon';
 
 interface WorkspaceDocumentEditorProps {
   document: UniversalLegalDocument | null;
@@ -23,7 +27,6 @@ interface WorkspaceDocumentEditorProps {
   onSelectTextHighlight?: (text: string) => void;
   isGenerating?: boolean;
   pipelineStageLabel?: string;
-  onTriggerNewDraftModal?: () => void;
   onTriggerUpload?: () => void;
   /** Acción global "Formatear documento" (vive en esta toolbar consolidada). */
   onFormatDocument?: () => void;
@@ -97,13 +100,22 @@ export function WorkspaceDocumentEditor({
   const [showPagesPanel, setShowPagesPanel] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMatch, setActiveMatch] = useState(0);
-  const [editingBlock, setEditingBlock] = useState<{ sectionId: string; blockId: string; text: string } | null>(null);
+  const [editingBlock, setEditingBlock] = useState<{ documentId: string; sectionId: string; blockId: string; text: string } | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [actionError, setActionError] = useState<string | null>(null);
   const [reopenState, setReopenState] = useState<'idle' | 'loading'>('idle');
   const [isTemplateSaving, setIsTemplateSaving] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportMenuPosition, setExportMenuPosition] = useState({ top: 0, left: 0 });
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showPendingModal, setShowPendingModal] = useState(false);
+  // Esc cierra los modales de calidad y de pendientes (mismo contrato que «Opciones de redacción»).
+  useEffect(() => {
+    if (!showReviewModal && !showPendingModal) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { setShowReviewModal(false); setShowPendingModal(false); } };
+    window.document.addEventListener('keydown', onKeyDown);
+    return () => window.document.removeEventListener('keydown', onKeyDown);
+  }, [showReviewModal, showPendingModal]);
   const [zoomMode, setZoomMode] = useState<'custom' | 'fit-width' | 'fit-page'>('custom');
   const [docTitle, setDocTitle] = useState(document?.title || '');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -115,6 +127,8 @@ export function WorkspaceDocumentEditor({
   // History stack for Undo/Redo
   const [history, setHistory] = useState<UniversalLegalDocument[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDocumentId, setHistoryDocumentId] = useState<string | undefined>(document?.id);
+  const hasCurrentHistory = historyDocumentId === document?.id;
 
   useEffect(() => {
     if (!document) return;
@@ -134,6 +148,7 @@ export function WorkspaceDocumentEditor({
   }, [document]);
 
   const isReadyToExport = exportReadiness === 'READY_TO_EXPORT' || exportReadiness === 'FINAL_DOCUMENT';
+  const finalExportAvailable = isReadyToExport && canExportDocumentFinal(document?.documentType || '');
 
   const hasExportableContent = useMemo(() => {
     return Boolean(document?.sections.some((section) => section.content.some((block) => block.text.trim().length > 0)));
@@ -246,7 +261,7 @@ export function WorkspaceDocumentEditor({
 
   // Undo / Redo
   const handleUndo = () => {
-    if (historyIndex > 0) {
+    if (hasCurrentHistory && historyIndex > 0) {
       const prev = history[historyIndex - 1];
       setHistoryIndex((i) => i - 1);
       onUpdateDocument(prev);
@@ -254,11 +269,20 @@ export function WorkspaceDocumentEditor({
   };
 
   const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
+    if (hasCurrentHistory && historyIndex < history.length - 1) {
       const next = history[historyIndex + 1];
       setHistoryIndex((i) => i + 1);
       onUpdateDocument(next);
     }
+  };
+
+  const commitDocumentEdit = (updatedDoc: UniversalLegalDocument) => {
+    if (!document) return;
+    const retainedHistory = !hasCurrentHistory || historyIndex < 0 ? [document] : history.slice(0, historyIndex + 1);
+    setHistoryDocumentId(document.id);
+    setHistory([...retainedHistory, updatedDoc]);
+    setHistoryIndex(retainedHistory.length);
+    onUpdateDocument(updatedDoc);
   };
 
   // Update block content with history
@@ -278,32 +302,41 @@ export function WorkspaceDocumentEditor({
       sections: updatedSections,
       updatedAt: new Date().toISOString(),
     };
-    setHistory((prev) => [...prev.slice(0, historyIndex + 1), updatedDoc]);
-    setHistoryIndex((i) => i + 1);
-    onUpdateDocument(updatedDoc);
+    commitDocumentEdit(updatedDoc);
     setEditingBlock(null);
   };
 
   const handleSaveTitle = () => {
     if (document && docTitle.trim()) {
-      onUpdateDocument({ ...document, title: docTitle.trim(), updatedAt: new Date().toISOString() });
+      commitDocumentEdit({ ...document, title: docTitle.trim(), updatedAt: new Date().toISOString() });
     }
     setIsEditingTitle(false);
   };
 
   const handleSave = async () => {
-    if (!onSaveDraft) return;
+    if (!onSaveDraft || saveState === 'saving') return;
+    setActionError(null);
     setSaveState('saving');
-    const ok = await onSaveDraft();
-    setSaveState(ok ? 'saved' : 'idle');
-    if (ok) window.setTimeout(() => setSaveState('idle'), 3000);
+    try {
+      const ok = await onSaveDraft();
+      setSaveState(ok ? 'saved' : 'idle');
+      if (!ok) setActionError('No se pudo guardar el borrador. Tus cambios siguen en el editor; reintenta el guardado.');
+      if (ok) window.setTimeout(() => setSaveState('idle'), 3000);
+    } catch {
+      setSaveState('idle');
+      setActionError('No se pudo guardar el borrador. Tus cambios siguen en el editor; reintenta el guardado.');
+    }
   };
 
   const handleReopen = async () => {
     if (!onReopenDraft || reopenState === 'loading') return;
     setReopenState('loading');
+    setActionError(null);
     try {
-      await onReopenDraft();
+      const ok = await onReopenDraft();
+      if (!ok) setActionError('No se pudo reabrir el borrador guardado. El documento actual no se ha sustituido.');
+    } catch {
+      setActionError('No se pudo reabrir el borrador guardado. El documento actual no se ha sustituido.');
     } finally {
       setReopenState('idle');
     }
@@ -312,8 +345,11 @@ export function WorkspaceDocumentEditor({
   const handleSaveMachoteTemplate = async () => {
     if (!document || !onSaveAsTemplate) return;
     setIsTemplateSaving(true);
+    setActionError(null);
     try {
       await onSaveAsTemplate(document);
+    } catch {
+      setActionError('No se pudo guardar la plantilla. El documento sigue en el editor; reintenta el guardado.');
     } finally {
       setIsTemplateSaving(false);
     }
@@ -400,7 +436,7 @@ export function WorkspaceDocumentEditor({
   ────────────────────────────────────────────────────────────────────────── */
   if (isGenerating && !document) {
     return (
-      <main className="flex-1 min-w-0 bg-[#ede8dd] overflow-y-auto flex flex-col h-full select-none font-sans">
+      <main className="workspace-editor-shell flex-1 min-w-0 bg-[#ede8dd] overflow-y-auto flex flex-col h-full select-none font-sans">
         <div className="p-3.5 border-b border-[#ded8c9] bg-[#fbf9f5] flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="w-4 h-4 rounded-full border-2 border-[#0B2545] border-t-transparent animate-spin" />
@@ -411,7 +447,7 @@ export function WorkspaceDocumentEditor({
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-lg bg-white rounded-3xl border border-[#ded8c9] shadow-2xl p-8 space-y-6 text-center">
             <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#0B2545] text-2xl flex items-center justify-center mx-auto animate-pulse">
-              ⚖️
+              <LexIcon name="scale" size={25} />
             </div>
 
             <div className="space-y-2">
@@ -429,12 +465,12 @@ export function WorkspaceDocumentEditor({
   }
 
   return (
-    <main className="flex-1 min-w-0 bg-[#ede8dd] flex flex-col h-full select-none relative font-sans overflow-hidden">
+    <main className="workspace-editor-shell flex-1 min-w-0 bg-[#ede8dd] flex flex-col h-full select-none relative font-sans overflow-hidden">
       {/* ── BARRA SUPERIOR CONSOLIDADA POR ZONAS (sin posicionamiento absoluto):
              A Identificación · B Edición global · C Formato · D Navegación ·
              E Vista · F Documento · G IA/Calidad/Exportación · Volver ── */}
       <div data-testid="editor-toolbar" className="sticky top-0 z-40 shrink-0 bg-[#fbf9f5] border-b border-[#ded8c9] px-3 py-2 shadow-xs font-sans">
-        <div data-testid="editor-toolbar-row-primary" className="flex min-w-max flex-nowrap items-center gap-x-2 overflow-x-auto pb-1">
+        <div data-testid="editor-toolbar-row-primary" className="flex min-w-0 w-full flex-nowrap items-center gap-x-2 overflow-x-auto pb-1">
         {/* ── ZONA A · IDENTIFICACIÓN (título truncable, nunca empuja botones) ── */}
         <div className="flex items-center gap-1.5 min-w-[140px] max-w-[240px] xl:max-w-[340px] min-w-0 grow shrink basis-[160px]">
           {document ? (
@@ -487,7 +523,7 @@ export function WorkspaceDocumentEditor({
             <span>{editLocked ? '🔒' : '✎'}</span>
             <span>{editLocked ? 'Editar contestación' : 'Bloquear edición'}</span>
           </button>
-          {!editLocked && history.length > 1 && (
+          {!editLocked && hasCurrentHistory && history.length > 1 && (
             <button
               onClick={() => {
                 const original = history[0];
@@ -506,7 +542,7 @@ export function WorkspaceDocumentEditor({
             <div className="hidden sm:flex items-center gap-1">
               <button
                 onClick={handleUndo}
-                disabled={historyIndex <= 0}
+                disabled={!hasCurrentHistory || historyIndex <= 0}
                 title="Deshacer"
                 className="w-7 h-7 bg-white hover:bg-slate-50 disabled:opacity-30 rounded-lg border border-[#ded8c9] flex items-center justify-center text-xs font-bold text-slate-700 shadow-xs"
               >
@@ -514,7 +550,7 @@ export function WorkspaceDocumentEditor({
               </button>
               <button
                 onClick={handleRedo}
-                disabled={historyIndex >= history.length - 1}
+                disabled={!hasCurrentHistory || historyIndex >= history.length - 1}
                 title="Rehacer"
                 className="w-7 h-7 bg-white hover:bg-slate-50 disabled:opacity-30 rounded-lg border border-[#ded8c9] flex items-center justify-center text-xs font-bold text-slate-700 shadow-xs"
               >
@@ -528,7 +564,7 @@ export function WorkspaceDocumentEditor({
             }`}
             title={editLocked ? 'Modo lectura: selección y copia permitidas' : 'Modo edición: el documento completo es editable'}
           >
-            {editLocked ? '🔒 Bloqueado' : '🟢 Habilitado'}
+            {editLocked ? 'Solo lectura' : 'Edición activa'}
           </span>
         </div>
 
@@ -599,6 +635,7 @@ export function WorkspaceDocumentEditor({
 
               <span className="inline-block min-w-[9rem] text-center font-semibold text-slate-700 px-2 font-mono text-xs tabular-nums select-none">
                 Pág. <span className="text-[#0B2545] font-extrabold text-sm">{viewPage}</span> / {totalPages}
+                <span className="block text-[9px] font-sans text-slate-500">Paginación estimada; el PDF puede variar</span>
               </span>
 
               <button
@@ -640,6 +677,7 @@ export function WorkspaceDocumentEditor({
                 <option value="100">100%</option>
                 <option value="125">125%</option>
                 <option value="150">150%</option>
+                {![75, 100, 125, 150].includes(zoomLevel) && <option value={String(zoomLevel)}>{zoomLevel}%</option>}
               </select>
               <button
                 onClick={() => { setZoomLevel((z) => Math.min(160, z + 10)); setZoomMode('custom'); }}
@@ -682,21 +720,24 @@ export function WorkspaceDocumentEditor({
         </div>
 
         {/* ── FILA 2 · DOCUMENTO + IA/CALIDAD/EXPORTACIÓN (+ Volver) ── */}
-        <div data-testid="editor-toolbar-row-secondary" className="flex min-w-max flex-nowrap items-center gap-1.5 overflow-x-auto pt-1 font-sans whitespace-nowrap">
+        <div data-testid="editor-toolbar-row-secondary" className="flex min-w-0 w-full flex-nowrap items-center gap-1.5 overflow-x-auto pt-1 font-sans whitespace-nowrap">
+          {/* Acciones de plantillas y archivo: secundarias, agrupadas en un menú para
+              que no compitan con las acciones principales del borrador. */}
+          <details className="lex-menu lex-menu-start">
+            <summary className="lex-button lex-button-secondary lex-button-compact">Plantillas y archivo</summary>
+            <div className="lex-menu-list" role="menu">
           {/* Botón Subir Machote */}
           <button
             onClick={onTriggerUpload}
+            disabled={!onTriggerUpload}
             className="py-1.5 px-3 rounded-xl bg-white border border-[#ded8c9] hover:bg-[#ede8dd] text-[#0B2545] text-xs font-bold shadow-xs transition flex items-center gap-1"
-            title="Subir documento real PDF o DOCX"
+            title={onTriggerUpload ? 'Subir documento real PDF o DOCX' : 'Carga no disponible en esta vista'}
           >
             <span>📥</span>
             <span>Subir Machote</span>
           </button>
 
-          {document && (
-            <>
-              {/* Botón Guardar Borrador + estado de autoguardado */}
-              {onReopenDraft && (
+              {document && onReopenDraft && (
                 <button
                   onClick={handleReopen}
                   disabled={reopenState === 'loading'}
@@ -707,6 +748,33 @@ export function WorkspaceDocumentEditor({
                   <span>{reopenState === 'loading' ? 'Abriendo...' : 'Reabrir guardado'}</span>
                 </button>
               )}
+              {document && onSaveAsTemplate && (
+                <button
+                  onClick={handleSaveMachoteTemplate}
+                  disabled={isTemplateSaving}
+                  className="py-1.5 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-800 text-xs font-bold shadow-xs transition flex items-center gap-1"
+                  title="Guardar este archivo como plantilla reutilizable"
+                >
+                  <span>📋</span>
+                  <span>{isTemplateSaving ? 'Guardando...' : 'Usar como Machote'}</span>
+                </button>
+              )}
+              {document && onGenerateFromMachote && (
+                <button
+                  onClick={() => onGenerateFromMachote(document)}
+                  className="py-1.5 px-3.5 rounded-xl bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-extrabold shadow-sm transition flex items-center gap-1.5"
+                  title="Redactar un nuevo escrito con la estructura y las fórmulas de este escrito; no se copia ningún dato de él"
+                >
+                  <span>⚡</span>
+                  <span>{USE_MY_TEMPLATE_LABEL}</span>
+                </button>
+              )}
+            </div>
+          </details>
+
+          {document && (
+            <>
+              {/* Botón Guardar Borrador + estado de autoguardado */}
               <button
                 onClick={handleSave}
                 disabled={saveState === 'saving' || !onSaveDraft}
@@ -719,31 +787,6 @@ export function WorkspaceDocumentEditor({
                 <span className="text-[10px] font-semibold text-slate-400 whitespace-nowrap" title="Autoguardado del borrador">
                   {autosaveState === 'saving' ? 'Guardando…' : '✓ Auto'}
                 </span>
-              )}
-
-              {/* Botón Usar como Machote / Guardar Plantilla */}
-              {onSaveAsTemplate && (
-                <button
-                  onClick={handleSaveMachoteTemplate}
-                  disabled={isTemplateSaving}
-                  className="py-1.5 px-3 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-800 text-xs font-bold shadow-xs transition flex items-center gap-1"
-                  title="Guardar este archivo como plantilla reutilizable"
-                >
-                  <span>📋</span>
-                  <span>{isTemplateSaving ? 'Guardando...' : 'Usar como Machote'}</span>
-                </button>
-              )}
-
-              {/* Botón Generar a partir del Machote */}
-              {onGenerateFromMachote && (
-                <button
-                  onClick={() => onGenerateFromMachote(document)}
-                  className="py-1.5 px-3.5 rounded-xl bg-[#0B2545] hover:bg-[#081d39] text-white text-xs font-extrabold shadow-sm transition flex items-center gap-1.5"
-                  title="Redactar un nuevo escrito basado en la estructura de este machote"
-                >
-                  <span>⚡</span>
-                  <span>Generar con Machote</span>
-                </button>
               )}
 
               {/* Revisión de Calidad (Quality Gate) */}
@@ -791,7 +834,11 @@ export function WorkspaceDocumentEditor({
               {/* Menú Exportar */}
               <div className="relative">
                 <button
-                  onClick={() => setShowExportMenu((open) => !open)}
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setExportMenuPosition({ top: rect.bottom + 6, left: Math.max(8, Math.min(rect.right - 256, window.innerWidth - 264)) });
+                    setShowExportMenu((open) => !open);
+                  }}
                   className="py-1.5 px-3 rounded-xl border text-xs font-bold shadow-xs transition flex items-center gap-1.5 bg-[#0B2545] hover:bg-[#081d39] text-white border-transparent"
                   title="Elegir exportación de borrador o final"
                 >
@@ -800,8 +847,8 @@ export function WorkspaceDocumentEditor({
                   <span className="text-[9px]">▼</span>
                 </button>
 
-                {showExportMenu && (
-                  <div className="absolute right-0 top-9 w-64 bg-white border border-[#ded8c9] rounded-xl shadow-xl z-50 py-1.5 text-xs text-slate-800 font-semibold animate-in fade-in zoom-in-95">
+                {showExportMenu && createPortal(
+                  <div style={exportMenuPosition} className="fixed w-64 max-h-[70vh] overflow-y-auto bg-white border border-[#ded8c9] rounded-xl shadow-xl z-[100] py-1.5 text-xs text-slate-800 font-semibold animate-in fade-in zoom-in-95">
                     <div className="px-3.5 pt-2 pb-1 text-[10px] uppercase tracking-wide text-amber-800">Exportar borrador</div>
                     {onExportDocx && (
                       <button
@@ -829,7 +876,7 @@ export function WorkspaceDocumentEditor({
                     )}
                     <div className="my-1 border-t border-slate-100" />
                     <div className="px-3.5 pt-1 pb-1 text-[10px] uppercase tracking-wide text-slate-600">Exportar final</div>
-                    {isReadyToExport ? (
+                    {finalExportAvailable ? (
                       <>
                         {onExportDocx && (
                           <button
@@ -856,10 +903,14 @@ export function WorkspaceDocumentEditor({
                       </>
                     ) : (
                       <div className="px-3.5 py-2 text-[11px] leading-snug text-slate-500">
-                        Disponible cuando se resuelvan los pendientes de revisión.
+                        {document?.documentType && !canExportDocumentFinal(document.documentType)
+                          ? (getFunctionalDocumentStatus(document.documentType) === 'PASS'
+                            ? 'Exportación FINAL no disponible: la revisión jurídica de este tipo de escrito sigue pendiente. Puedes descargar un borrador.'
+                            : 'Exportación FINAL no disponible: tipo en desarrollo (sin certificar). Puedes descargar un borrador.')
+                          : 'Disponible cuando se resuelvan los pendientes de revisión.'}
                       </div>
                     )}
-                  </div>
+                  </div>, window.document.body
                 )}
               </div>
 
@@ -878,6 +929,7 @@ export function WorkspaceDocumentEditor({
         </div>
       </div>
 
+      {actionError && <div role="alert" className="shrink-0 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800">{actionError}</div>}
       {document && (
         <div
           role="status"
@@ -947,7 +999,7 @@ export function WorkspaceDocumentEditor({
           {!document ? (
             <div
               style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
-              className="transition-transform duration-150 py-4"
+              className="transition-transform duration-150 py-4 w-[816px] max-w-none"
             >
               <div
                 onClick={onTriggerUpload}
@@ -985,7 +1037,7 @@ export function WorkspaceDocumentEditor({
             /* ── RENDER DE HOJA PAGINADA ÚNICA (UNA SOLA HOJA A LA VEZ: Pág. 1 / 27) ── */
             <div
               style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
-              className="transition-transform duration-150 py-4"
+              className="transition-transform duration-150 py-4 w-[816px] max-w-none"
             >
               <div
                 key={`sheet-page-${viewPage}`}
@@ -1019,10 +1071,11 @@ export function WorkspaceDocumentEditor({
                       </div>
 
                       {/* Proemio / Autoridad */}
-                      <div className="flex items-center justify-between text-xs text-slate-800 pt-2">
-                        <span className="font-bold uppercase tracking-wider">C. JUEZ / H. TRIBUNAL</span>
+                      {/* El destinatario real va en el proemio del escrito; aquí solo la fecha de elaboración.
+                          La jurisdicción ("federal", "local") no es un lugar de firma. */}
+                      <div className="flex items-center justify-end text-xs text-slate-800 pt-2">
                         <span className="text-slate-700">
-                          {document.jurisdiction || '—'}, a {new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}
+                          Fecha de elaboración: {new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}
                         </span>
                       </div>
                     </div>
@@ -1093,7 +1146,7 @@ export function WorkspaceDocumentEditor({
                           {/* Párrafos del documento */}
                           <div className="space-y-2.5 w-full max-w-full overflow-hidden break-words">
                             {section.content.map((block) => {
-                              const isEditing = editingBlock?.blockId === block.id;
+                              const isEditing = editingBlock?.documentId === document.id && editingBlock?.blockId === block.id;
 
                               const blockInlineStyle: React.CSSProperties = {
                                 fontFamily: block.style?.fontFamily || 'inherit',
@@ -1114,8 +1167,9 @@ export function WorkspaceDocumentEditor({
                                 >
                                   {isEditing ? (
                                     <div className="relative font-sans w-full" data-block-editor>
-                                      {/* Acciones flotantes: NO alteran el flujo ni la altura de la hoja */}
-                                      <div className="absolute right-0 -top-7 z-10 flex justify-end gap-1.5">
+                                      {/* Mantener acciones dentro del bloque: el overflow de la hoja
+                                          recortaba la fila flotante y el título interceptaba el clic. */}
+                                      <div className="flex justify-end gap-1.5 mb-2">
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -1180,7 +1234,7 @@ export function WorkspaceDocumentEditor({
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            setEditingBlock({ sectionId: section.id, blockId: block.id, text: block.text });
+                                            setEditingBlock({ documentId: document.id, sectionId: section.id, blockId: block.id, text: block.text });
                                           }}
                                           className="font-sans opacity-0 group-hover/block:opacity-100 p-1 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 text-xs rounded shadow-xs shrink-0"
                                           title="Editar texto directamente"
@@ -1215,18 +1269,30 @@ export function WorkspaceDocumentEditor({
         </div>
       </div>
 
+      {document?.generationMetadata.operationalManual && <details className="absolute bottom-4 left-4 z-30 max-h-[45vh] w-[min(34rem,calc(100%-2rem))] overflow-auto rounded-xl border border-slate-200 bg-white p-3 shadow-lg font-sans">
+        <summary className="cursor-pointer text-sm font-bold text-[#0B2545]">Criterios aplicados · Manual LEX PLANTILLAS v{document.generationMetadata.operationalManual.manualVersion}</summary>
+        <p className="mt-2 text-xs text-slate-500">Guía interna; no es autoridad jurídica oficial. La revisión no desbloquea FINAL.</p>
+        {document.generationMetadata.operationalManual.retrievals.map((entry, index) => <div key={`${entry.taskId}-${index}`} className="mt-3 border-t border-slate-100 pt-2 text-xs">
+          <p className="font-semibold">Tarea {entry.taskId} · {entry.retrievalStage}</p>
+          {(entry.selectedRules || entry.selectedRuleIds.map((id) => ({ id, physicalPage: Number(id.match(/-p(\d{3})-/)?.[1] || 0), section: 'Sección por consultar' }))).map((rule) => <a key={rule.id} href={`/api/operational-manual?ruleId=${encodeURIComponent(rule.id)}`} target="_blank" rel="noreferrer" className="mt-1 block break-all text-[#0B5ED7]">Página {rule.physicalPage} · {rule.section} · {rule.id} · ver texto original</a>)}
+        </div>)}
+        {document.generationMetadata.operationalManual.auditFindings.map((finding, index) => <p key={`${finding.ruleId}-${index}`} className="mt-2 text-xs text-slate-600">Auditoría: {finding.status} · regla {finding.ruleId} · página {finding.physicalPage} · {finding.code}</p>)}
+        <a href="/api/operational-manual/original" target="_blank" rel="noreferrer" className="mt-3 block text-xs font-bold text-[#0B5ED7]">Abrir PDF original</a>
+      </details>}
+
       {/* Modal de Calidad / Quality Gate */}
       {showReviewModal && qualityGate && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-[1001] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 text-xs font-sans animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-extrabold text-[#0B2545]">
+        <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowReviewModal(false); }}>
+          <div className="lex-modal" role="dialog" aria-modal="true" aria-labelledby="quality-review-title">
+            <header className="lex-modal-header">
+              <h3 id="quality-review-title" className="lex-modal-title">
                 Revisión de Calidad Jurídica
               </h3>
-              <button onClick={() => setShowReviewModal(false)} className="text-slate-400 hover:text-slate-700 font-bold text-sm">
-                ✕
+              <button type="button" onClick={() => setShowReviewModal(false)} className="lex-modal-close" aria-label="Cerrar">
+                ×
               </button>
-            </div>
+            </header>
+            <div className="lex-modal-body space-y-4 text-xs">
 
             <div className={`p-3 rounded-xl border font-bold flex items-center justify-between ${
               qualityGate.canMarkAsFinal
@@ -1256,33 +1322,37 @@ export function WorkspaceDocumentEditor({
                 Aceptar
               </button>
             </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Modal de Aspectos Pendientes antes de Exportar */}
       {showPendingModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[1002] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 text-xs font-sans animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowPendingModal(false); }}>
+          <div className="lex-modal" role="dialog" aria-modal="true" aria-labelledby="pending-export-title">
+            <header className="lex-modal-header">
               <div className="flex items-center gap-2">
                 <span className="text-xl">📋</span>
                 <div>
-                  <h3 className="text-sm font-extrabold text-[#0B2545]">
+                  <h3 id="pending-export-title" className="lex-modal-title">
                     {pendingCount > 0 ? 'Documento en Revisión' : 'Listo para Finalizar'}
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="lex-help">
                     Control de calidad jurídica previo a la exportación
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowPendingModal(false)}
-                className="text-slate-400 hover:text-slate-700 font-bold text-base p-1"
+                className="lex-modal-close"
+                aria-label="Cerrar"
               >
-                ✕
+                ×
               </button>
-            </div>
+            </header>
+            <div className="lex-modal-body space-y-4 text-xs">
 
             <p className="text-slate-600 leading-relaxed">
               {pendingCount > 0
@@ -1360,6 +1430,7 @@ export function WorkspaceDocumentEditor({
                   )}
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>

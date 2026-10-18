@@ -1,7 +1,7 @@
 # GenerationTrace y observabilidad end-to-end
 
 **Fecha:** 2026-09-07  
-**Proyecto:** `C:\Users\yahir\Desktop\APP-plantillas`  
+**Proyecto:** `RUTA_LOCAL`  
 **Fase:** 0 — baseline, observabilidad, provenance y prevención de falso Coverage  
 **Estado:** diseño aprobado por el usuario; el spec requiere revisión antes de planificar la implementación
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess, executionOwnerKey, type ExecutionOwner } from '@/lib/security/workspaceExecutionAccess';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { validateUploadBuffer } from '@/lib/security/uploadValidation';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
@@ -24,8 +24,8 @@ export const runtime = 'nodejs';
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 const MAX_PAGES = Number(process.env.UPLOAD_MAX_PAGES) || 100;
 
-function ownerKey(context: { organizationId: string; userId: string }): string {
-  return `${context.organizationId}:${context.userId}`;
+function ownerKey(context: ExecutionOwner): string {
+  return executionOwnerKey(context);
 }
 
 function mapProgressPhase(phase: string): UploadAnalysisPhase {
@@ -130,7 +130,7 @@ async function processSyncUpload(buffer: Buffer, fileName: string, mimeType: str
 
 export async function POST(request: NextRequest): Promise<Response> {
   const requestId = request.headers.get('x-request-id')?.trim() || generateRequestId();
-  const access = await requireLawyerAccess(request);
+  const access = await requireWorkspaceExecutionAccess(request);
   if (!access.ok) return access.response;
   const rateLimit = checkRequestRateLimit(request, 'upload', 10, ownerKey(access.context));
   if (!rateLimit.ok) {

@@ -168,6 +168,70 @@ describe('motor universal de documentos', () => {
     expect(result.generationMetadata.provenance).toContain('TEMPLATE_STRUCTURE');
   });
 
+  it('redacta de nuevo las secciones sustantivas sin entregar el texto de la plantilla al generador', async () => {
+    const workflow = buildCaseWorkflow({
+      sourceDocuments: [fullSource],
+      analysis: { facts: [], missingData: [] },
+      generationMode: 'personal_template',
+      templateId: 'template-familiar',
+    });
+    const historicalTemplate = [
+      'CONTESTACIÓN FAMILIAR DE MODELO',
+      'HECHOS',
+      `El cliente histórico ${CANARY_CLIENTE}, expediente ${EXPEDIENTE_TEST_ID}, solicita alimentos.`,
+      'Desarrollo argumentativo del modelo para conservar su forma y extensión. '.repeat(12),
+      'PETITORIOS',
+      'PRIMERO. Tenerme por presentado y acordar de conformidad lo solicitado.',
+    ].join('\n');
+    const received: string[] = [];
+
+    await runGenerationPipeline({
+      workflow,
+      sourceDocuments: [fullSource],
+      referenceDocumentText: historicalTemplate,
+      documentTypeLabel: 'Contestación de Demanda',
+      userInstruction: 'Genera la contestación del caso nuevo',
+      generateSection: async ({ section }) => {
+        received.push(section.content.map((block) => block.text).join('\n'));
+        return 'Contenido del caso nuevo.';
+      },
+    });
+
+    expect(received.length).toBeGreaterThan(0);
+    expect(received.join('\n')).not.toContain(CANARY_CLIENTE);
+    expect(received.join('\n')).not.toContain(EXPEDIENTE_TEST_ID);
+  });
+
+  it('respeta la corrección del abogado: una sección marcada como fórmula conserva el texto de la plantilla', async () => {
+    const workflow = buildCaseWorkflow({
+      sourceDocuments: [fullSource],
+      analysis: { facts: [], missingData: [] },
+      generationMode: 'personal_template',
+      templateId: 'template-familiar',
+      sectionKinds: { hechos: 'FORMULA' },
+    } as never);
+    const template = [
+      'CONTESTACIÓN FAMILIAR DE MODELO',
+      'HECHOS',
+      'Fórmula propia del despacho para esta sección. '.repeat(12),
+      'PETITORIOS',
+      'PRIMERO. Tenerme por presentado y acordar de conformidad lo solicitado.',
+    ].join('\n');
+    const received: string[] = [];
+    await runGenerationPipeline({
+      workflow,
+      sourceDocuments: [fullSource],
+      referenceDocumentText: template,
+      documentTypeLabel: 'Contestación de Demanda',
+      userInstruction: 'Genera la contestación del caso nuevo',
+      generateSection: async ({ section }) => {
+        received.push(section.content.map((block) => block.text).join('\n'));
+        return 'Contenido del caso nuevo.';
+      },
+    });
+    expect(received.join('\n')).toContain('Fórmula propia del despacho');
+  });
+
   it('transporta todos los hechos numerados al plan de redacción sin truncarlos', async () => {
     const result = await runGenerationPipeline({
       sourceDocuments: [fullSource],
@@ -230,10 +294,13 @@ describe('motor universal de documentos', () => {
         }),
       });
       const finalText = result.sections.flatMap((section) => section.content).map((block) => block.text).join('\n');
-      expect(finalText).toContain('PRIMERO. A');
-      expect(finalText).toContain('SEGUNDO. B');
-      expect(finalText).toContain('TERCERO. C');
-      expect(finalText).toContain('CUARTO. D');
+      // Fase 2 (2026-10-13): el hecho ya no se imprime con su número duplicado («AL HECHO PRIMERO.- PRIMERO. A»);
+      // la intención de la prueba —todos los hechos numerados llegan al documento final, cada uno con su
+      // número— se conserva con el formato limpio «AL HECHO <n>.- La parte actora afirma: "<texto>."» (sin repetir el hecho).
+      expect(finalText).toContain('AL HECHO PRIMERO.- La parte actora afirma: "A."');
+      expect(finalText).toContain('AL HECHO SEGUNDO.- La parte actora afirma: "B."');
+      expect(finalText).toContain('AL HECHO TERCERO.- La parte actora afirma: "C."');
+      expect(finalText).toContain('AL HECHO CUARTO.- La parte actora afirma: "D."');
     } finally {
       if (previousKey === undefined) delete process.env.NVIDIA_API_KEY;
       else process.env.NVIDIA_API_KEY = previousKey;

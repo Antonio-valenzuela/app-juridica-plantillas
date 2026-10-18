@@ -5,17 +5,29 @@ import type { CaseDocument, UploadedSourceDocument } from '@/lib/legal-engine/ty
 import { reconstructCaseAnalysis, CaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 import type { TemplateItem } from './TemplateLibraryManager';
 import type { DraftDepth } from '@/lib/legal-engine/draftDepth';
-import { LEGAL_CATALOG_REGISTRY, getCatalogDocument } from '@/lib/catalog/legalCatalog';
+import { DEFAULT_PAGE_TARGET, tryParsePageTarget, type PageTarget } from '@/lib/legal-engine/pageTarget';
+import { canGenerateDocumentDraft, getCatalogDocument, getContestacionesDocumentOptions, getFunctionalDocumentStatus } from '@/lib/catalog/legalCatalog';
 import {
   evaluateSourceOutputCompatibility,
   inferSourceMatterForDocuments,
   inferSourceOutputType,
 } from '@/lib/legal-engine/sourceOutputCompatibility';
+import { proposeActuaciones } from '@/lib/legal-engine/actuacionProposal';
+import { describeIncompatibleSource } from '@/lib/apiErrorMessage';
+import { ActuacionProposalCard } from './ActuacionProposalCard';
 
-import { ContestacionesExpedienteCard, type ExpedienteFichaData } from './ContestacionesExpedienteCard';
+import { ContestacionesExpedienteCard, type ExpedienteFichaData, type ExpedienteFieldStatus } from './ContestacionesExpedienteCard';
 import { ContestacionesAnalysisPanel } from './ContestacionesAnalysisPanel';
 import { ContestacionesConfigPanel } from './ContestacionesConfigPanel';
 import { ContestacionesChecklist } from './ContestacionesChecklist';
+import { AppealResolutionReviewPanel } from './AppealResolutionReviewPanel';
+import { CaseDossierPanel, CaseDossierSummaryCard, type CaseDossierState } from './CaseDossierPanel';
+import { RequirementsDialog } from './RequirementsDialog';
+import type { CaseDossier } from '@/lib/legal-engine/caseDossier';
+import { getWritingContract } from '@/lib/legal-engine/writingContract';
+import { AppealReasoningAiReview } from './AppealReasoningCandidatesPanel';
+import { extractAppealReasoningCandidates } from '@/lib/legal-engine/case-extraction/appealReasoningCandidates';
+import { deriveProvisionalAppealConfirmation, extractAppealResolutionReview, isCivilFamilyAppeal, resolveAppealGeneration, selectPrimaryAppealResolution, validateAppealConfirmation, type AppealConfirmation } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 
 export interface CaseDocumentsReaderProps {
   documents: CaseDocument[];
@@ -23,6 +35,8 @@ export interface CaseDocumentsReaderProps {
   selectedDocId?: string | null;
   onSelectDocument: (doc: CaseDocument) => void;
   onUploadNewDocument?: () => void;
+  /** Abre el modal existente para subir y guardar una plantilla (machote) del abogado. */
+  onUploadTemplate?: () => void;
   onGenerateResponse?: (request?: string | {
     userInstructions: string;
     selectedDocumentType: string;
@@ -32,6 +46,14 @@ export interface CaseDocumentsReaderProps {
     generationMode?: 'automatic' | 'personal_template' | 'reference_document';
     generationExtension?: { generationMode: 'standard' | 'extended-legal'; targetPages?: number; minPages?: number; maxPages?: number };
     draftDepth?: DraftDepth;
+    /** Meta de extensión elegida (5/10/20/40/personalizada); el servidor la vuelve a validar. */
+    pageTarget?: PageTarget;
+    appealConfirmation?: AppealConfirmation;
+    /** Ficha del caso confirmada por el abogado (con la parte que representa). */
+    caseDossier?: CaseDossier;
+    uncertifiedDraftAcknowledged?: boolean;
+    /** Correcciones del abogado: qué secciones de su plantilla se conservan o se reescriben. */
+    templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
   }) => void;
   onOpenEditor?: () => void;
   isGenerating?: boolean;
@@ -87,6 +109,31 @@ export function deriveContestacionesSteps(signals: ContestacionesUiSignals) {
   ];
 }
 
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  DEMANDA: 'Demanda',
+  DEMANDA_CIVIL: 'Demanda civil',
+  DEMANDA_MERCANTIL: 'Demanda mercantil',
+  DEMANDA_LABORAL: 'Demanda laboral',
+  DEMANDA_AMPARO: 'Demanda de amparo',
+  DEMANDA_AMPARO_DIRECTO: 'Demanda de amparo directo',
+  CONTESTACION_DEMANDA: 'Contestación de demanda',
+  SENTENCIA_O_RESOLUCION: 'Sentencia o resolución',
+  SENTENCIA_AMPARO: 'Sentencia de amparo',
+  SENTENCIA_AMPARO_DIRECTO: 'Sentencia de amparo directo',
+  RECURSO: 'Recurso',
+  REPLICA: 'Réplica',
+  LAUDO: 'Laudo',
+  ACUERDO: 'Acuerdo',
+};
+
+/** Tipo del documento fuente en lenguaje del abogado; sin rótulo si no está clasificado. */
+export function humanSourceDocumentType(type?: string | null): string | undefined {
+  if (!type || type === 'DOCUMENTO_JURIDICO_NO_CLASIFICADO') return undefined;
+  if (SOURCE_TYPE_LABELS[type]) return SOURCE_TYPE_LABELS[type];
+  const words = type.toLowerCase().split('_').filter(Boolean).join(' ');
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : undefined;
+}
+
 export function formatContestacionesReadiness(readiness?: string | null) {
   switch (readiness?.toUpperCase()) {
     case 'READY':
@@ -102,6 +149,20 @@ export function formatContestacionesReadiness(readiness?: string | null) {
     default:
       return { label: 'Pendiente de evaluación', tone: 'neutral' as const };
   }
+}
+
+export type GenerationFlow = 'appeal' | 'contestacion' | 'both';
+
+/**
+ * Bloqueo de generación: único motivo por el que el botón no habilita.
+ * Cada bloqueo es visible y accionable; nada más puede deshabilitarlo.
+ */
+export interface GenerationBlocker {
+  code: string;
+  flow: GenerationFlow;
+  actionable: boolean;
+  step: number;
+  label: string;
 }
 
 export function getContestacionesGenerationBlockReason(input: {
@@ -131,22 +192,7 @@ export const CONTESTACIONES_SECTION_ORDER = [
   'action',
 ] as const;
 
-export const RESPONSE_DOCUMENT_TYPES = [
-  { value: 'contestacion_demanda_civil', label: 'Contestación de Demanda Civil' },
-  { value: 'contestacion_demanda_laboral', label: 'Contestación de Demanda Laboral' },
-  { value: 'contestacion_demanda_mercantil', label: 'Contestación de Demanda Mercantil' },
-  { value: 'apelacion_civil', label: 'Apelación Civil' },
-  { value: 'apelacion_mercantil', label: 'Apelación Mercantil' },
-  { value: 'apelacion_familiar', label: 'Apelación Familiar' },
-  { value: 'demanda_amparo_directo', label: 'Demanda de Amparo Directo' },
-  { value: 'demanda_amparo_indirecto', label: 'Demanda de Amparo Indirecto' },
-  { value: 'recurso_revision_amparo_directo', label: 'Recurso de Revisión en Amparo Directo' },
-  { value: 'recurso_revision_amparo', label: 'Recurso de Revisión en Amparo' },
-  { value: 'recurso_queja_amparo', label: 'Recurso de Queja en Amparo' },
-  { value: 'recurso_reclamacion', label: 'Recurso de Reclamación' },
-  { value: 'incidente_procesal', label: 'Incidente Procesal / de Nulidad' },
-  { value: 'redaccion_libre', label: 'Redacción Libre — Escribir directamente lo que quiero' },
-] as const;
+export const RESPONSE_DOCUMENT_TYPES = getContestacionesDocumentOptions();
 
 function formatContestacionesFileSize(bytes?: number) {
   if (!bytes || bytes <= 0) return '—';
@@ -178,6 +224,7 @@ export function CaseDocumentsReader({
   selectedDocId,
   onSelectDocument,
   onUploadNewDocument,
+  onUploadTemplate,
   onGenerateResponse,
   onOpenEditor,
   isGenerating = false,
@@ -192,6 +239,7 @@ export function CaseDocumentsReader({
   const [viewMode, setViewMode] = useState<'original' | 'structure'>('original');
   const [isDragging, setIsDragging] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [isInspectorOpen, setIsInspectorOpen] = useState(true);
 
   // Exportar para chat — texto extraído completo
   const getFullExtractedText = useCallback(() => {
@@ -239,11 +287,69 @@ export function CaseDocumentsReader({
 
   // Estados de configuración de contestación
   const [customPrompt, setCustomPrompt] = useState('');
-  const [selectedResponseType, setSelectedResponseType] = useState<string>('contestacion_demanda_civil');
+  const [selectedResponseType, setSelectedResponseType] = useState<string>(RESPONSE_DOCUMENT_TYPES[0]?.value || '');
+  const [showUncertifiedDrafts, setShowUncertifiedDrafts] = useState(false);
   const userHasManuallyChangedDocTypeRef = useRef(false);
+  // Actuación que el abogado eligió o confirmó expresamente (no la preseleccionada por el sistema).
+  const [confirmedActuacion, setConfirmedActuacion] = useState<string | null>(null);
   const [generationMode, setGenerationMode] = useState<'automatic' | 'personal_template' | 'reference_document'>('automatic');
-  const [draftDepth, setDraftDepth] = useState<DraftDepth>('PROFESSIONAL_20');
+  const [templateSectionKinds, setTemplateSectionKinds] = useState<Record<string, 'FORMULA' | 'SUSTANTIVA'>>({});
+  // Extensión del escrito: se recuerda por expediente (y por sesión si aún no hay expediente).
+  const pageTargetStorageKey = `lex:page-target:${String(caseFicha?.expediente || '').trim().toLowerCase().replace(/\s+/g, '') || 'sesion'}`;
+  const [pageTarget, setPageTarget] = useState<PageTarget>(DEFAULT_PAGE_TARGET);
+  useEffect(() => {
+    try {
+      const stored = tryParsePageTarget(JSON.parse(window.localStorage.getItem(pageTargetStorageKey) || window.sessionStorage.getItem('lex:page-target:sesion') || 'null'));
+      if (stored) setPageTarget(stored);
+    } catch { /* almacenamiento no disponible: se usa el valor por defecto */ }
+  }, [pageTargetStorageKey]);
+  const changePageTarget = (target: PageTarget) => {
+    setPageTarget(target);
+    try {
+      const serialized = JSON.stringify(target);
+      window.localStorage.setItem(pageTargetStorageKey, serialized);
+      window.sessionStorage.setItem('lex:page-target:sesion', serialized);
+    } catch { /* la elección sigue vigente en esta pantalla aunque no pueda persistirse */ }
+  };
   const [selectedMachoteId, setSelectedMachoteId] = useState<string>('');
+  const [dossierState, setDossierState] = useState<CaseDossierState>({ problems: [] });
+  const [requirementsOpen, setRequirementsOpen] = useState(false);
+  const autoOpenedKeyRef = useRef('');
+  const [appealConfirmation, setAppealConfirmation] = useState<AppealConfirmation>();
+  const appealReview = useMemo(() => isCivilFamilyAppeal(selectedResponseType) ? extractAppealResolutionReview(sourceDocs) : undefined, [sourceDocs, selectedResponseType]);
+  useEffect(() => { setAppealConfirmation(undefined); }, [selectedResponseType, appealReview?.sourceFingerprint]);
+  const confirmedAppeal = appealReview ? validateAppealConfirmation(appealReview, appealConfirmation) : undefined;
+  // Sin formulario obligatorio: si el abogado no ratifica datos se usa la confirmación provisional
+  // derivada de la resolución principal; lo no verificado queda marcado en el borrador.
+  const provisionalAppeal = useMemo(() => appealReview ? deriveProvisionalAppealConfirmation(appealReview, { expediente: caseFicha?.expediente }) : undefined, [appealReview, caseFicha?.expediente]);
+  const effectiveAppealConfirmation = appealConfirmation ?? provisionalAppeal;
+  const appealCandidates = useMemo(() => appealReview && appealConfirmation && validateAppealConfirmation(appealReview, appealConfirmation).eligible
+    ? extractAppealReasoningCandidates(sourceDocs, { documentType: selectedResponseType, resolution: validateAppealConfirmation(appealReview, appealConfirmation).selected!, parties: appealConfirmation.parties, representedNames: appealConfirmation.representedNames, sourceFingerprint: appealReview.sourceFingerprint }) : undefined,
+  [appealReview, appealConfirmation, sourceDocs, selectedResponseType]);
+  const pendingAppealField = 'Por confirmar';
+  const soleDetectedResolution = appealReview ? selectPrimaryAppealResolution(appealReview.resolutions).primary : undefined;
+  const detectedActors = soleDetectedResolution?.parties.filter(p => p.role === 'actor').map(p => p.name).join('; ');
+  const detectedDefendants = soleDetectedResolution?.parties.filter(p => p.role === 'demandado').map(p => p.name).join('; ');
+  // `caseFicha` es estado global de la página y puede provenir de otro expediente: en apelación la
+  // identidad se proyecta SOLO desde la resolución actual (o queda por confirmar).
+  const detectedCourt = soleDetectedResolution && !soleDetectedResolution.court.startsWith('[') ? soleDetectedResolution.court : undefined;
+  const appealFichaStatuses: Partial<Record<'expediente' | 'actor' | 'demandado' | 'autoridad' | 'materia' | 'estadoProcesal', ExpedienteFieldStatus>> | undefined = appealReview ? {
+    expediente: confirmedAppeal?.eligible ? 'CONFIRMED' : (soleDetectedResolution?.expediente || caseFicha?.expediente) ? 'DETECTED_UNCONFIRMED' : 'PENDING',
+    actor: confirmedAppeal?.eligible ? 'CONFIRMED' : detectedActors ? 'DETECTED_UNCONFIRMED' : 'PENDING',
+    demandado: confirmedAppeal?.eligible ? 'CONFIRMED' : detectedDefendants ? 'DETECTED_UNCONFIRMED' : 'PENDING',
+    autoridad: confirmedAppeal?.eligible ? 'CONFIRMED' : detectedCourt ? 'DETECTED_UNCONFIRMED' : 'PENDING',
+    materia: 'PENDING',
+    estadoProcesal: 'PENDING',
+  } : undefined;
+  const appealFicha = appealReview ? {
+    expediente: confirmedAppeal?.eligible ? appealConfirmation!.expediente : soleDetectedResolution?.expediente || caseFicha?.expediente || pendingAppealField,
+    actor: confirmedAppeal?.eligible ? appealConfirmation!.parties.filter(p => p.role === 'actor').map(p => p.name).join('; ') || pendingAppealField : detectedActors || pendingAppealField,
+    demandado: confirmedAppeal?.eligible ? appealConfirmation!.parties.filter(p => p.role === 'demandado').map(p => p.name).join('; ') || pendingAppealField : detectedDefendants || pendingAppealField,
+    autoridad: confirmedAppeal?.eligible ? confirmedAppeal.selected!.court : detectedCourt || pendingAppealField,
+    // La materia se conserva pendiente: ni la detección general ni el tipo elegido la confirman.
+    materia: pendingAppealField,
+    estadoProcesal: caseFicha?.estadoProcesal || pendingAppealField,
+  } : undefined;
 
   // Reconstrucción del análisis del caso
   const caseAnalysis: CaseAnalysis = useMemo(() => {
@@ -264,21 +370,6 @@ export function CaseDocumentsReader({
   );
   const hasFileUrl = Boolean(selectedDoc?.fileUrl);
 
-  // Catálogo e Inferencia de Tipo / Materia para Contestaciones
-  const catalogOptions = useMemo(() => {
-    return LEGAL_CATALOG_REGISTRY.documents
-      .filter((d) => d.implemented)
-      .map((d) => ({
-        value: d.id,
-        label: d.label,
-        areaId: d.areaId,
-        description: d.description,
-        isResponse:
-          /contestaci[oó]n|recurso|incidente|excepci[oó]n|reconvenci[oó]n/i.test(d.label) ||
-          /contestacion|recurso|incidente|excepcion|reconvencion/i.test(d.id),
-      }));
-  }, []);
-
   const inferredSourceType = useMemo(() => {
     if (!sourceDocs || sourceDocs.length === 0) return null;
     return inferSourceOutputType(sourceDocs);
@@ -289,10 +380,26 @@ export function CaseDocumentsReader({
     return inferSourceMatterForDocuments(sourceDocs);
   }, [inferredSourceType, sourceDocs]);
 
-  const suggestedDocType = useMemo(() => {
+  const isJudgmentSource = Boolean(inferredSourceType && (
+    inferredSourceType === 'SENTENCIA_O_RESOLUCION'
+    || inferredSourceType === 'SENTENCIA_AMPARO'
+    || inferredSourceType.startsWith('SENTENCIA_')
+  ));
+  const selectedOutputIsAppeal = /^(?:apelacion_|recurso_(?:revision|queja|reclamacion))/i.test(selectedResponseType);
+
+  // Propuesta por segmentación de actos: la naturaleza del acto controlante (no la primera mención de
+  // «demanda», «auto» o «sentencia») orienta las actuaciones posibles, todas generables y compatibles.
+  // La elección expresa del abogado sobrevive a un cambio de PDF (como el tipo de escrito elegido); la
+  // compatibilidad con la nueva fuente se vuelve a evaluar igualmente.
+  const actuacionProposal = useMemo(() => (sourceDocs && sourceDocs.length > 0 ? proposeActuaciones(sourceDocs) : null), [sourceDocs]);
+
+  // Heurística previa por materia: solo cuando no hay propuesta (sin documento).
+  const legacySuggestedDocType = useMemo(() => {
     if (inferredSourceType === 'SENTENCIA_AMPARO_DIRECTO') {
       return 'recurso_revision_amparo_directo';
     }
+    if (isJudgmentSource && inferredMatter === 'CIVIL') return 'apelacion_civil';
+    if (isJudgmentSource && inferredMatter === 'FAMILIAR') return 'apelacion_familiar';
     if (inferredMatter === 'LABORAL' || inferredSourceType === 'DEMANDA_LABORAL') {
       return 'contestacion_demanda_laboral';
     }
@@ -302,13 +409,14 @@ export function CaseDocumentsReader({
     if (inferredMatter === 'FAMILIAR') {
       return 'contestacion_divorcio';
     }
-    if (inferredMatter === 'ADMINISTRATIVO') {
+    // El clasificador de materia devuelve la forma femenina (ADMINISTRATIVA/AGRARIA).
+    if (inferredMatter === 'ADMINISTRATIVA' || inferredMatter === 'ADMINISTRATIVO') {
       return 'contestacion_nulidad_administrativa';
     }
     if (inferredMatter === 'FISCAL') {
       return 'contestacion_nulidad_fiscal';
     }
-    if (inferredMatter === 'AGRARIO') {
+    if (inferredMatter === 'AGRARIA' || inferredMatter === 'AGRARIO') {
       return 'contestacion_demanda_agraria';
     }
     if (inferredMatter === 'AMPARO') {
@@ -318,16 +426,11 @@ export function CaseDocumentsReader({
       return 'contestacion_demanda_civil';
     }
     return undefined;
-  }, [inferredSourceType, inferredMatter]);
-
-  useEffect(() => {
-    if (suggestedDocType && !userHasManuallyChangedDocTypeRef.current) {
-      setSelectedResponseType(suggestedDocType);
-    }
-  }, [suggestedDocType]);
+  }, [inferredSourceType, inferredMatter, isJudgmentSource]);
+  const suggestedDocType = actuacionProposal ? (actuacionProposal.recommended ?? undefined) : legacySuggestedDocType;
 
   const checkDocCompatibility = useCallback(
-    (docType: string): { compatible: boolean; reason?: string } => {
+    (docType: string): { compatible: boolean; reason?: string; advisories?: Array<{ code: string; message: string }> } => {
       // Redacción Libre acepta cualquier fuente intencionalmente
       if (docType === 'redaccion_libre') {
         return { compatible: true };
@@ -336,15 +439,18 @@ export function CaseDocumentsReader({
         return { compatible: true };
       }
       try {
-        evaluateSourceOutputCompatibility({
+        const evaluation = evaluateSourceOutputCompatibility({
           selectedDocumentType: docType,
           sourceDocuments: sourceDocs,
         });
-        return { compatible: true };
+        return { compatible: true, ...(evaluation.advisories?.length ? { advisories: evaluation.advisories } : {}) };
       } catch (err: any) {
         return {
           compatible: false,
-          reason: err?.message || 'Este escrito pertenece a otra materia y no corresponde al expediente analizado.',
+          // El abogado ve la explicación en lenguaje llano, nunca el código interno ni los identificadores.
+          reason: err?.code === 'SOURCE_DOCUMENT_INCOMPATIBLE'
+            ? describeIncompatibleSource({ message: err.message, errorMetadata: err.metadata })
+            : err?.message || 'Este escrito pertenece a otra materia y no corresponde al expediente analizado.',
         };
       }
     },
@@ -355,21 +461,37 @@ export function CaseDocumentsReader({
     return checkDocCompatibility(selectedResponseType);
   }, [checkDocCompatibility, selectedResponseType]);
 
+  // La sugerencia automática solo puede llevar a un tipo que la fuente admite.
+  // Antes se aplicaba sin esa verificación: una materia mal inferida (p. ej. un
+  // escrito de amparo → recurso de revisión) cambiaba el tipo elegido por uno
+  // incompatible y dejaba deshabilitado «Generar».
+  const suggestedDocTypeIsUsable = Boolean(
+    suggestedDocType
+    && getFunctionalDocumentStatus(suggestedDocType) === 'PASS'
+    && checkDocCompatibility(suggestedDocType).compatible,
+  );
+  useEffect(() => {
+    if (suggestedDocType && suggestedDocTypeIsUsable && !userHasManuallyChangedDocTypeRef.current) {
+      setSelectedResponseType(suggestedDocType);
+    }
+  }, [suggestedDocType, suggestedDocTypeIsUsable]);
+
   const documentTypeOptions = useMemo(() => {
     const map = new Map<string, { value: string; label: string }>();
 
-    for (const item of RESPONSE_DOCUMENT_TYPES) {
+    for (const item of getContestacionesDocumentOptions({ includeUncertifiedDrafts: showUncertifiedDrafts })) {
       map.set(item.value, { value: item.value, label: item.label });
     }
-
-    for (const doc of catalogOptions) {
-      if (!map.has(doc.value) && doc.isResponse) {
-        map.set(doc.value, { value: doc.value, label: doc.label });
-      }
+    // Actuaciones propuestas para ESTE documento (p. ej. contestación de divorcio, reconvención, revocación,
+    // desahogo de vista): son tipos generables y compatibles con la fuente aunque no estén en la lista base.
+    for (const item of actuacionProposal?.candidates ?? []) {
+      if (!map.has(item.documentType)) map.set(item.documentType, { value: item.documentType, label: item.label });
     }
+    const libre = map.get('redaccion_libre');
+    if (libre) { map.delete('redaccion_libre'); map.set('redaccion_libre', libre); }
 
     return Array.from(map.values());
-  }, [catalogOptions]);
+  }, [showUncertifiedDrafts, actuacionProposal]);
 
   const selectedDocOption = useMemo(() => {
     return (
@@ -410,8 +532,11 @@ export function CaseDocumentsReader({
   }, [customTemplates, selectedResponseType, selectedAreaId]);
 
   const effectiveMachote = useMemo(() => {
-    if (selectedMachoteId && compatibleMachotes.some((m) => m.id === selectedMachoteId)) {
-      return compatibleMachotes.find((m) => m.id === selectedMachoteId) || null;
+    // Elección expresa del abogado: se usa su plantilla aunque el filtro de
+    // compatibilidad por materia no la habría propuesto.
+    if (selectedMachoteId) {
+      const chosen = (customTemplates || []).find((m) => m.id === selectedMachoteId);
+      if (chosen) return chosen;
     }
     return compatibleMachotes[0] || null;
   }, [selectedMachoteId, compatibleMachotes]);
@@ -435,18 +560,132 @@ export function CaseDocumentsReader({
   });
 
   const hasDirectInstruction = customPrompt.trim().length >= 10;
-  const effectiveCompatible = currentDocCompatibility.compatible || hasDirectInstruction || selectedResponseType === 'redaccion_libre';
-  const generationBlockReason = getContestacionesGenerationBlockReason({
-    hasDocument: Boolean(selectedDoc),
-    compatible: effectiveCompatible,
-    compatibilityReason: currentDocCompatibility.reason,
-    generationMode,
-    hasCompatibleTemplate: compatibleMachotes.length > 0,
-    hasReferenceDocument: false,
-  });
+  const generateActionLabel = /^contestacion/.test(selectedResponseType)
+    ? 'Generar contestación'
+    : /^apelacion/.test(selectedResponseType)
+      ? 'Generar apelación'
+      : /^recurso/.test(selectedResponseType) ? 'Generar recurso' : 'Generar escrito';
+  const requestedResponseType = selectedResponseType === 'redaccion_libre' ? suggestedDocType || 'escrito_libre' : selectedResponseType;
+  const responseFunctionalStatus = getFunctionalDocumentStatus(requestedResponseType);
+  // Todo escrito con parte firmante pasa por la ficha del caso (solo si hay un documento fuente del que extraerla).
+  const showCaseDossier = Boolean(selectedDoc && sourceDocs.length > 0 && getWritingContract(requestedResponseType).needsRepresentation);
+  const dossierSourceKey = sourceDocs.map((source) => source.id).join('|');
+  // Si el escrito pide más datos, el panel se abre solo (una vez por documento y tipo); al confirmar la ficha se cierra.
+  const dossierKey = `${requestedResponseType}:${dossierSourceKey}`;
+  const dossierPending = showCaseDossier && !dossierState.dossier;
+  useEffect(() => {
+    if (dossierPending && autoOpenedKeyRef.current !== dossierKey) {
+      autoOpenedKeyRef.current = dossierKey;
+      setRequirementsOpen(true);
+    }
+  }, [dossierPending, dossierKey]);
+  useEffect(() => { if (dossierState.dossier) setRequirementsOpen(false); }, [dossierState.dossier]);
+  // ¿Puede generarse el borrador de apelación? Basta la resolución principal detectada o la ratificada.
+  const appealResolutionConfirmed = Boolean(appealReview && resolveAppealGeneration(appealReview, effectiveAppealConfirmation).canGenerate);
+  // Flujo activo: cada workflow evalúa ÚNICAMENTE sus propios requisitos.
+  // Apelación y Contestación no comparten blockers, checklist ni compatibleMachotes.
+  const isAppealFlow = selectedOutputIsAppeal;
+  // Una fuente judicial en Contestación es ASESOR, no bloqueo: se informa y se
+  // ofrece cambiar a Apelación (afordance en la sección de fuente), pero el
+  // usuario que eligió conscientemente contestación no queda atrapado. Para
+  // Apelación sí es requisito implícito haber detectado la resolución.
+  // Solo una CONTESTACIÓN exige una demanda: otras actuaciones contra una resolución (amparo, revocación,
+  // promoción, desahogo…) no son una apelación y no deben bloquearse por ello; su compatibilidad la decide
+  // la matriz fuente→salida.
+  const judgmentSourceNeedsAppeal = isJudgmentSource && !isAppealFlow && /^contestacion_/.test(selectedResponseType);
+  const actuacionNeedsConfirmation = Boolean(actuacionProposal?.requiresConfirmation && selectedDoc && confirmedActuacion !== selectedResponseType);
+  const effectiveCompatible = currentDocCompatibility.compatible;
+
+  const generationBlockers: GenerationBlocker[] = [];
+  if (!selectedDoc) {
+    generationBlockers.push({
+      code: 'SOURCE_DOCUMENT_MISSING', flow: 'both', actionable: true, step: 1,
+      label: 'Carga un documento fuente para habilitar la generación.',
+    });
+  }
+  if (!canGenerateDocumentDraft(requestedResponseType, showUncertifiedDrafts)) {
+    generationBlockers.push({
+      code: 'TYPE_NOT_DRAFT_CAPABLE', flow: 'both', actionable: true, step: 2,
+      label: responseFunctionalStatus === 'PASS'
+        ? 'El tipo de escrito seleccionado no tiene una ruta de borrador disponible.'
+        : 'Activa “En desarrollo (sin certificar)” para generar este tipo únicamente como borrador asistido.',
+    });
+  }
+  if (isAppealFlow) {
+    // Requisitos EXCLUSIVOS de Apelación. La revisión de la resolución impugnada
+    // solo existe para apelaciones civiles y familiares; los recursos de amparo
+    // (revisión, queja, reclamación) no pueden cumplirla y no deben bloquearse.
+    if (isCivilFamilyAppeal(selectedResponseType) && !appealReview) {
+      generationBlockers.push({
+        code: 'APPEAL_RESOLUTION_NOT_DETECTED', flow: 'appeal', actionable: true, step: 1,
+        label: 'Selecciona la resolución que deseas impugnar.',
+      });
+    } else if (appealReview && !appealResolutionConfirmed) {
+      generationBlockers.push({
+        code: 'APPEAL_CONFIRMATION_PENDING', flow: 'appeal', actionable: true, step: 1,
+        label: 'No se pudo preparar la resolución a impugnar. Vuelve a cargar el documento.',
+      });
+    }
+    // La matriz fuente→salida también rige los recursos: una demanda no se impugna por apelación. Antes solo
+    // lo rechazaba el servidor tras pulsar Generar.
+    if (selectedDoc && !effectiveCompatible) {
+      generationBlockers.push({
+        code: 'SOURCE_DOCUMENT_INCOMPATIBLE', flow: 'appeal', actionable: true, step: 1,
+        label: currentDocCompatibility.reason || 'El documento cargado no corresponde a este recurso. Elige una de las actuaciones propuestas.',
+      });
+    }
+  } else {
+    // Requisitos EXCLUSIVOS de Contestación.
+    // Una resolución judicial NO permite contestar una demanda: es una fuente
+    // incompatible y por tanto un blocker real y visible. El mensaje ofrece
+    // cambiar a Apelación, que es la vía correcta para impugnar.
+    if (judgmentSourceNeedsAppeal) {
+      generationBlockers.push({
+        code: 'SOURCE_DOCUMENT_INCOMPATIBLE', flow: 'contestacion', actionable: true, step: 1,
+        label: 'Este documento parece ser una resolución judicial, no una demanda. Para elaborar una contestación carga la demanda. Si deseas impugnar esta resolución, cambia a Apelación.',
+      });
+    }
+    const contestacionReason = getContestacionesGenerationBlockReason({
+      hasDocument: Boolean(selectedDoc),
+      compatible: effectiveCompatible,
+      compatibilityReason: currentDocCompatibility.reason,
+      generationMode,
+      hasCompatibleTemplate: Boolean(effectiveMachote),
+      hasReferenceDocument: false,
+    });
+    if (contestacionReason) {
+      generationBlockers.push({
+        code: 'CONTESTACION_REQUIREMENT', flow: 'contestacion', actionable: true, step: 1,
+        label: contestacionReason,
+      });
+    }
+  }
+
+  // La ficha del caso es previa a redactar: el abogado la confirma y elige a quién representa (no se infiere).
+  if (showCaseDossier && !dossierState.dossier) {
+    generationBlockers.push({
+      code: 'CASE_DOSSIER_PENDING', flow: 'both', actionable: true, step: 1,
+      label: dossierState.problems[0] || 'Confirma la ficha del caso y elige a quién representas.',
+    });
+  }
+
+  if (actuacionNeedsConfirmation) {
+    generationBlockers.push({
+      code: 'ACTUACION_CONFIRMATION_PENDING', flow: 'both', actionable: true, step: 2,
+      label: 'Confirma la actuación: con este documento caben varias vías y la elección es del abogado.',
+    });
+  }
+
+  const generationBlockReason = generationBlockers.length ? Array.from(new Set(generationBlockers.map(b => b.label))).join(' ') : null;
+  // Aviso (no bloqueo) cuando la fuente es una resolución judicial y el
+  // usuario está en Contestación.
+  const judgmentSourceAdvisory = judgmentSourceNeedsAppeal
+    ? 'El documento parece ser una resolución judicial, no una demanda. Para impugnarla puedes continuar como Apelación.'
+    : null;
 
   /* Instrucción enriquecida para el motor jurídico */
   const buildContestacionInstruction = (): string => {
+    if (appealReview) return customPrompt.trim(); // No inherited demand/labor findings in appeal requests.
     const parts: string[] = [];
     if (customPrompt.trim()) {
       parts.push(`INSTRUCCIONES DE DEFENSA DEL ABOGADO:\n${customPrompt.trim()}`);
@@ -469,89 +708,107 @@ export function CaseDocumentsReader({
       selectedDocumentType: effectiveDocType,
       documentTypeLabel: effectiveLabel,
       generationMode,
-      draftDepth,
+      pageTarget,
+      uncertifiedDraftAcknowledged: showUncertifiedDrafts && responseFunctionalStatus !== 'PASS',
+      ...(appealReview ? { appealConfirmation: effectiveAppealConfirmation } : {}),
+      ...(showCaseDossier && dossierState.dossier ? { caseDossier: dossierState.dossier } : {}),
       referenceDocumentId: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.id : undefined,
       referenceDocumentText: generationMode === 'personal_template' && effectiveMachote ? effectiveMachote.content || '' : undefined,
+      ...(generationMode === 'personal_template' && Object.keys(templateSectionKinds).length > 0 ? { templateSectionKinds } : {}),
     });
   };
 
+  const handleReviewGenerationRequirements = () => {
+    const firstBlocker = generationBlockers[0];
+    if (firstBlocker?.code === 'SOURCE_DOCUMENT_MISSING') {
+      onUploadNewDocument?.();
+      return;
+    }
+
+    if (firstBlocker?.code === 'CASE_DOSSIER_PENDING') {
+      setRequirementsOpen(true);
+      return;
+    }
+
+    const target = firstBlocker?.code === 'ACTUACION_CONFIRMATION_PENDING'
+      ? document.querySelector<HTMLElement>('[data-testid="actuacion-proposal"]')
+      : isAppealFlow
+      ? document.querySelector<HTMLElement>('[aria-label="Resolución a impugnar"]')
+      : firstBlocker?.code === 'SOURCE_DOCUMENT_INCOMPATIBLE'
+        ? document.querySelector<HTMLElement>('[data-testid="source-incompatible-notice"]')
+        : firstBlocker?.code === 'TYPE_NOT_DRAFT_CAPABLE'
+          ? document.querySelector<HTMLElement>('[aria-label="En desarrollo (sin certificar)"]')
+          : document.querySelector<HTMLElement>('[data-testid="contestaciones-config-panel"]');
+
+    target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    const firstControl = target?.matches('input, select, textarea, button')
+      ? target
+      : target?.querySelector<HTMLElement>('input:not([type="checkbox"]), select, textarea, button');
+    firstControl?.focus({ preventScroll: true });
+  };
+
   return (
-    <div className="w-full min-w-0 px-3 py-3 sm:px-4 lg:px-0 xl:py-4 space-y-3 lg:space-y-4">
+    <div className="contestaciones-desktop-workspace w-full min-w-0" data-testid="legal-desktop-workspace">
       {/* Header */}
-      <section className="space-y-3">
-        <div className="contestaciones-page-header flex flex-col gap-2">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 lg:text-[28px]">
-              Contestaciones y recursos
-            </h1>
-            <p className="mt-1 text-sm leading-relaxed text-slate-500">
-              Analiza el documento fuente, configura la respuesta y genera un borrador profesional.
-            </p>
-          </div>
-
-          <div className="hidden md:flex items-center gap-2 pt-2 text-xs font-medium text-slate-400">
-            <span>La tecnología al servicio de la justicia</span>
-            <span className="h-[1px] w-6 bg-amber-400" />
-          </div>
+      <header className="lex-page-header">
+        <div className="lex-page-heading">
+          <h1 className="lex-page-title">Contestaciones y recursos</h1>
+          <p className="lex-page-subtitle">Analiza el documento oficial y genera el escrito jurídico para revisión profesional.</p>
         </div>
-
-        {/* Stepper horizontal inline */}
-        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            {/* Step 1 */}
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0B2545] text-sm font-bold text-white shadow-xs">
-                1
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-900">1. Documento fuente</p>
-                <p className="text-[11px] text-slate-400">Carga y revisa el documento</p>
-              </div>
-            </div>
-
-            <div className="hidden sm:block h-[1px] w-8 md:w-12 bg-slate-200" />
-
-            {/* Step 2 */}
-            <div className="flex items-center gap-2.5">
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                contestacionesSteps[1].status === 'COMPLETED'
-                  ? 'bg-[#0B2545] text-white'
-                  : contestacionesSteps[1].status === 'ACTIVE'
-                    ? 'border-2 border-[#0B2545] bg-white text-[#0B2545]'
-                    : 'border border-slate-200 bg-white text-slate-400'
-              }`}>
-                2
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-slate-700">2. Análisis</p>
-                <p className="text-[11px] text-slate-400">IA analiza el contenido</p>
-              </div>
-            </div>
-
-            <div className="hidden sm:block h-[1px] w-8 md:w-12 bg-slate-200" />
-
-            {/* Step 3 */}
-            <div className="flex items-center gap-2.5">
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                contestacionesSteps[2].status === 'COMPLETED'
-                  ? 'bg-emerald-600 text-white'
-                  : contestacionesSteps[2].status === 'ACTIVE'
-                    ? 'border-2 border-[#0B2545] bg-white text-[#0B2545]'
-                    : 'border border-slate-200 bg-white text-slate-400'
-              }`}>
-                3
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-slate-700">3. Generación</p>
-                <p className="text-[11px] text-slate-400">Configura y genera tu escrito</p>
-              </div>
-            </div>
+        <div className="lex-page-actions">
+          <button type="button" className="lex-button lex-button-secondary" onClick={() => window.dispatchEvent(new CustomEvent('open-legal-chat'))}>
+            Asistente legal
+          </button>
+          <button
+            type="button"
+            className="lex-button lex-button-secondary"
+            data-testid="toggle-document-inspector"
+            aria-controls="document-inspector"
+            aria-expanded={isInspectorOpen}
+            onClick={() => setIsInspectorOpen((open) => !open)}
+          >
+            {isInspectorOpen ? 'Ocultar panel de datos' : 'Mostrar panel de datos'}
+          </button>
         </div>
-      </section>
+      </header>
+
+      {/* Pasos del flujo con su estado real */}
+      <ol className="lex-stepper" aria-label="Progreso">
+        {[
+          {
+            title: 'Documento fuente',
+            detail: selectedDoc ? 'Cargado' : 'Carga el documento',
+            status: contestacionesSteps[0].status,
+          },
+          {
+            title: 'Análisis',
+            detail: !selectedDoc ? 'Pendiente' : analysisAvailable ? 'Información extraída' : 'Analizando…',
+            status: contestacionesSteps[1].status === 'BLOCKED' && analysisAvailable ? 'COMPLETED' : contestacionesSteps[1].status,
+          },
+          {
+            title: 'Generación',
+            detail: isGenerating
+              ? 'Generando borrador…'
+              : generationJob?.status === 'completed'
+                ? 'Borrador listo'
+                : selectedDoc ? 'Elige la actuación y genera' : 'Pendiente',
+            status: generationJob?.status === 'completed' ? 'COMPLETED' : contestacionesSteps[2].status,
+          },
+        ].map((step, index) => (
+          <li key={step.title} className={`lex-step is-${String(step.status).toLowerCase()}`} aria-current={step.status === 'ACTIVE' ? 'step' : undefined}>
+            <span className="lex-step-number">{step.status === 'COMPLETED' ? '✓' : index + 1}</span>
+            <span className="lex-step-text">
+              <span className="lex-step-title">{step.title}</span>
+              <span className="lex-step-detail">{step.detail}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
 
       {/* Main Grid: Left Column & Right Column */}
-      <div className="contestaciones-layout-grid grid items-start gap-4 lg:gap-5">
+      <div className="contestaciones-layout-grid grid items-start gap-4 lg:gap-5" data-testid="legal-workspace-grid" data-inspector-open={isInspectorOpen}>
         {/* LEFT COLUMN */}
-        <main className="contestaciones-main-column min-w-0 space-y-4">
+        <main className="contestaciones-main-column min-w-0 space-y-4" data-testid="document-canvas" aria-label="Documento fuente">
           {/* Documento fuente */}
           <section className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-xs transition hover:border-slate-300/80">
             {!selectedDoc ? (
@@ -584,152 +841,76 @@ export function CaseDocumentsReader({
             ) : (
               <>
                 {/* Document Metadata sub-bar */}
-                <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/50 px-4 py-3 md:flex-row md:items-center md:justify-between">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-black ${
-                      isPdfDoc ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
-                    }`}>
-                      {isPdfDoc ? 'PDF' : 'DOC'}
-                    </div>
-
+                <div className="lex-doc-bar">
+                  <div className="lex-doc-identity">
+                    <span className={`lex-doc-badge ${isPdfDoc ? 'is-pdf' : 'is-doc'}`} aria-hidden="true">{isPdfDoc ? 'PDF' : 'DOC'}</span>
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-bold text-slate-800" title={selectedDoc.name}>
-                          {selectedDoc.name}
-                        </p>
-                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
-                          {isPdfDoc ? 'PDF' : 'DOCX'}
-                        </span>
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
-                          {formatContestacionesFileSize(selectedSourceDoc?.fileSizeBytes)}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 text-[11px] text-slate-400">
-                        Cargado el {formatDocDate(selectedDoc.uploadedAt || (selectedSourceDoc as any)?.uploadedAt)}
+                      <p className="lex-doc-name" title={selectedDoc.name}>{selectedDoc.name}</p>
+                      <p className="lex-doc-meta">
+                        {totalPages} página{totalPages === 1 ? '' : 's'} · {formatContestacionesFileSize(selectedSourceDoc?.fileSizeBytes)} · Cargado el {formatDocDate(selectedDoc.uploadedAt || (selectedSourceDoc as any)?.uploadedAt)}
                       </p>
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap items-center justify-end gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('original')}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                        viewMode === 'original'
-                          ? 'bg-[#0B2545] text-white shadow-xs'
-                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      Vista original
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('structure')}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                        viewMode === 'structure'
-                          ? 'bg-[#0B2545] text-white shadow-xs'
-                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      Texto extraído
-                    </button>
-
+                  <div className="lex-doc-actions">
+                    <div className="lex-segmented" role="group" aria-label="Vista del documento">
+                      <button type="button" aria-pressed={viewMode === 'original'} onClick={() => setViewMode('original')}>Vista original</button>
+                      <button type="button" aria-pressed={viewMode === 'structure'} onClick={() => setViewMode('structure')}>Texto extraído</button>
+                    </div>
                     {onUploadNewDocument && (
-                      <button
-                        type="button"
-                        onClick={onUploadNewDocument}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shadow-2xs"
-                      >
-                        <svg className="h-3.5 w-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                        </svg>
-                        <span>Reemplazar documento</span>
+                      <button type="button" onClick={onUploadNewDocument} className="lex-button lex-button-secondary">
+                        Reemplazar documento
                       </button>
                     )}
                   </div>
                 </div>
 
                 {/* Viewer Body */}
-                <div className="min-w-0 bg-white">
+                <div className="contestaciones-document-viewer min-w-0 bg-white">
                   {/* Toolbar */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-4 py-3">
-                    <div className="flex items-center gap-2">
+                  <div className="contestaciones-document-toolbar lex-viewer-toolbar">
+                    <div className="lex-pager" role="group" aria-label="Páginas">
                       <button
                         type="button"
                         onClick={() => setActivePage((prev) => Math.max(1, prev - 1))}
                         disabled={safeActivePage <= 1}
-                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+                        className="lex-icon-button"
+                        aria-label="Página anterior"
                       >
-                        ← Anterior
+                        ←
                       </button>
-
-                      <span className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
-                        Página {safeActivePage} de {totalPages}
-                      </span>
-
+                      <span className="lex-pager-label">Página {safeActivePage} de {totalPages}</span>
                       <button
                         type="button"
                         onClick={() => setActivePage((prev) => Math.min(totalPages, prev + 1))}
                         disabled={safeActivePage >= totalPages}
-                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+                        className="lex-icon-button"
+                        aria-label="Página siguiente"
                       >
-                        Siguiente →
-                      </button>
-
-                      <span className="ml-1 text-sm text-slate-400">
-                        ({totalPages} página{totalPages === 1 ? '' : 's'})
-                      </span>
-                    </div>
-
-                    {hasFileUrl && isPdfDoc && (
-                      <a
-                        href={selectedDoc.fileUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 transition hover:text-[#0B2545]"
-                      >
-                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        <span>Abrir aparte</span>
-                      </a>
-                    )}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={handleCopyForChat}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-                        title="Copiar texto extraído para pegar en ChatGPT/Asistente"
-                      >
-                        📋 Copiar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleExportTxtForChat}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-                        title="Descargar texto extraído como .txt para chat"
-                      >
-                        ⬇ TXT
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSendToChat}
-                        className="inline-flex items-center gap-1 rounded-lg bg-[#0B2545] px-2.5 py-2 text-xs font-bold text-white hover:bg-slate-900 transition"
-                        title="Enviar texto al Asistente Jurídico interno"
-                      >
-                        💬 Chat
+                        →
                       </button>
                     </div>
-                    {copyFeedback && <span className="text-xs font-medium text-emerald-600">{copyFeedback}</span>}
+
+                    <details className="lex-menu">
+                      <summary className="lex-button lex-button-secondary" aria-label="Más acciones del documento">Más acciones</summary>
+                      <div className="lex-menu-list" role="menu">
+                        {hasFileUrl && isPdfDoc && (
+                          <a role="menuitem" href={selectedDoc.fileUrl} target="_blank" rel="noreferrer">Abrir en otra pestaña</a>
+                        )}
+                        <button type="button" role="menuitem" onClick={handleCopyForChat}>Copiar texto extraído</button>
+                        <button type="button" role="menuitem" onClick={handleExportTxtForChat}>Descargar texto (.txt)</button>
+                        <button type="button" role="menuitem" onClick={handleSendToChat}>Enviar al asistente jurídico</button>
+                      </div>
+                    </details>
+                    {copyFeedback && <span className="lex-feedback" role="status">{copyFeedback}</span>}
                   </div>
 
-                  <div className="h-[62vh] min-h-[440px] max-h-[820px] bg-white lg:h-[74vh] lg:min-h-[600px]">
+                  <div className="contestaciones-document-preview h-[62vh] min-h-[440px] max-h-[820px] bg-white lg:h-[74vh] lg:min-h-[600px]">
                     {viewMode === 'original' && hasFileUrl && isPdfDoc ? (
                       <object
+                        key={`${selectedDoc.id}:${safeActivePage}`}
                         data={`${selectedDoc.fileUrl}#page=${safeActivePage}&toolbar=0&navpanes=0&view=FitH`}
                         type="application/pdf"
-                        className="block h-full w-full"
+                        className="contestaciones-document-pdf-viewport"
                       >
                         <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
                           <p className="text-sm font-semibold text-slate-700">
@@ -746,7 +927,7 @@ export function CaseDocumentsReader({
                         </div>
                       </object>
                     ) : (
-                      <div className="h-full overflow-y-auto bg-slate-50/70 p-5">
+                      <div className="contestaciones-document-text-viewport h-full overflow-y-auto bg-slate-50/70 p-5">
                         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-2xs">
                           <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-2.5">
                             <p className="text-xs font-bold text-slate-700">
@@ -771,8 +952,9 @@ export function CaseDocumentsReader({
             )}
           </section>
 
-          {/* Documentos recientes */}
-          <section className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs transition hover:border-slate-300/80">
+          {/* Documentos del expediente: solo cuando hay más de uno entre los que elegir */}
+          {documents.length > 1 && (
+          <section className="lex-card">
             <div className="mb-3 flex items-center border-b border-slate-100 pb-2.5">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
@@ -780,8 +962,8 @@ export function CaseDocumentsReader({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Documentos recientes
+                <h3 className="lex-card-title">
+                  Documentos del expediente
                 </h3>
               </div>
 
@@ -858,64 +1040,135 @@ export function CaseDocumentsReader({
               </div>
             )}
           </section>
+          )}
+
         </main>
 
         {/* RIGHT COLUMN */}
-        <aside className="contestaciones-side-column min-w-0 space-y-3.5">
-          <div className="contestaciones-assistance-banner flex items-start gap-3 rounded-xl border border-amber-200/80 bg-[#FFFBEB] px-3.5 py-3 shadow-xs">
-            <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3l1.9 5.8L20 10.7l-6.1 1.9L12 18.5l-1.9-5.9L4 10.7l6.1-1.9L12 3z" />
-            </svg>
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-amber-900">Asistencia jurídica</p>
-              <p className="mt-0.5 text-xs leading-snug text-amber-800/90">
-                Obtén análisis, sugerencias y borradores con base en la legislación mexicana y criterios jurisprudenciales.
-              </p>
-            </div>
-          </div>
-
-          <ContestacionesExpedienteCard
-            caseFicha={caseFicha}
-            caseAnalysis={caseAnalysis}
-            inferredMatter={inferredMatter}
-          />
-
-          <ContestacionesAnalysisPanel
-            hasDocument={Boolean(selectedDoc)}
-            analysisAvailable={analysisAvailable}
-            caseAnalysis={caseAnalysis}
-          />
-
+        <aside id="document-inspector" className="contestaciones-side-column min-w-0 space-y-3.5" data-testid="document-inspector" aria-label="Inspector del expediente" aria-hidden={!isInspectorOpen} hidden={!isInspectorOpen}>
+          <div className="contestaciones-inspector-scroll">
           <ContestacionesConfigPanel
             selectedDocumentType={selectedResponseType}
             onDocumentTypeChange={(val) => {
+              setAppealConfirmation(undefined);
               userHasManuallyChangedDocTypeRef.current = true;
               setSelectedResponseType(val);
+              setConfirmedActuacion(val);
             }}
             documentTypeOptions={documentTypeOptions}
             generationMode={generationMode}
             onGenerationModeChange={setGenerationMode}
-            draftDepth={draftDepth}
-            onDraftDepthChange={setDraftDepth}
+            pageTarget={pageTarget}
+            onPageTargetChange={changePageTarget}
             customTemplates={customTemplates}
             selectedTemplateId={selectedMachoteId}
-            onSelectTemplateId={setSelectedMachoteId}
+            onSelectTemplateId={(id) => { setSelectedMachoteId(id); setTemplateSectionKinds({}); }}
+            templateSectionKinds={templateSectionKinds}
+            onTemplateSectionKindsChange={setTemplateSectionKinds}
             userInstructions={customPrompt}
             onUserInstructionsChange={setCustomPrompt}
             disabled={isGenerating}
+            showUncertifiedDrafts={showUncertifiedDrafts}
+            onShowUncertifiedDraftsChange={setShowUncertifiedDrafts}
+            onUploadTemplate={onUploadTemplate}
           />
-
+          {selectedDoc && actuacionProposal && (
+            <ActuacionProposalCard
+              proposal={actuacionProposal}
+              selectedDocumentType={selectedResponseType}
+              confirmed={confirmedActuacion === selectedResponseType}
+              disabled={isGenerating}
+              onSelect={(value) => {
+                setAppealConfirmation(undefined);
+                userHasManuallyChangedDocTypeRef.current = true;
+                setSelectedResponseType(value);
+                setConfirmedActuacion(value);
+              }}
+              onConfirm={() => setConfirmedActuacion(selectedResponseType)}
+            />
+          )}
           <ContestacionesChecklist
+            appealMode={Boolean(appealReview)}
             hasDocument={Boolean(selectedDoc)}
             analysisCompleted={analysisAvailable || hasDirectInstruction}
             configDefined={Boolean(selectedResponseType)}
             isGenerating={isGenerating}
             generationJob={generationJob}
             blockReason={generationBlockReason}
-            isIncompatible={!effectiveCompatible}
+            // ÚNICA fuente de bloqueo: el botón depende de `generationBlockers`.
+            isIncompatible={false}
+            onReviewRequirements={handleReviewGenerationRequirements}
             onGenerate={handleTriggerGenerate}
-            onOpenEditor={onOpenEditor}
+            onOpenEditor={selectedDoc ? onOpenEditor : undefined}
+            actionLabel={generateActionLabel}
           />
+          {showCaseDossier && <>
+            <CaseDossierSummaryCard state={dossierState} onOpen={() => setRequirementsOpen(true)} disabled={isGenerating} />
+            <RequirementsDialog
+              open={requirementsOpen}
+              onClose={() => setRequirementsOpen(false)}
+              title="Confirma los datos del caso"
+              description="Este escrito necesita que confirmes la ficha y a quién representas. Corrige lo que haga falta y escribe lo que no se detectó."
+            >
+              <CaseDossierPanel key={dossierKey} sources={sourceDocs} documentType={requestedResponseType} onChange={setDossierState} disabled={isGenerating} />
+            </RequirementsDialog>
+          </>}
+          {appealReview && <AppealResolutionReviewPanel key={`${selectedResponseType}:${appealReview.sourceFingerprint}`} review={appealReview} detectedExpediente={caseFicha?.expediente} onChange={setAppealConfirmation} disabled={isGenerating} />}
+          {!selectedDoc && (
+            <section className="lex-card lex-empty-state" aria-label="Sin documento">
+              <h2 className="lex-card-title">Sin documento cargado</h2>
+              <p>Carga la demanda o resolución en PDF o DOCX. Aquí verás el expediente, las partes, el órgano y lo que requiere revisión.</p>
+            </section>
+          )}
+          {selectedDoc && (
+            <ContestacionesExpedienteCard
+              caseFicha={appealFicha || caseFicha}
+              fieldStatuses={appealFichaStatuses}
+              caseAnalysis={appealReview ? null : caseAnalysis}
+              inferredMatter={appealReview ? null : inferredMatter}
+              documentTypeLabel={humanSourceDocumentType(inferredSourceType)}
+              readiness={generationBlockReason
+                ? { label: 'Requiere revisión', tone: 'warning' }
+                : analysisAvailable ? { label: 'Listo para generar', tone: 'success' } : undefined}
+            />
+          )}
+
+          {currentDocCompatibility.compatible && currentDocCompatibility.advisories?.map((advisory) => (
+            <p key={advisory.code} role="note" data-testid="compatibility-advisory" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950">
+              {advisory.message}
+            </p>
+          ))}
+
+          {judgmentSourceNeedsAppeal && (
+            <section role="alert" data-testid="source-incompatible-notice" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <p className="font-bold">Este documento parece ser una resolución judicial, no una demanda.</p>
+              <p className="mt-1">Para elaborar una contestación carga la demanda. Si deseas impugnar esta resolución, cambia a Apelación u otra de las actuaciones propuestas.</p>
+              {suggestedDocType && !/^contestacion_/.test(suggestedDocType) && (
+                <button
+                  type="button"
+                  className="mt-2 rounded-lg border border-amber-400 bg-white px-3 py-1.5 font-semibold"
+                  onClick={() => {
+                    userHasManuallyChangedDocTypeRef.current = true;
+                    setSelectedResponseType(suggestedDocType);
+                    setConfirmedActuacion(suggestedDocType);
+                  }}
+                >
+                  Cambiar a {actuacionProposal?.candidates.find((item) => item.documentType === suggestedDocType)?.label || 'la actuación propuesta'}
+                </button>
+              )}
+            </section>
+          )}
+
+          {appealReview ? <section className="lex-card"><h2 className="lex-card-title">Análisis de la apelación</h2><p className="lex-empty-note">No aplica todavía: se construirá en la fase de razonamientos y agravios</p></section> : selectedDoc && <ContestacionesAnalysisPanel
+            hasDocument={Boolean(selectedDoc)}
+            analysisAvailable={analysisAvailable}
+            caseAnalysis={caseAnalysis}
+            pageCount={totalPages}
+          />}
+
+
+          {appealCandidates && <AppealReasoningAiReview key={appealCandidates.bindingKey} review={appealCandidates} />}
+          </div>
         </aside>
       </div>
 

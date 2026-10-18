@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { TemplateCategory, ProfessionalTemplate } from '@/lib/templates/templateTypes';
 import { normalizeLegalDocumentText } from '@/lib/text/normalizeLegalDisplayText';
 import { markTemplateAsUserOwned } from '@/lib/templates/templateOrigin';
@@ -49,6 +49,15 @@ export function SaveCustomTemplateModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const analysisRequestIdRef = useRef(0);
   const pendingTemplateIdRef = useRef<string | null>(null);
+
+  // Mismo contrato que «Opciones de redacción»: Esc cierra (si la operación en curso lo permite).
+  const requestCloseRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') requestCloseRef.current(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -250,26 +259,23 @@ export function SaveCustomTemplateModal({
   const requestClose = () => {
     if (canClose) onClose();
   };
+  requestCloseRef.current = requestClose;
 
   return (
-    <div
-      className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[1050] flex items-center justify-center p-4 select-none font-sans"
-      onClick={requestClose}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="save-custom-template-title"
-    >
+    <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
       <div
-        className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 font-sans"
-        onClick={(e) => e.stopPropagation()}
+        className="lex-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="save-custom-template-title"
       >
-        {/* Encabezado Profesional */}
-        <div className="p-5 border-b border-slate-100 flex items-start justify-between bg-[#fbf9f5]">
-          <div className="space-y-0.5">
-            <h2 id="save-custom-template-title" className="text-base font-bold text-[#0B2545] tracking-tight">
+        {/* Encabezado: mismo estilo que el modal «Opciones de redacción» */}
+        <header className="lex-modal-header">
+          <div>
+            <h2 id="save-custom-template-title" className="lex-modal-title">
               Subir y Guardar Mi Propio Machote
             </h2>
-            <p className="text-xs text-slate-500 font-medium">
+            <p className="lex-help">
               Guarda un documento oficial para reutilizarlo en cualquier momento.
             </p>
           </div>
@@ -277,14 +283,14 @@ export function SaveCustomTemplateModal({
             onClick={requestClose}
             aria-label="Cerrar diálogo"
             disabled={!canClose}
-            className="w-7 h-7 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-700 flex items-center justify-center font-bold text-xs transition shadow-xs"
+            className="lex-modal-close"
           >
-            ✕
+            ×
           </button>
-        </div>
+        </header>
 
         {/* Cuerpo del Formulario */}
-        <div className="p-6 overflow-y-auto space-y-4 text-xs text-slate-800">
+        <div className="lex-modal-body text-xs text-slate-800">
           {/* Nombre del Machote */}
           <div className="space-y-1">
             <label htmlFor="custom-template-title" className="font-bold text-slate-700 block">
@@ -509,12 +515,12 @@ export function SaveCustomTemplateModal({
         </div>
 
         {/* Pie del Modal */}
-        <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-[#fbf9f5]">
+        <footer className="lex-modal-footer">
           <button
             type="button"
             onClick={requestClose}
             disabled={!canClose}
-            className="px-4 py-2 rounded-xl bg-white border border-[#ded8c9] hover:bg-slate-100 text-slate-700 text-xs font-bold transition shadow-xs"
+            className="lex-button lex-button-secondary"
           >
             Cancelar
           </button>
@@ -522,12 +528,12 @@ export function SaveCustomTemplateModal({
             type="button"
             onClick={handleSave}
             disabled={loading || isAnalyzing}
-            className="px-5 py-2 rounded-xl bg-[#0B2545] hover:bg-[#081d39] disabled:opacity-50 text-white text-xs font-bold transition shadow-sm flex items-center gap-1.5"
+            className="lex-button lex-button-primary"
           >
             <span>💾</span>
             <span>{loading ? 'Guardando...' : analysisFailed ? 'Reintentar análisis' : persistenceResult?.retryable ? 'Reintentar guardado' : 'Guardar como Machote'}</span>
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

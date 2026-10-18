@@ -127,93 +127,13 @@ export function ExpedientesView({
                 </td>
               </tr>
             )}
-
-            <tr
-              onClick={() => onSelectExpediente('800/2024')}
-              className="hover:bg-surface-container-low/60 transition-colors cursor-pointer"
-            >
-              <td className="py-3 px-4 font-code-mono text-xs font-bold text-on-surface">
-                800/2024
-              </td>
-              <td className="py-3 px-4 text-xs text-on-surface">
-                Juzgado 14° Civil de Proceso Escrito CDMX
-              </td>
-              <td className="py-3 px-4 text-xs font-medium text-on-surface">
-                Rescisión Contractual · Inmobiliaria vs Desarrollos
-              </td>
-              <td className="py-3 px-3">
-                <span className="px-2 py-0.5 rounded bg-surface-container text-[11px] font-medium text-on-surface-variant">
-                  Civil
-                </span>
-              </td>
-              <td className="py-3 px-4">
-                <span className="inline-flex items-center gap-1.5 text-xs text-primary font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                  3 días restantes
-                </span>
-              </td>
-              <td className="py-3 px-4 text-right">
-                <span className="material-symbols-outlined text-[18px] text-secondary">arrow_forward</span>
-              </td>
-            </tr>
-
-            <tr
-              onClick={() => onSelectExpediente('512/2024')}
-              className="hover:bg-surface-container-low/60 transition-colors cursor-pointer"
-            >
-              <td className="py-3 px-4 font-code-mono text-xs font-bold text-on-surface">
-                512/2024
-              </td>
-              <td className="py-3 px-4 text-xs text-on-surface">
-                Juzgado 2do Mercantil Oral CDMX
-              </td>
-              <td className="py-3 px-4 text-xs font-medium text-on-surface">
-                Cobro de Pagarés · Banco vs Grupo Logístico
-              </td>
-              <td className="py-3 px-3">
-                <span className="px-2 py-0.5 rounded bg-surface-container text-[11px] font-medium text-on-surface-variant">
-                  Mercantil
-                </span>
-              </td>
-              <td className="py-3 px-4">
-                <span className="inline-flex items-center gap-1.5 text-xs text-secondary font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
-                  Desahogo de pruebas
-                </span>
-              </td>
-              <td className="py-3 px-4 text-right">
-                <span className="material-symbols-outlined text-[18px] text-secondary">arrow_forward</span>
-              </td>
-            </tr>
-
-            <tr
-              onClick={() => onSelectExpediente('930/2023')}
-              className="hover:bg-surface-container-low/60 transition-colors cursor-pointer"
-            >
-              <td className="py-3 px-4 font-code-mono text-xs font-bold text-on-surface">
-                930/2023
-              </td>
-              <td className="py-3 px-4 text-xs text-on-surface">
-                1er Tribunal Colegiado en Materia Civil
-              </td>
-              <td className="py-3 px-4 text-xs font-medium text-on-surface">
-                Juicio de Amparo Directo · Crédito Indebido
-              </td>
-              <td className="py-3 px-3">
-                <span className="px-2 py-0.5 rounded bg-surface-container text-[11px] font-medium text-on-surface-variant">
-                  Amparo
-                </span>
-              </td>
-              <td className="py-3 px-4">
-                <span className="inline-flex items-center gap-1.5 text-xs text-tertiary font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-tertiary" />
-                  Para sentencia
-                </span>
-              </td>
-              <td className="py-3 px-4 text-right">
-                <span className="material-symbols-outlined text-[18px] text-secondary">arrow_forward</span>
-              </td>
-            </tr>
+            {!caseFicha?.expediente && (
+              <tr>
+                <td colSpan={5} className="py-6 px-4 text-center text-xs text-on-surface-variant">
+                  Aún no hay expedientes. Importa un caso para verlo aquí.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

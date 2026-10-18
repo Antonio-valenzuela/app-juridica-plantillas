@@ -13,7 +13,7 @@ import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -416,6 +416,11 @@ function resolveTesseractWorkerPath(): string | undefined {
   return existsSync(workerPath) ? workerPath : undefined;
 }
 
+function resolveTesseractLanguagePath(): string {
+  const languageDataFile = process.env.TESSDATA_PATH?.trim() || join(process.cwd(), 'spa.traineddata');
+  return dirname(languageDataFile);
+}
+
 async function resolvePdfRenderer(): Promise<string | null> {
   if (resolvedPdfRenderer !== undefined) return resolvedPdfRenderer;
 
@@ -560,10 +565,15 @@ export class TesseractOCRProvider implements DocumentOCRProvider {
     const Tesseract = await import('tesseract.js');
     const workerCount = resolveOcrConcurrency(input.concurrency, imageBuffers.length);
     const workerPath = resolveTesseractWorkerPath();
+    const workerOptions = {
+      langPath: resolveTesseractLanguagePath(),
+      gzip: false,
+      ...(workerPath ? { workerPath } : {}),
+    };
     const workers = await Promise.all(
       Array.from(
         { length: workerCount },
-        () => Tesseract.default.createWorker(input.language || 'spa', 1, workerPath ? { workerPath } : {})
+        () => Tesseract.default.createWorker(input.language || 'spa', 1, workerOptions)
       )
     );
     const pageResults: Array<OCRPageResult & { confidence: number }> = [];

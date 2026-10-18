@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
@@ -15,8 +16,8 @@ dotenv.config({ path: path.join(process.cwd(), '.env') });
 process.env.NVIDIA_REQUEST_TIMEOUT_MS ||= '90000';
 delete process.env.DEMO_MODE_ENABLED;
 
-const GOLDEN_PATH = 'C:\\Users\\yahir\\.gemini\\antigravity\\brain\\9e22de42-f574-48ec-b12b-9eca82f5f4fa\\scratch\\test_docs\\11_DE_JULIO_CONTESTACION_DEMANDA_REIVINDICATORIA.docx';
-const AUDIT_PATH = 'C:\\Users\\yahir\\.gemini\\antigravity\\brain\\9e22de42-f574-48ec-b12b-9eca82f5f4fa\\scratch\\argumentative_contract_golden_audit.json';
+const GOLDEN_PATH = 'RUTA_LOCAL';
+const AUDIT_PATH = 'RUTA_LOCAL';
 
 interface RecordedProviderCall {
   taskId: string;
@@ -53,7 +54,7 @@ function lastByTask<T extends { taskId: string }>(entries: readonly T[]): Map<st
   return result;
 }
 
-describe('golden real NVIDIA contract and materialization audit', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('golden real NVIDIA contract and materialization audit', () => {
   const hasKey = !!process.env.NVIDIA_API_KEY?.trim();
   const shouldRunReal = hasKey && process.env.RUN_LIVE_PROVIDER_TESTS === 'true' && process.env.NVIDIA_REAL_TEST === 'true';
 

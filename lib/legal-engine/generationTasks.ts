@@ -16,12 +16,16 @@
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
 import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { CaseAnalysis, LegalIssue } from './caseAnalysis';
+import type { LegalDraftingContract } from './draftingPropagation';
 import type { SectionPlan, IssuePlan, ClaimPlan, FactResponsePlan } from './pipeline';
 import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } from './coverageMatrix';
 import { buildLegalIssueMatrix, type LegalIssueItem, type LegalIssueMatrix } from './legalIssueMatrix';
 import { buildEvidenceGroups } from './evidenceGrouping';
 import type { LawyerProfile } from '../workspace/lawyerProfileTypes';
+import { loadActiveManual } from '../operational-manual/store';
+import { retrieveManualRules, formatManualTaskContext, type ManualMatter } from '../operational-manual/core';
 import { runFastMode } from '@/lib/ai/orchestrator';
+import { currentAbortSignal, GenerationCancelledError, throwIfCancelled, withAbort } from '@/lib/ai/abortContext';
 import { sanitizeGeneratedText } from './pipeline';
 import {
   hasSeedMarkers,
@@ -74,6 +78,7 @@ export type GenerationTaskStatus =
   | 'fallback';
 
 export interface GenerationTask {
+  legalDraftingContract?: LegalDraftingContract;
   id: string;
   documentId?: string;
   sectionId: string;
@@ -87,6 +92,8 @@ export interface GenerationTask {
   tokenBudget: number;
   /** Objetivo informativo de palabras para el modo extended-legal. */
   targetWords?: number;
+  /** Techo de palabras (extensión como máximo): se puede quedar muy por debajo si el material no alcanza. */
+  maxWords?: number;
   minOutputTokens?: number;
   status: GenerationTaskStatus;
   order?: number;
@@ -241,6 +248,14 @@ export function buildGenerationTasksForSection(
   const tasks: GenerationTask[] = [];
   const sourceDocIds = doc.sourceDocuments?.map((s) => s.id).filter(Boolean);
   const finalizeTasks = (list: GenerationTask[]): GenerationTask[] => {
+    for (const task of list) {
+      task.legalDraftingContract = task.issuePlan?.legalDraftingContract
+        || task.factResponsePlan?.legalDraftingContract || task.claimPlan?.legalDraftingContract
+        || legalIssueMatrix?.issues.find(i => task.legalIssueIds?.includes(i.id))?.legalDraftingContract;
+      if (task.legalDraftingContract && 'claimId' in task.legalDraftingContract) {
+        task.legalDraftingContract = {...task.legalDraftingContract, legalIssueIds:[...(task.legalIssueIds || [])]};
+      }
+    }
     if (sourceDocIds && sourceDocIds.length > 0) {
       for (const t of list) {
         if (!t.sourceDocIds) {
@@ -268,7 +283,9 @@ export function buildGenerationTasksForSection(
               : taskType === 'COVERAGE_ITEM'
                 ? Math.min(80, Math.max(35, allocatedWords))
                 : Math.max(250, allocatedWords);
-        task.targetWords = taskTargetWords;
+        // Extensión como máximo: es un techo, no un objetivo; no se exige un mínimo ni se amplía para alcanzarlo.
+        if (extension.lengthIsCeiling) task.maxWords = taskTargetWords;
+        else task.targetWords = taskTargetWords;
         const smallDescriptiveTask = taskType === 'FACT_RESPONSE' || taskType === 'CLAIM';
         task.tokenBudget = smallDescriptiveTask
           ? Math.min(task.tokenBudget, Math.max(800, taskTargetWords * 5))
@@ -363,7 +380,7 @@ export function buildGenerationTasksForSection(
         status: 'pending',
         order: (idx + 1) * 10,
         orderInParent: (idx + 1) * 10,
-        coverageItemIds: matchedCovIds.length > 0 ? matchedCovIds : (secPlan.coverageItemIds || [issueId]),
+        coverageItemIds: canonicalIssue?.planningOnly ? [] : matchedCovIds.length > 0 ? matchedCovIds : (secPlan.coverageItemIds || [issueId]),
         factIds: relatedFacts,
         evidenceIds: relatedEv,
         authorityIds,
@@ -943,6 +960,21 @@ export function stitchTruncatedText(existingText: string, continuationText: stri
   if (!cleanExisting) return cleanContinuation;
   if (!cleanContinuation) return cleanExisting;
 
+  // Some providers restart the whole response despite the continuation instruction.
+  // Admit the replacement only when its COMPLETE prefix is identical word for word
+  // (line wrapping may differ). Never use title matching or fuzzy similarity here.
+  const priorWords = cleanExisting.split(/\s+/);
+  const nextWords = cleanContinuation.split(/\s+/);
+  const finalWord = priorWords[priorWords.length - 1];
+  const prefixMatches = priorWords.slice(0, -1).every((word, index) => word === nextWords[index]);
+  const lastWordMatches = finalWord === nextWords[priorWords.length - 1]
+    || (/^\p{L}{4,}$/u.test(finalWord)
+      && Boolean(nextWords[priorWords.length - 1]?.startsWith(finalWord)));
+  if (priorWords.length >= 30 && nextWords.length >= priorWords.length
+    && prefixMatches && lastWordMatches) {
+    return cleanContinuation;
+  }
+
   // 1. Check direct character overlap on seam
   const maxOverlap = Math.min(250, cleanExisting.length, cleanContinuation.length);
   for (let len = maxOverlap; len >= 5; len--) {
@@ -1073,6 +1105,10 @@ export async function executeGenerationTask(
 ): Promise<{ block: ContentBlock; result: GenerationTaskResult }> {
   const taskStartedAt = new Date().toISOString();
   const taskStartedMs = Date.now();
+  const signal = currentAbortSignal();
+  // Cancelación cooperativa: con la señal ya abortada esta tarea no inicia ninguna llamada nueva y la
+  // cancelación se propaga; jamás se fabrica un fallback que «complete» trabajo cancelado.
+  throwIfCancelled(signal);
   task.status = 'in_progress';
   task.passes = 1;
   task.revisionPasses = 0;
@@ -1298,6 +1334,7 @@ export async function executeGenerationTask(
         },
       };
     } catch (err: any) {
+      if (err instanceof GenerationCancelledError) throw err;
       task.status = 'fallback';
       task.fallbackUsed = true;
       task.error = err?.message || 'Error en generador';
@@ -1371,7 +1408,26 @@ export async function executeGenerationTask(
     }
   }
 
-  const { systemPrompt, userMessage } = buildTaskContextPack(task, doc, caseAnalysis, lawyerProfile);
+  const { systemPrompt, userMessage: baseUserMessage } = buildTaskContextPack(task, doc, caseAnalysis, lawyerProfile);
+  const activeManual = await loadActiveManual();
+  const matterKey = String(doc.matter || '').toLocaleUpperCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const manualMatter = (['CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL'] as ManualMatter[]).find((matter) => matterKey.includes(matter)) || 'GENERAL';
+  const manualSelection = activeManual ? retrieveManualRules(activeManual, { matter: manualMatter, caseType: doc.documentType, task: `${task.title || ''} ${task.objective || ''}`, stage: task.sectionTitle, budgetChars: 4500, measureContext: (rules) => formatManualTaskContext(rules).length }) : undefined;
+  const manualContext = formatManualTaskContext(manualSelection?.selected || []);
+  const userMessage = baseUserMessage + manualContext;
+  if (activeManual && manualSelection) {
+    const manualTrace = doc.generationMetadata.operationalManual ||= {
+      manualVersion: activeManual.manifest.version, manualHash: activeManual.manifest.sourceHash,
+      selectedRuleIds: [], selectedPages: [], selectedSections: [], retrievals: [], auditRuleIds: [], auditFindings: [],
+    };
+    const selectedRuleIds = manualSelection.selected.map((item) => item.stableRuleId);
+    const selectedPages = [...new Set(manualSelection.selected.map((item) => item.physicalPage))];
+    manualTrace.selectedRuleIds = [...new Set([...manualTrace.selectedRuleIds, ...selectedRuleIds])];
+    manualTrace.selectedPages = [...new Set([...manualTrace.selectedPages, ...selectedPages])];
+    manualTrace.selectedSections = [...new Set([...manualTrace.selectedSections, ...manualSelection.selected.map((item) => item.section)])];
+    manualTrace.retrievals.push({ taskId: task.id, retrievalStage: 'GENERATION_TASK', selectedRuleIds, selectedPages, selectedRules: manualSelection.selected.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, section: item.section })), discardedRulesByContextLimit: manualSelection.discardedRulesByContextLimit });
+    if (trace) trace.trace.operationalManual = manualTrace;
+  }
   trace?.recordTaskPlanned(task, { systemPrompt, userMessage });
   let accumulatedText = '';
   let finishReason: string | null = 'stop';
@@ -1390,14 +1446,15 @@ export async function executeGenerationTask(
 
   try {
     // ── Pase 1 ──────────────────────────────────────────────────────────────
-    const aiRes = await runFastMode({
+    const aiRes = await withAbort(runFastMode({
+      purpose: 'LEGAL_GENERATION' as const,
       systemPrompt,
       userMessage,
       mode: 'fast',
       maxTokens: task.tokenBudget,
       maxProviderRetries: extendedContract ? 1 : undefined,
       ...caseProviderFlags(doc),
-    });
+    }), signal);
 
     const isLegalAiResponse = Boolean(
       aiRes.success &&
@@ -1459,7 +1516,9 @@ export async function executeGenerationTask(
               'Continúa exactamente desde el argumento inconcluso sin repetir lo ya redactado y concluye de forma contundente el planteamiento jurídico.',
             ].join('\n');
 
-        const contRes = await runFastMode({
+        throwIfCancelled(signal);
+        const contRes = await withAbort(runFastMode({
+      purpose: 'LEGAL_GENERATION' as const,
           systemPrompt,
           userMessage: continuationUserMessage,
           mode: 'fast',
@@ -1469,7 +1528,7 @@ export async function executeGenerationTask(
           ),
           maxProviderRetries: extendedContract ? 1 : undefined,
           ...caseProviderFlags(doc),
-        });
+        }), signal);
 
         const isLegalContinuation = Boolean(
           contRes.success &&
@@ -1551,6 +1610,7 @@ export async function executeGenerationTask(
       }
     }
   } catch (err: any) {
+    if (err instanceof GenerationCancelledError) throw err;
     fallbackUsed = true;
     task.status = 'failed';
     task.error = String(err?.message || err);
@@ -1609,14 +1669,16 @@ export async function executeGenerationTask(
       const prevBlockId = block.id;
       const revisionPrompt = buildTargetedRevisionPrompt(task, block, evaluation);
 
-      const revRes = await runFastMode({
+      throwIfCancelled(signal);
+      const revRes = await withAbort(runFastMode({
+      purpose: 'LEGAL_GENERATION' as const,
         systemPrompt: revisionPrompt.systemInstruction,
         userMessage: revisionPrompt.userMessage,
         mode: 'fast',
         maxTokens: task.tokenBudget,
         maxProviderRetries: extendedContract ? 1 : undefined,
         ...caseProviderFlags(doc),
-      });
+      }), signal);
 
       if (revRes.success && revRes.content) {
         sanitized = sanitizeGeneratedText(revRes.content.trim());
@@ -1882,15 +1944,17 @@ export function updateCoverageMatrixWithTaskResults(
   let unsupportedCount = 0;
   let notApplicableCount = 0;
 
-  coverageMatrix.items.forEach((item) => {
-    if (item.required) requiredCount++;
-    if (item.status === 'pending') pendingCount++;
-    else if (item.status === 'generated') generatedCount++;
-    else if (item.status === 'covered') coveredCount++;
-    else if (item.status === 'weak') weakCount++;
-    else if (item.status === 'unsupported') unsupportedCount++;
-    else if (item.status === 'not_applicable') notApplicableCount++;
-  });
+  coverageMatrix.items
+    .filter((item) => item.metadata?.compatibilityAlias !== true)
+    .forEach((item) => {
+      if (item.required) requiredCount++;
+      if (item.status === 'pending') pendingCount++;
+      else if (item.status === 'generated') generatedCount++;
+      else if (item.status === 'covered') coveredCount++;
+      else if (item.status === 'weak') weakCount++;
+      else if (item.status === 'unsupported') unsupportedCount++;
+      else if (item.status === 'not_applicable') notApplicableCount++;
+    });
 
   coverageMatrix.summary.required = requiredCount;
   coverageMatrix.summary.pending = pendingCount;
@@ -1976,15 +2040,17 @@ export function applySemanticEvaluationToCoverageMatrix(
   let unsupportedCount = 0;
   let notApplicableCount = 0;
 
-  coverageMatrix.items.forEach((item) => {
-    if (item.required) requiredCount++;
-    if (item.status === 'pending') pendingCount++;
-    else if (item.status === 'generated') generatedCount++;
-    else if (item.status === 'covered') coveredCount++;
-    else if (item.status === 'weak') weakCount++;
-    else if (item.status === 'unsupported') unsupportedCount++;
-    else if (item.status === 'not_applicable') notApplicableCount++;
-  });
+  coverageMatrix.items
+    .filter((item) => item.metadata?.compatibilityAlias !== true)
+    .forEach((item) => {
+      if (item.required) requiredCount++;
+      if (item.status === 'pending') pendingCount++;
+      else if (item.status === 'generated') generatedCount++;
+      else if (item.status === 'covered') coveredCount++;
+      else if (item.status === 'weak') weakCount++;
+      else if (item.status === 'unsupported') unsupportedCount++;
+      else if (item.status === 'not_applicable') notApplicableCount++;
+    });
 
   coverageMatrix.summary.required = requiredCount;
   coverageMatrix.summary.pending = pendingCount;

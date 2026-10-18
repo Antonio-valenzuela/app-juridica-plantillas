@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   if (!process.argv[2]) throw new Error('Uso: rebuild-final-generator-validation-report.mts <runDir>');
   const evidenceDir = path.join(runDir, 'evidence');
   const outputDir = path.join(runDir, 'outputs');
-  const manifest = await readJson(path.resolve('audit/final-legal-readiness-2026/selected-cases.json'));
+  const manifest = await readJson(path.resolve('audit/banco-prueba/selected-cases.json'));
   const sourceManifest = (manifest.cases || []).find((item: JsonRecord) => String(item.caseNumber) === String(process.argv[3] || '01'));
   const [request, analysis, generated, trace, generatedText] = await Promise.all([
     readJson(path.join(evidenceDir, 'generation-request-summary.json')),

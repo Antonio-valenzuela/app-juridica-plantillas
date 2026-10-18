@@ -25,7 +25,7 @@ const AMPARO_DIRECTO_LABORAL_SYNTHETIC = [
   'PODER JUDICIAL DE LA FEDERACIÓN',
   '',
   'AMPARO DIRECTO:',
-  '800/2024',
+  '999/2099',
   '',
   'QUEJOSO:',
   'PERSONA DEMO',
@@ -61,7 +61,7 @@ const REPLICA_REAL_SYNTHETIC = [
 
 const REPLICA_WITH_AMPARO_EXPEDIENTE_MENTION = [
   'RÉPLICA A LA CONTESTACIÓN DE DEMANDA',
-  'AMPARO DIRECTO: 800/2024',
+  'AMPARO DIRECTO: 999/2099',
   'La parte actora controvierte los argumentos de la contestación.',
 ].join('\n');
 
@@ -97,7 +97,7 @@ describe('RED: Amparo Directo vs Replica precedence', () => {
   it('una réplica que menciona la sentencia recurrida conserva su tipo de escrito', () => {
     const doc = createDocFromText([
       'RÉPLICA A LA CONTESTACIÓN DE DEMANDA',
-      'AMPARO DIRECTO: 800/2024',
+      'AMPARO DIRECTO: 999/2099',
       'La parte actora controvierte la sentencia recurrida.',
     ].join('\n'), 'replica-sentence-mention');
     expect(inferSourceOutputType([doc])).toBe('REPLICA');

@@ -3,6 +3,10 @@ import { prisma } from '@/lib/prisma';
 import { requireCaseAccess } from '@/lib/cases/access';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
+import { desktopDraftRepository, isGeneratedActivity } from '@/lib/workspace/desktopDraftRepository';
+import { DesktopProfileRepository } from '@/lib/workspace/desktopProfileRepository';
+import { listDesktopGenerationJobs } from '@/lib/legal-engine/generationJobPersistence';
+import { buildAnalyticsDataset } from '@/lib/workspace/analytics';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +33,24 @@ function statusOfDraft(draft: { status: string; validationResults: unknown; gene
 export async function GET(request: NextRequest) {
   const requestId = request.headers.get('x-request-id')?.trim() || generateRequestId();
   try {
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    if (local?.ok) {
+      const owner = await new DesktopProfileRepository().load();
+      const drafts = (await local.store.list()).filter(isGeneratedActivity).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      const jobs = await listDesktopGenerationJobs(owner.ownerId);
+      const dataset = buildAnalyticsDataset({ drafts, jobs, rangeDays: 30 });
+      // Share Configuración's deduplicated, 30-day draft + job activity counts.
+      // A failed/review job can exist without a saved document.
+      const counts = { generated: dataset.totals.completed, review: dataset.totals.needsReview, failed: dataset.totals.failed };
+      const failure = jobs.filter(job => job.status === 'failed' || job.terminalStatus === 'FAILED').sort((a,b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      return NextResponse.json({ ok: true, source: 'DESKTOP_LOCAL', stats: { ...counts, pendingReview: counts.review,
+        totalDocuments: drafts.length, averageGenerationMs: dataset.totals.averageGenerationMs }, daily: dataset.daily,
+        recentDocuments: drafts.slice(0,8).map(draft => ({ id: draft.id, title: draft.title, documentType: draft.documentType,
+          matter: draft.matter, status: statusOfDraft({ ...draft, validationResults: draft.validationResults, generationMetadata: draft.generationMetadata }), updatedAt: draft.updatedAt })),
+        health: { status: failure ? 'attention' : 'operativo', latestFailure: failure ? { code: failure.errorCode, at: failure.updatedAt } : null,
+          persistedDocuments: drafts.length, persistedJobs: jobs.length } });
+    }
     const access = await requireCaseAccess(request);
     if (!access.ok) return access.response;
 

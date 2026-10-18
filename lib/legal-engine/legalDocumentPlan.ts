@@ -12,6 +12,9 @@ export interface FactResponseRow {
   lawyerPosition?: Exclude<LawyerFactPosition, 'UNDEFINED'>;
   responseText?: string;
   attorneyInputGroupId?: string;
+  /** Source allegation is a basis for review, never proof or client adoption. */
+  factualBasis?: { factIds: string[]; sourceDocumentIds: string[]; positionSupportText?: string };
+  risk?: Array<'ATTORNEY_POSITION_REQUIRED' | 'EVIDENCE_LINK_REQUIRED' | 'SOURCE_ALLEGATION_REQUIRES_REVIEW'>;
 }
 
 export interface AttorneyInputRequirement {
@@ -77,6 +80,15 @@ export function buildFactResponseMatrix(facts: readonly AnalyzedFact[]): FactRes
       sourceText: fact.sourceFact || fact.text,
       sourceDocumentIds: uniqueIds([fact.documentId, fact.sourceReference?.documentId]),
       evidenceIds: uniqueIds(fact.relatedEvidenceIds || []),
+      factualBasis: {
+        factIds: [fact.id], sourceDocumentIds: uniqueIds([fact.documentId, fact.sourceReference?.documentId]),
+        ...(confirmed && fact.manualResponse?.trim() ? { positionSupportText: fact.manualResponse.trim() } : {}),
+      },
+      risk: [
+        ...(!confirmed ? ['ATTORNEY_POSITION_REQUIRED' as const] : []),
+        ...(!fact.relatedEvidenceIds?.length ? ['EVIDENCE_LINK_REQUIRED' as const] : []),
+        'SOURCE_ALLEGATION_REQUIRES_REVIEW',
+      ],
       positionStatus: confirmed ? 'CONFIRMED' : 'PENDING',
       ...(confirmed ? { lawyerPosition: fact.lawyerPosition as Exclude<LawyerFactPosition, 'UNDEFINED'> } : {}),
       ...(confirmed && fact.manualResponse?.trim() ? { responseText: fact.manualResponse.trim() } : {}),

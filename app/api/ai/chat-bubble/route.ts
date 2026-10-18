@@ -147,13 +147,13 @@ async function retrieveIndexedChangeEvidence(message: string, materia: string | 
   const matterFilter: any = materia
     ? {
         OR: [
-          { matter: { contains: materia, mode: "insensitive" } },
+          { matter: { contains: materia } },
           {
             documentVersion: {
               document: {
                 OR: [
-                  { matter: { contains: materia, mode: "insensitive" } },
-                  { title: { contains: materia, mode: "insensitive" } },
+                  { matter: { contains: materia } },
+                  { title: { contains: materia } },
                 ],
               },
             },
@@ -166,8 +166,8 @@ async function retrieveIndexedChangeEvidence(message: string, materia: string | 
     ? {
         document: {
           OR: [
-            { matter: { contains: materia, mode: "insensitive" } },
-            { title: { contains: materia, mode: "insensitive" } },
+            { matter: { contains: materia } },
+            { title: { contains: materia } },
           ],
         },
       }
@@ -363,8 +363,8 @@ async function retrieveContextTextual(query: string, matter?: string | null, lim
   try {
     const chunkWhere: any = {};
     chunkWhere.OR = words.flatMap(word => [
-      { text: { contains: word, mode: "insensitive" } },
-      { article: { contains: word, mode: "insensitive" } }
+      { text: { contains: word } },
+      { article: { contains: word } }
     ]);
     
     dbChunks = await (prisma as any).documentChunk.findMany({
@@ -387,8 +387,8 @@ async function retrieveContextTextual(query: string, matter?: string | null, lim
   try {
     const itemWhere: any = {};
     itemWhere.OR = words.flatMap(word => [
-      { title: { contains: word, mode: "insensitive" } },
-      { summary: { contains: word, mode: "insensitive" } }
+      { title: { contains: word } },
+      { summary: { contains: word } }
     ]);
     dbItems = await (prisma as any).item.findMany({
       where: itemWhere,

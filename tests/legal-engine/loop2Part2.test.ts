@@ -73,12 +73,12 @@ describe('LOOP 2 PARTE 2 — extracción, contexto y salida segura', () => {
   it('detecta y canoniza el marcador compacto antes de que llegue al renderer o al editor', () => {
     const doc = documentWithText('Comparece [DATOPENDIENTE:Nombredelpromovente] y formula argumentos jurídicos.');
 
-    expect(extractPlaceholders(doc)).toContain('[DATO PENDIENTE: Nombre del promovente]');
+    expect(extractPlaceholders(doc)).toContain('[PENDIENTE: Nombre del promovente]');
     const { document: sanitized, report } = sanitizeLegalDocument(doc);
     const output = sanitized.sections.flatMap((section) => section.content.map((block) => block.text)).join('\n');
 
-    expect(output).toContain('[DATO PENDIENTE: Nombre del promovente]');
-    expect(report.placeholdersFound).toContain('[DATO PENDIENTE: Nombre del promovente]');
+    expect(output).toContain('[PENDIENTE: Nombre del promovente]');
+    expect(report.placeholdersFound).toContain('[PENDIENTE: Nombre del promovente]');
   });
 
   it('hace que missingFields y los marcadores impidan considerar el documento listo para FINAL', () => {

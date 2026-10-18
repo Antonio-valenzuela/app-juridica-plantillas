@@ -1,9 +1,12 @@
 import { fetch } from "undici";
 import type { AIHealthResult, AIProvider, AIProviderResult, AIRequest } from "./types";
 import { sanitizeAiError } from "./types";
+import { linkAbortSignal } from "../abortContext";
 import { getNvidiaModel as getChainNvidiaModel } from "../providerChain";
 
 export interface NVIDIACompletionOptions {
+  /** Cancelación externa (plazo del pipeline): aborta la petición en curso. */
+  signal?: AbortSignal;
   prompt: string;
   systemPrompt?: string;
   temperature?: number;
@@ -64,6 +67,7 @@ export async function generateNVIDIACompletion(
   const configuredTimeout = Number(process.env.NVIDIA_REQUEST_TIMEOUT_MS);
   const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1000 ? configuredTimeout : 120000;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const unlinkAbort = linkAbortSignal(controller, options.signal);
 
   // PASO 2: logging sanitizado del request (sin secretos)
   const sanitizedRequestLog = {
@@ -106,24 +110,14 @@ export async function generateNVIDIACompletion(
     });
 
     clearTimeout(timeoutId);
+
+    unlinkAbort();
     const latencyMs = Date.now() - startMs;
 
     if (!response.ok) {
-      const errText = await response.text();
-      const sanitizedBody = errText.slice(0, 2000).replace(/nvapi-[^\s"']+/gi, "[REDACTED]").replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]");
-      // PASO 3: conservar body real del 404 con contexto completo
-      console.error(
-        `[NVIDIA] NVIDIA_HTTP_ERROR ${JSON.stringify({
-          status: response.status,
-          statusText: response.statusText,
-          body: sanitizedBody,
-          endpoint,
-          model,
-          latencyMs,
-          NVIDIA_API_KEY_PRESENT: true,
-        })}`
-      );
-      throw new NVIDIACompletionError(`[NVIDIA Provider] HTTP ${response.status}: ${errText}`, response.status);
+      const requestId = response.headers.get("x-request-id") || response.headers.get("request-id") || response.headers.get("x-correlation-id") || "unavailable";
+      console.error(`[NVIDIA] NVIDIA_HTTP_ERROR ${JSON.stringify({ status: response.status, requestId })}`);
+      throw new NVIDIACompletionError(`[NVIDIA Provider] HTTP ${response.status} requestId=${requestId}`, response.status);
     }
 
     // Éxito: log sanitizado
@@ -161,6 +155,7 @@ export async function generateNVIDIACompletion(
     };
   } catch (error: unknown) {
     clearTimeout(timeoutId);
+    unlinkAbort();
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`[NVIDIA Provider] Timeout de ${timeoutMs}ms alcanzado en la llamada a NVIDIA Build.`);
     }
@@ -181,6 +176,7 @@ export class NVIDIAProvider implements AIProvider {
 
     try {
       const res = await generateNVIDIACompletion({
+        signal: request.signal,
         prompt: request.userMessage,
         systemPrompt: request.systemPrompt,
         temperature: request.temperature,

@@ -19,6 +19,45 @@ const payload = {
 };
 
 describe('AnalyticsPanel', () => {
+  it('distinguishes section and extension activity from unmeasured global provider requests and tokens', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
+    render(<AnalyticsPanel />);
+    fireEvent.click(await screen.findByText('Diagnóstico avanzado'));
+    expect(await screen.findByText('Actividad de secciones y extensión:')).toBeVisible();
+    expect(screen.getByText('Solicitudes totales al proveedor:')).toHaveTextContent('No medido');
+    expect(screen.getByText('Tokens globales:')).toHaveTextContent('No medido');
+  });
+  it('gives a measured activity bar an absolute height so an auto-height wrapper cannot collapse it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
+    render(<AnalyticsPanel />);
+    const bar = await screen.findByTestId('analytics-daily-bar-2026-09-23');
+    expect(bar.style.height).toMatch(/^[1-9]\d*px$/);
+  });
+  it('does not display zero extension outcomes when no outcome was measured', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...payload, hasActivity: true,
+      observations: { pages: 0, qualityGate: 0, validation: 0, extensionOutcome: 0 }, extension: { achieved: 0, unmet: 0, withoutTarget: 5 },
+    }) }));
+    render(<AnalyticsPanel />);
+    expect((await screen.findByText('Objetivo alcanzado')).parentElement).toHaveTextContent('No medido');
+    expect(screen.getByText('Objetivo no alcanzado').parentElement).toHaveTextContent('No medido');
+  });
+  it('does not report zero PASS/FAIL when no quality or validation observations exist', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...payload,
+      observations: { pages: 0, qualityGate: 0, validation: 0 },
+      quality: { ...payload.quality, qualityGatePass: 0, qualityGateFail: 0, validationPass: 0, validationFail: 0 },
+    }) }));
+    render(<AnalyticsPanel />);
+    expect(await screen.findByText('Quality gate')).toHaveTextContent('Sin datos');
+    expect(screen.getByText('Validación')).toHaveTextContent('Sin datos');
+  });
+  it('shows Sin datos rather than a fake zero for unmeasured generated pages', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...payload,
+      totals: { ...payload.totals, generatedPages: 0 }, observations: { pages: 0, qualityGate: 0, validation: 0 },
+    }) }));
+    render(<AnalyticsPanel />);
+    const label = await screen.findByText('Páginas generadas');
+    expect(label.parentElement).toHaveTextContent('Sin datos');
+  });
   it('renders real KPI/chart values and distinguishes NEEDS_REVIEW from FAILED', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
     render(<AnalyticsPanel />);
@@ -40,7 +79,9 @@ describe('AnalyticsPanel', () => {
     await waitFor(() => expect(screen.getByText('Documentos generados')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '7 días' }));
     fireEvent.click(screen.getByRole('button', { name: '90 días' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith('/api/workspace/analytics?rangeDays=90', { cache: 'no-store' }));
+    // Contrato ampliado (2026-10-13): el panel también consulta el registro de envíos a IA en la nube con el mismo periodo.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/workspace/analytics?rangeDays=90', { cache: 'no-store' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/workspace/analytics/ai-egress?rangeDays=90', { cache: 'no-store' }));
   });
 
   it('renders honest empty and error states without fake metrics', async () => {
@@ -56,5 +97,35 @@ describe('AnalyticsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
     await waitFor(() => expect(screen.getByText('No fue posible cargar las analíticas.')).toBeInTheDocument());
     expect(screen.queryByText('Cargando analíticas…')).not.toBeInTheDocument();
+  });
+
+  it('identifies an unavailable analytics route without trying to parse its HTML 404 page', async () => {
+    const json = vi.fn().mockRejectedValue(new Error('Unexpected token <'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, json }));
+
+    render(<AnalyticsPanel />);
+
+    expect(await screen.findByText('El servidor local devolvió HTTP 404 al solicitar las analíticas. Reinicia la aplicación y vuelve a intentarlo.')).toBeInTheDocument();
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it('explains that real metrics are unavailable when workspace persistence is disconnected', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ ok: false, error: 'WORKSPACE_UNAVAILABLE' }),
+    }));
+
+    render(<AnalyticsPanel />);
+
+    expect(await screen.findByText('Las métricas reales no se cargaron porque la base de datos del despacho no está disponible (HTTP 503). No se mostrarán datos de ejemplo.')).toBeInTheDocument();
+  });
+
+  it('describes an expired or unauthorized session in grammatically correct Spanish', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, json: vi.fn() }));
+
+    render(<AnalyticsPanel />);
+
+    expect(await screen.findByText('La sesión no permite consultar las analíticas (HTTP 401).')).toBeInTheDocument();
   });
 });

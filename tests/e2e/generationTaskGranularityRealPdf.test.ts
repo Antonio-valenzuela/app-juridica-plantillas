@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { extractPdfTextServer } from '@/lib/pdf/pdfExtractor';
@@ -6,7 +7,7 @@ import { runGenerationPipeline, type PipelineInput } from '@/lib/legal-engine/pi
 
 const REAL_PDF = 'data/uploads/templates/1787377598439-0129000036717288006AST.PDF';
 
-describe('E2E real PDF: source compatibility gate', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('E2E real PDF: source compatibility gate', () => {
   it('blocks a demanda de amparo from reaching a recurso de revisión provider', async () => {
     const extraction = await extractPdfTextServer(readFileSync(REAL_PDF));
     const source = createSourceDocument({

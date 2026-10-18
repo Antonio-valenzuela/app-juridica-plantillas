@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,7 +7,7 @@ import { createSourceDocument } from '@/lib/legal-engine/context';
 import { buildSourceGrounding } from '@/lib/legal-engine/sourceGrounding';
 import { resolveContestacionRoutingFromSource } from '@/lib/legal-engine/documentRouting';
 
-const auditRoot = path.resolve(process.cwd(), 'audit/final-legal-readiness-2026');
+const auditRoot = path.resolve(process.cwd(), 'audit/banco-prueba');
 
 async function groundingFor(caseNumber: string) {
   const sourceDirectory = path.join(auditRoot, 'cases', caseNumber, 'source');
@@ -28,7 +29,7 @@ async function groundingFor(caseNumber: string) {
   }));
 }
 
-describe('classification to routing remains independent', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('classification to routing remains independent', () => {
   it.each([
     ['01', 'contestacion_demanda_laboral'],
     ['02', 'contestacion_demanda_laboral'],

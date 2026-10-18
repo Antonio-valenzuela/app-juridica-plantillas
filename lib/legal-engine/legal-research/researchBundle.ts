@@ -127,11 +127,16 @@ export async function hashResearchBundle(bundle: LegalResearchBundle): Promise<s
   return sha256ResearchValue(semanticBundle(bundle));
 }
 
+/** Jurisprudencia del Semanario Judicial de la Federación (sjf*.scjn.gob.mx): verificación manual obligatoria. */
+function isSjfJurisprudence(authority: VerifiedAuthority): boolean {
+  return authority.identity.authorityType === 'JURISPRUDENCE' && /(^|\.)sjf\d*\.scjn\.gob\.mx$/i.test(authority.source.sourceDomain || '');
+}
+
 export async function buildLegalResearchBundle(
   input: BuildLegalResearchBundleInput,
 ): Promise<LegalResearchBundle> {
   const unresolvedQuestions = [...(input.unresolvedQuestions || [])];
-  const verifiedAuthorities = input.regime.status === 'RESOLVED'
+  const candidateAuthorities = input.regime.status === 'RESOLVED'
     ? input.verifications
         .map(verifiedAuthorityFrom)
         .filter((authority): authority is VerifiedAuthority => Boolean(authority))
@@ -141,6 +146,11 @@ export async function buildLegalResearchBundle(
           authority.supportsLegalIssueIds.includes(input.request.legalIssueId),
         )
     : [];
+  // Jurisprudencia del SJF: siempre MANUAL_ONLY. Nunca se acredita como autoridad verificada.
+  const verifiedAuthorities = candidateAuthorities.filter((authority) => !isSjfJurisprudence(authority));
+  for (const authority of candidateAuthorities.filter(isSjfJurisprudence)) {
+    unresolvedQuestions.push(`SJF_JURISPRUDENCE_MANUAL_ONLY:${authority.identity.identityKey}`);
+  }
   const resultRejections = input.verifications
     .map(rejectionFrom)
     .filter((rejection): rejection is RejectedAuthorityCandidate => Boolean(rejection));

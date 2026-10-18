@@ -166,29 +166,14 @@ export function evaluateStyleMatch(machoteText: string, generatedText: string): 
 }
 
 /**
- * Applies the lawyer's profile style (opening, closing, formulas, tone) to a generated section
- * strictly preserving current case facts and eliminating past case private data.
+ * Preserve generated case prose. Free-text historical profile formulas are not
+ * safe render-time additions: they may carry another matter's facts or relief.
+ * Structured tone/length/citation preferences are applied in the drafting directive.
  */
 export function applyStyleToSectionText(
-  sectionType: string,
+  _sectionType: string,
   sectionText: string,
-  profile: LawyerProfile = DEFAULT_LAWYER_PROFILE
+  _profile: LawyerProfile = DEFAULT_LAWYER_PROFILE
 ): string {
-  let styled = sectionText;
-
-  if (sectionType === 'identity' && profile.openingPatterns.length > 0) {
-    const formula = profile.openingPatterns[0];
-    if (!styled.includes(formula)) {
-      styled = `${formula}\n${styled}`;
-    }
-  }
-
-  if (sectionType === 'closing' && profile.closingPatterns.length > 0) {
-    const formula = profile.closingPatterns[0];
-    if (!styled.includes(formula)) {
-      styled = `${styled}\n\n${formula}`;
-    }
-  }
-
-  return styled;
+  return sectionText;
 }

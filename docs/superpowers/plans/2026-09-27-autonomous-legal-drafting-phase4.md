@@ -13,7 +13,7 @@
 ## Global constraints
 
 - One local lawyer; no Windows installer, roles, teams or SaaS billing.
-- No production database writes from `Datos.zip`; the six hash-pinned inputs stay in `audit/`.
+- No production database writes from `banco-de-pruebas.zip`; the six hash-pinned inputs stay in `audit/`.
 - No case-document upload to external model providers in automated tests. Keys must be suppressed before imports, not merely within tests.
 - Source allegation is not an admitted client fact. Secondary legal sources are discovery, not verified citations.
 - DRAFT may require review; FINAL stays fail-closed. Page targets never justify padding.

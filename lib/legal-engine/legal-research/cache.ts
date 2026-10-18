@@ -45,13 +45,24 @@ export function makeResearchCacheKey(input: ResearchCacheKeyInput): ResearchCach
   });
 }
 
-export function createMemoryResearchCache(): ResearchCache {
-  const entries = new Map<ResearchCacheKey, ResearchCacheEntry>();
+/** Vigencia por defecto de un resultado de investigación: las fuentes oficiales cambian (reformas, nuevas tesis). */
+export const DEFAULT_RESEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function createMemoryResearchCache(options: { ttlMs?: number; now?: () => number } = {}): ResearchCache {
+  const ttlMs = options.ttlMs ?? DEFAULT_RESEARCH_CACHE_TTL_MS;
+  const now = options.now ?? Date.now;
+  const entries = new Map<ResearchCacheKey, { entry: ResearchCacheEntry; storedAt: number }>();
+  const expired = (storedAt: number) => ttlMs > 0 && now() - storedAt >= ttlMs;
   return {
-    get: (key) => entries.get(key),
-    set: (key, entry) => entries.set(key, entry),
+    get: (key) => {
+      const stored = entries.get(key);
+      if (!stored) return undefined;
+      if (expired(stored.storedAt)) { entries.delete(key); return undefined; }
+      return stored.entry;
+    },
+    set: (key, entry) => { entries.set(key, { entry, storedAt: now() }); },
     clear: () => entries.clear(),
-    size: () => entries.size,
+    size: () => { for (const [key, stored] of entries) if (expired(stored.storedAt)) entries.delete(key); return entries.size; },
   };
 }
 

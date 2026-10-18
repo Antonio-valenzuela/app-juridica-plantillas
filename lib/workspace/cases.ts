@@ -1,4 +1,8 @@
 export interface WorkspaceCaseSummary {
+  kind?: 'LOCAL_CASE';
+  notes?: string;
+  draftIds?: string[];
+  draftRecordId?: string | null;
   id: string;
   title: string;
   expediente: string | null;
@@ -13,7 +17,7 @@ export interface WorkspaceCaseSummary {
 }
 
 /**
- * Summary projection for the cases list. The JSONB documents remain in storage,
+ * Summary projection for the cases list. The JSON documents remain in storage,
  * but the list endpoint never transfers their complete contents to Node.
  */
 export const WORKSPACE_CASE_SUMMARY_SQL = `
@@ -26,26 +30,26 @@ SELECT
   "createdAt",
   "updatedAt",
   COALESCE(
-    "structuredDoc"->'caseRefs'->>'expediente',
-    "formData"->'intake'->>'expediente'
+    json_extract("structuredDoc", '$.caseRefs.expediente'),
+    json_extract("formData", '$.intake.expediente')
   ) AS "expediente",
   COALESCE(
-    "structuredDoc"->'parties'->>'actor',
-    "structuredDoc"->'parties'->>'promovente',
-    "formData"->'intake'->>'promovente'
+    json_extract("structuredDoc", '$.parties.actor'),
+    json_extract("structuredDoc", '$.parties.promovente'),
+    json_extract("formData", '$.intake.promovente')
   ) AS "actor",
   COALESCE(
-    "structuredDoc"->'parties'->>'demandado',
-    "structuredDoc"->'parties'->>'counterparty',
-    "formData"->'intake'->>'demandado'
+    json_extract("structuredDoc", '$.parties.demandado'),
+    json_extract("structuredDoc", '$.parties.counterparty'),
+    json_extract("formData", '$.intake.demandado')
   ) AS "counterparty",
   CASE
-    WHEN jsonb_typeof("sourceDocuments") = 'array'
-      THEN jsonb_array_length("sourceDocuments")
+    WHEN json_valid("sourceDocuments") AND json_type("sourceDocuments") = 'array'
+      THEN json_array_length("sourceDocuments")
     ELSE 0
   END AS "sourceCount"
 FROM "LegalDraft"
-WHERE "organizationId" = $1 AND "userId" = $2
+WHERE "organizationId" = ? AND "userId" = ?
 ORDER BY "updatedAt" DESC
 `;
 
@@ -55,12 +59,24 @@ export interface WorkspaceCaseSummaryRow {
   matter: string | null;
   jurisdiction: string | null;
   status: string;
-  createdAt: Date | string;
-  updatedAt: Date | string;
+  createdAt: Date | string | number | bigint;
+  updatedAt: Date | string | number | bigint;
   expediente: string | null;
   actor: string | null;
   counterparty: string | null;
   sourceCount: number;
+}
+
+/**
+ * SQL crudo en SQLite devuelve DateTime como milisegundos (escritos por Prisma) o
+ * como texto UTC sin zona ("YYYY-MM-DD HH:MM:SS", valor por defecto de la columna).
+ */
+function toIsoDate(value: Date | string | number | bigint): string {
+  if (typeof value === 'bigint') return new Date(Number(value)).toISOString();
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value)) {
+    return new Date(`${value.replace(' ', 'T')}Z`).toISOString();
+  }
+  return new Date(value).toISOString();
 }
 
 export function mapWorkspaceCaseSummaryRow(row: WorkspaceCaseSummaryRow): WorkspaceCaseSummary {
@@ -71,8 +87,8 @@ export function mapWorkspaceCaseSummaryRow(row: WorkspaceCaseSummaryRow): Worksp
     matter: row.matter || null,
     jurisdiction: row.jurisdiction || null,
     status: row.status,
-    createdAt: new Date(row.createdAt).toISOString(),
-    updatedAt: new Date(row.updatedAt).toISOString(),
+    createdAt: toIsoDate(row.createdAt),
+    updatedAt: toIsoDate(row.updatedAt),
     sourceCount: Number(row.sourceCount) || 0,
     actor: row.actor || null,
     counterparty: row.counterparty || null,

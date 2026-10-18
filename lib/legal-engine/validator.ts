@@ -1,5 +1,6 @@
 import { UniversalLegalDocument, ValidationResult, ValidationCheck, ValidationIssue } from './types';
 import { hasUnresolvedFieldMarkers } from './pendingFields';
+import { auditLegalArgumentStructure } from './legalArgumentContract';
 
 function addCheck(
   id: string,
@@ -57,5 +58,11 @@ export function validateDocument(doc: UniversalLegalDocument): ValidationResult 
     }
   });
 
+  // Additive structural guard: never substitutes for authority, factual,
+  // coverage or FINAL checks. DRAFT export policy remains with exportGuards.
+  for (const finding of auditLegalArgumentStructure(doc)) {
+    result.isValid = false;
+    result.errors.push({ checkId: finding.code, message: finding.message, sectionId: finding.sectionId });
+  }
   return result;
 }

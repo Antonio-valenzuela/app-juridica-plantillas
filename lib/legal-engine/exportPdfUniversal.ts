@@ -1,4 +1,5 @@
 import { prepareUniversalDocumentForExport, validateForExport, type PrepareUniversalDocumentForExportOptions } from './exportGuards';
+import { prepareDraftReviewMaterialization } from './draftDocumentMaterialization';
 import {
   verifyCompatibilityMaterialization,
   verifyFinalDocumentExportability,
@@ -16,6 +17,8 @@ import {
   markExportManifestRecorded,
 } from './exportArtifactTypes';
 import type { ExportArtifact } from './exportArtifactTypes';
+import type { MoldPdfSettings } from '../templates/docxMold';
+import { preparePdfImage, type PreparedPdfImage } from './pdfImages';
 import type {
   ExportRenderModel,
   RenderParagraph,
@@ -27,10 +30,27 @@ import type { UniversalLegalDocument } from './types';
 export type { ExportArtifact } from './exportArtifactTypes';
 
 /** The PDF renderer consumes the same semantic model as the DOCX renderer. */
+export interface PdfDesignImage {
+  placement: 'header' | 'footer';
+  align: 'left' | 'center' | 'right';
+  widthPt: number;
+  heightPt: number;
+  image: PreparedPdfImage;
+}
+
+/** Diseño opcional tomado de la plantilla del abogado: familia estándar de la letra e imágenes de membrete. */
+export interface PdfDesign {
+  family: 'serif' | 'sans' | 'mono';
+  images: PdfDesignImage[];
+  headerDistancePt: number;
+  footerDistancePt: number;
+}
+
 export interface PdfRenderOptions {
   format: 'pdf';
   pageProfile: PdfPageProfile;
   lawyerProfile: LawyerProfile;
+  design?: PdfDesign;
 }
 
 export class PdfRenderError extends Error {
@@ -123,6 +143,26 @@ const FONTS = [
   { key: 'F5', base: 'Helvetica' },
   { key: 'F6', base: 'Helvetica-Bold' },
 ] as const;
+
+const EXTRA_FONTS: Record<'sans' | 'mono', ReadonlyArray<{ key: string; base: string }>> = {
+  sans: [
+    { key: 'F7', base: 'Helvetica-Oblique' },
+    { key: 'F8', base: 'Helvetica-BoldOblique' },
+  ],
+  mono: [
+    { key: 'F9', base: 'Courier' },
+    { key: 'F10', base: 'Courier-Bold' },
+    { key: 'F11', base: 'Courier-Oblique' },
+    { key: 'F12', base: 'Courier-BoldOblique' },
+  ],
+};
+
+/** Qué fuente del PDF reemplaza a F1..F4 (Times) según la familia de la plantilla. */
+const FAMILY_FONT_MAP: Record<'serif' | 'sans' | 'mono', Record<string, string>> = {
+  serif: {},
+  sans: { F1: 'F5', F2: 'F6', F3: 'F7', F4: 'F8' },
+  mono: { F1: 'F9', F2: 'F10', F3: 'F11', F4: 'F12' },
+};
 
 const SUPPORTED_ROLES: ReadonlySet<RenderParagraph['role']> = new Set([
   'TITLE',
@@ -314,17 +354,21 @@ function paragraphTokens(paragraph: RenderParagraph): StyledToken[] {
 
 function lineFragments(
   tokens: readonly StyledToken[],
-  maxWidth: number,
+  bodyMaxWidth: number,
+  firstLineMaxWidth = bodyMaxWidth,
 ): { lines: PlacedFragment[][]; paragraphBreaks: number } {
   const lines: PlacedFragment[][] = [];
   let current: PlacedFragment[] = [];
   let currentWidth = 0;
   let paragraphBreaks = 0;
+  // Con sangría de primera línea, el primer renglón dispone de menos ancho.
+  let maxWidth = firstLineMaxWidth;
 
   const pushCurrent = () => {
     if (current.length > 0) lines.push(current);
     current = [];
     currentWidth = 0;
+    if (lines.length > 0) maxWidth = bodyMaxWidth;
   };
 
   for (const token of tokens) {
@@ -394,10 +438,11 @@ function paragraphLines(
   const size = paragraphSize(paragraph);
   const lineHeight = size * parseLineHeight(paragraph.style.lineHeight);
   const indent = indentPoints(paragraph.style, size);
+  const firstIndent = indentPoints({ indent: paragraph.style.firstLineIndent }, size);
   const width = Math.max(1, contentWidth - indent);
   const wrapped = paragraph.role === 'SPACER'
     ? { lines: [], paragraphBreaks: 0 }
-    : lineFragments(paragraphTokens(paragraph), width);
+    : lineFragments(paragraphTokens(paragraph), width, Math.max(1, width - firstIndent));
   const fragments = wrapped.lines;
   const requestedAlign = paragraph.style.textAlign
     || (paragraph.role === 'TITLE' ? 'center'
@@ -407,9 +452,10 @@ function paragraphLines(
     ? 'left'
     : requestedAlign;
   const lines = fragments.map((line, index) => {
+    const lineIndent = index === 0 ? firstIndent : 0;
     const widthUsed = lineWidth(line);
-    const extra = width - widthUsed;
-    let x = indent;
+    const extra = width - lineIndent - widthUsed;
+    let x = indent + lineIndent;
     let justifyGapThousandths: number | undefined;
     if (align === 'center') x = indent + Math.max(0, extra / 2);
     if (align === 'right') x = indent + Math.max(0, extra);
@@ -451,14 +497,15 @@ function closingHeight(paragraphs: readonly RenderParagraph[], contentWidth: num
   }, 0) * 1.25;
 }
 
-function buildPageLayout(model: ExportRenderModel, profile: PdfPageProfile): PageContent[] {
+function buildPageLayout(model: ExportRenderModel, profile: PdfPageProfile, design?: PdfDesign): PageContent[] {
   const pageWidth = profile.width;
   const pageHeight = profile.height;
   const left = profile.margins.left;
   const right = profile.margins.right;
   const top = pageHeight - profile.margins.top;
   const bottom = profile.margins.bottom;
-  const contentWidth = pageWidth - left - right;
+  // Courier mide 0.6 em por carácter: se reduce el ancho útil para que el ajuste de línea no se desborde.
+  const contentWidth = (pageWidth - left - right) * (design?.family === 'mono' ? 0.96 : 1);
   const body = bodyParagraphs(model);
   const paragraphs = allParagraphs(model);
   const firstSignatureIndex = paragraphs.findIndex((paragraph) => paragraph.role === 'SIGNATURE');
@@ -554,7 +601,49 @@ class StreamBuilder {
   }
 }
 
-function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): Buffer {
+interface PlacedImage {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const FOOTER_NUMBER_Y_WITH_IMAGES = 16;
+const FOOTER_IMAGE_BOTTOM = 30;
+
+/** Posición de las imágenes del membrete (mismas en todas las páginas), escaladas para caber en el margen. */
+function placeDesignImages(design: PdfDesign, profile: PdfPageProfile): PlacedImage[] {
+  const contentWidth = profile.width - profile.margins.left - profile.margins.right;
+  const placed: PlacedImage[] = [];
+  for (const placement of ['header', 'footer'] as const) {
+    const available = placement === 'header'
+      ? Math.max(10, profile.margins.top - design.headerDistancePt - 6)
+      : Math.max(10, profile.margins.bottom - FOOTER_IMAGE_BOTTOM - 4);
+    for (const align of ['left', 'center', 'right'] as const) {
+      const group = design.images
+        .map((image, index) => ({ image, index }))
+        .filter((entry) => entry.image.placement === placement && entry.image.align === align);
+      if (group.length === 0) continue;
+      const sized = group.map(({ image, index }) => {
+        const scale = Math.min(1, available / image.heightPt, contentWidth / Math.max(1, group.length * image.widthPt));
+        return { index, width: image.widthPt * scale, height: image.heightPt * scale };
+      });
+      const total = sized.reduce((sum, item) => sum + item.width, 0) + (sized.length - 1) * 6;
+      let x = align === 'left' ? profile.margins.left
+        : align === 'center' ? profile.margins.left + Math.max(0, (contentWidth - total) / 2)
+          : profile.width - profile.margins.right - total;
+      for (const item of sized) {
+        const y = placement === 'header' ? profile.height - design.headerDistancePt - item.height : FOOTER_IMAGE_BOTTOM;
+        placed.push({ index: item.index, x, y, width: item.width, height: item.height });
+        x += item.width + 6;
+      }
+    }
+  }
+  return placed;
+}
+
+function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile, design?: PdfDesign): Buffer {
   const chunks: Buffer[] = [];
   let fileSize = 0;
   const push = (chunk: Buffer) => {
@@ -564,10 +653,21 @@ function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): B
   const pushStr = (text: string) => push(Buffer.from(text, 'latin1'));
   const objectMap = new Map<number, Buffer>();
 
-  // 1 Catalog, 2 Pages, 3..8 fonts, then one page/content pair per page.
+  // 1 Catalog, 2 Pages, fonts, image XObjects, then one page/content pair per page.
+  const family = design?.family ?? 'serif';
+  const fontList: ReadonlyArray<{ key: string; base: string }> = [
+    ...FONTS,
+    ...(family === 'serif' ? [] : EXTRA_FONTS[family]),
+  ];
+  const fontMap = FAMILY_FONT_MAP[family];
   const fontIds: Record<string, number> = {};
   let nextId = 3;
-  for (const font of FONTS) fontIds[font.key] = nextId++;
+  for (const font of fontList) fontIds[font.key] = nextId++;
+  const imageIds: Array<{ id: number; smaskId?: number }> = [];
+  for (const entry of design?.images ?? []) {
+    imageIds.push({ id: nextId++, smaskId: entry.image.alpha ? nextId++ : undefined });
+  }
+  const placedImages = design ? placeDesignImages(design, profile) : [];
   const pageObjectIds: number[] = [];
   const contentObjectIds: number[] = [];
   for (let index = 0; index < pages.length; index += 1) {
@@ -587,7 +687,7 @@ function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): B
     'latin1',
   ));
 
-  for (const font of FONTS) {
+  for (const font of fontList) {
     const id = fontIds[font.key];
     objectMap.set(id, Buffer.from(
       `${id} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /${font.base} /Encoding /WinAnsiEncoding >>\nendobj\n`,
@@ -595,13 +695,35 @@ function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): B
     ));
   }
 
+  (design?.images ?? []).forEach((entry, index) => {
+    const { id, smaskId } = imageIds[index]!;
+    const image = entry.image;
+    const dictionary = `/Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /${image.colorSpace} /BitsPerComponent 8 /Filter /${image.filter}`;
+    if (smaskId && image.alpha) {
+      objectMap.set(smaskId, Buffer.concat([
+        Buffer.from(`${smaskId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${image.alpha.length} >>\nstream\n`, 'latin1'),
+        image.alpha,
+        Buffer.from('\nendstream\nendobj\n', 'latin1'),
+      ]));
+    }
+    objectMap.set(id, Buffer.concat([
+      Buffer.from(`${id} 0 obj\n<< ${dictionary} /Length ${image.data.length}${smaskId ? ` /SMask ${smaskId} 0 R` : ''} >>\nstream\n`, 'latin1'),
+      image.data,
+      Buffer.from('\nendstream\nendobj\n', 'latin1'),
+    ]));
+  });
+
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
     const stream = new StreamBuilder();
+    for (const placed of placedImages) {
+      stream.push(`q ${placed.width.toFixed(2)} 0 0 ${placed.height.toFixed(2)} ${placed.x.toFixed(2)} ${placed.y.toFixed(2)} cm /Im${placed.index + 1} Do Q\n`);
+    }
     for (const line of pages[pageIndex]!.lines) {
       let cursorX = line.x;
       for (const group of groupLineFragments(line.fragments)) {
         const escaped = escapePdfLiteral(group.text);
-        const fontKey = FONTS.some((font) => font.key === group.fontKey) ? group.fontKey : 'F1';
+        const baseKey = FONTS.some((font) => font.key === group.fontKey) ? group.fontKey : 'F1';
+        const fontKey = fontMap[baseKey] ?? baseKey;
         const wordSpacing = line.justifyGapThousandths !== undefined
           ? -(line.justifyGapThousandths / 1000) * group.size
           : 0;
@@ -611,7 +733,7 @@ function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): B
         cursorX += estimateWidth(
           group.text,
           group.size,
-          fontKey === 'F2' || fontKey === 'F4',
+          baseKey === 'F2' || baseKey === 'F4',
         );
       }
     }
@@ -620,7 +742,9 @@ function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): B
     const footerSize = 9;
     const footerWidth = estimateWidth(footer, footerSize, false);
     const footerX = (profile.width - footerWidth) / 2;
-    const footerY = Math.max(20, profile.margins.bottom / 2);
+    const footerY = placedImages.some((placed) => design?.images[placed.index]?.placement === 'footer')
+      ? FOOTER_NUMBER_Y_WITH_IMAGES
+      : Math.max(20, profile.margins.bottom / 2);
     stream.push(`BT /F5 ${footerSize} Tf 1 0 0 1 ${footerX.toFixed(2)} ${footerY.toFixed(2)} Tm (${escapePdfLiteral(footer)}) Tj ET\n`);
 
     const streamBuffer = stream.toBuffer();
@@ -632,9 +756,12 @@ function serializePdf(pages: readonly PageContent[], profile: PdfPageProfile): B
     ]));
 
     const pageId = pageObjectIds[pageIndex]!;
-    const resources = FONTS.map((font) => `/${font.key} ${fontIds[font.key]} 0 R`).join(' ');
+    const resources = fontList.map((font) => `/${font.key} ${fontIds[font.key]} 0 R`).join(' ');
+    const xObjects = imageIds.length > 0
+      ? ` /XObject << ${imageIds.map((entry, index) => `/Im${index + 1} ${entry.id} 0 R`).join(' ')} >>`
+      : '';
     objectMap.set(pageId, Buffer.from(
-      `${pageId} 0 obj\n<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${profile.width} ${profile.height}] /Contents ${contentId} 0 R /Resources << /Font << ${resources} >> >> >>\nendobj\n`,
+      `${pageId} 0 obj\n<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${profile.width} ${profile.height}] /Contents ${contentId} 0 R /Resources << /Font << ${resources} >>${xObjects} >> >>\nendobj\n`,
       'latin1',
     ));
   }
@@ -672,7 +799,7 @@ export async function renderPdf(
       throw new PdfRenderError('PDF requiere un LawyerProfile de presentación resuelto.');
     }
 
-    const bytes = serializePdf(buildPageLayout(model, options.pageProfile), options.pageProfile);
+    const bytes = serializePdf(buildPageLayout(model, options.pageProfile, options.design), options.pageProfile, options.design);
     if (!bytes || bytes.length < 800 || bytes.subarray(0, 4).toString() !== '%PDF') {
       throw new Error('PDF serializer returned an invalid document.');
     }
@@ -702,6 +829,9 @@ function verifiedInputForPreparedDocument(
   exportValidation: ReturnType<typeof validateForExport>,
   options: PrepareUniversalDocumentForExportOptions = {},
 ): VerifiedMaterializationInput {
+  if (document.generationMetadata.exportMode === 'DRAFT') {
+    return prepareDraftReviewMaterialization(document, exportValidation);
+  }
   const candidate = document as UniversalLegalDocument & {
     documentAssemblyResult?: unknown;
     documentAssemblyQualityGate?: unknown;
@@ -727,6 +857,62 @@ export const exportUniversalToPdf = async (
     format: 'pdf',
     pageProfile: resolvePdfPageProfile(),
     lawyerProfile: DEFAULT_LAWYER_PROFILE,
+  });
+  if (trace) {
+    trace.exportManifest = markExportManifestRecorded(artifact.manifest);
+    recordExportWordCounts(trace, artifact.manifest);
+  }
+  return Buffer.from(artifact.bytes);
+};
+
+function withMoldTypography(model: ExportRenderModel, settings: MoldPdfSettings): ExportRenderModel {
+  const restyle = (paragraph: RenderParagraph): RenderParagraph => paragraph.role === 'HEADER' || paragraph.role === 'FOOTER'
+    ? paragraph
+    : {
+      ...paragraph,
+      style: {
+        ...paragraph.style,
+        fontSize: `${paragraph.role === 'TITLE' ? settings.fontSizePt + 1 : settings.fontSizePt}pt`,
+        lineHeight: String(settings.lineHeight),
+      },
+    };
+  return {
+    ...model,
+    header: model.header.map(restyle),
+    footer: model.footer.map(restyle),
+    sections: model.sections.map((section) => ({ ...section, paragraphs: section.paragraphs.map(restyle) })),
+  };
+}
+
+/** PDF aproximado: mismos márgenes, tamaño de letra e interlineado del molde del abogado. */
+export const exportUniversalToPdfWithMold = async (
+  docData: UniversalLegalDocument,
+  settings: MoldPdfSettings,
+  trace?: GenerationTrace,
+  exportOptions: PrepareUniversalDocumentForExportOptions = {},
+  /** Recibe los avisos de lo que no se pudo igualar (por ejemplo, una imagen que no se pudo leer). */
+  notices: string[] = [],
+): Promise<Buffer> => {
+  const prepared = await prepareUniversalDocumentForExport(docData, exportOptions);
+  const exportValidation = validateForExport(prepared.document);
+  const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation, exportOptions);
+  const model = withMoldTypography(materializePreparedFinalDocument(verified), settings);
+  const images: PdfDesignImage[] = [];
+  for (const [placement, list] of [['header', settings.headerImages], ['footer', settings.footerImages]] as const) {
+    for (const entry of list) {
+      const image = preparePdfImage(entry.data, entry.mime);
+      if (!image) {
+        notices.push(`El PDF no incluye la imagen del membrete «${entry.name}» porque no se pudo leer; el Word sí la conserva.`);
+        continue;
+      }
+      images.push({ placement, align: entry.align, widthPt: entry.widthPt, heightPt: entry.heightPt, image });
+    }
+  }
+  const artifact = await renderPdf(model, {
+    format: 'pdf',
+    pageProfile: resolvePdfPageProfile({ serverOption: settings.pageProfile }),
+    lawyerProfile: DEFAULT_LAWYER_PROFILE,
+    design: { family: settings.family, images, headerDistancePt: settings.headerDistancePt, footerDistancePt: settings.footerDistancePt },
   });
   if (trace) {
     trace.exportManifest = markExportManifestRecorded(artifact.manifest);

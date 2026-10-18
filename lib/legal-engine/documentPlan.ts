@@ -12,10 +12,16 @@ import { isCivilMercantileResponseDocumentType } from './responseContext';
 import { isCivilMercantileEvidenceArgumentDocumentType } from './evidenceArgumentContext';
 import { extractMachoteStructure } from './structureBuilder';
 import { formatCaseContextField } from './caseContext';
+import { renderRequestLedSection } from './generationRequestContract';
+import { AGRAVIOS_PLACEHOLDER_TITLE, agravioInstruction, agravioSectionTitle, renderAgravioFallback } from './contestacionAgraviosStructure';
 import { hasSeedMarkers, stripSeedMarkers } from './seedMarkers';
 import { buildCoverageMatrix, type CoverageMatrix } from './coverageMatrix';
 import { bindCoverageToSections } from './richCoverage';
 import { buildLegalIssueMatrix, type LegalIssueMatrix } from './legalIssueMatrix';
+import { factsPolicyFor } from './factsPolicy';
+import { injectNarrativeFacts } from './factsSeed';
+import { sectionDisplayTitle } from './documentStrategies';
+import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
 
 /**
  * documentPlan.ts — PLAN DOCUMENTAL ÚNICO (FASES 4, 7, 10, 11)
@@ -90,7 +96,7 @@ export function inferSectionType(title: string): SectionType {
   const t = normalizeTitleKey(title);
   if (/petitorio|peticion/.test(t)) return 'petition';
   if (/firma/.test(t)) return 'signature';
-  if (/protesto|lugar y fecha/.test(t)) return 'closing';
+  if (/protesto|lugar (?:y )?fecha/.test(t)) return 'closing';
   if (/anexo/.test(t)) return 'annex';
   if (/prueba|instrumental|evidencia/.test(t)) return 'evidence';
   if (ARGUMENT_TITLE_RE.test(t)) return 'argument';
@@ -115,6 +121,10 @@ function seedForSection(
   type: SectionType,
   doc: UniversalLegalDocument
 ): SectionSeed {
+  const requestLedText = renderRequestLedSection(doc, type, title);
+  if (requestLedText !== undefined) {
+    return { text: requestLedText, generationRequirement: 'DETERMINISTIC', generationStatus: 'generated', generationInstruction: `Conservar la solicitud y datos confirmados: ${requestLedText}` };
+  }
   const commercial = doc.caseContext?.commercialEnforcement;
   if (tpl.tipo === 'demanda_ejecutiva_mercantil') {
     if (type === 'header') {
@@ -146,8 +156,12 @@ function seedForSection(
         generationInstruction: 'Formular peticiones mercantiles ejecutivas confirmadas por el abogado y congruentes con el título ejecutivo.',
       };
     }
+    // Los hechos CONFIRMADOS por el abogado se conservan de forma determinista (sin proveedor no se pierden).
+    const confirmedFacts = type === 'background'
+      ? (commercial?.facts || []).filter((fact) => fact.status === 'CONFIRMED' && fact.text.value)
+      : [];
     return {
-      text: '',
+      text: confirmedFacts.map((fact, index) => `${index + 1}. ${fact.text.value}`).join('\n'),
       generationRequirement: 'AI_REQUIRED',
       generationStatus: 'pending',
       generationInstruction: `Desarrollar únicamente con el CommercialEnforcementContext confirmado para ${title}.`,
@@ -214,16 +228,78 @@ function seedForSection(
  * Determinístico: los IDs son estables entre generaciones
  * (`sec-{tipo}-{n}`), lo que preserva referencias externas y ediciones.
  */
+/**
+ * ¿La estructura declarada del tipo tiene la forma de una contestación de
+ * demanda (la que construye `buildContestacionSkeleton`)? Las contestaciones
+ * especializadas (nulidad fiscal/administrativa, agraria, proveedor, seguridad
+ * social…) declaran estructura propia: no pueden recibir secciones de una
+ * contestación civil ni perder las suyas (identidad del escrito, no etiqueta).
+ */
+function declaresDemandContestacionShape(template: DocumentTemplate): boolean {
+  return template.estructura.some((title) => normalizeTitleKey(title) === 'comparecencia y personalidad');
+}
+
+/**
+ * Toda sección que el tipo DECLARA debe existir en el plan. Las que el
+ * constructor no emitió se insertan en su posición declarada con la semilla
+ * de plantilla (pendiente de redacción/postura): no se inventa contenido.
+ */
+function reconcileDeclaredSections(
+  sections: DocumentNode[],
+  template: DocumentTemplate,
+  doc: UniversalLegalDocument,
+): DocumentNode[] {
+  // Coincidencia por prioridad (exacta > comienza con > contiene) para anclar
+  // cada sección declarada a la sección correcta y no a la primera que la mencione.
+  // Los contratos con IDs crudos (demanda civil/mercantil) se anclan también por
+  // `section.id`: su título visible es legible y ya no coincide con el declarado.
+  const findSection = (declared: string) => {
+    const wanted = normalizeTitleKey(declared);
+    const keys = result.map((section) => [
+      normalizeTitleKey(section.title),
+      normalizeTitleKey(section.id),
+    ].filter(Boolean));
+    const exact = keys.findIndex((pair) => pair.includes(wanted));
+    if (exact >= 0) return exact;
+    const starts = keys.findIndex((pair) => pair.some((key) => key.startsWith(wanted) || wanted.startsWith(key)));
+    if (starts >= 0) return starts;
+    return keys.findIndex((pair) => pair.some((key) => key.includes(wanted) || wanted.includes(key)));
+  };
+  const seeded = buildTemplateSkeleton(template, doc);
+  const result = [...sections];
+  let anchorIndex = -1;
+  template.estructura.forEach((declared, declaredIndex) => {
+    const found = findSection(declared);
+    if (found >= 0) {
+      anchorIndex = found;
+      return;
+    }
+    const node = seeded[declaredIndex];
+    // Una sección sin texto no sobrevive al ensamblado; el marcador deja explícito
+    // que la redacción queda a cargo del abogado (no se inventa contenido).
+    const firstBlock = node.content[0];
+    const inserted = firstBlock && !firstBlock.text.trim()
+      ? { ...node, content: [{ ...firstBlock, text: `${declared}:
+[REQUIERE POSTURA DEL ABOGADO]` }, ...node.content.slice(1)] }
+      : node;
+    result.splice(anchorIndex + 1, 0, inserted);
+    anchorIndex += 1;
+  });
+  return result;
+}
+
 export function buildTemplateSkeleton(tpl: DocumentTemplate, doc: UniversalLegalDocument): DocumentNode[] {
+  // En la demanda civil y mercantil la `estructura` declara IDs canónicos de
+  // sección (contrato de export/calidad). El ID sigue siendo ese identificador,
+  // pero el TÍTULO visible es el rótulo legible y jamás un `via_accion` crudo.
+  const idIsSectionContract = tpl.tipo === 'demanda_ordinaria_civil' || tpl.tipo === 'demanda_ejecutiva_mercantil';
   return tpl.estructura.map((title, i) => {
     const secType = inferSectionType(title);
     const seed = seedForSection(tpl, title, secType, doc);
     return createDocumentNode({
-      id: tpl.tipo === 'demanda_ordinaria_civil' || tpl.tipo === 'demanda_ejecutiva_mercantil'
-        ? title
-        : `sec-${tpl.tipo}-${i + 1}`,
+      id: idIsSectionContract ? title : `sec-${tpl.tipo}-${i + 1}`,
       type: secType,
-      title,
+      title: idIsSectionContract ? sectionDisplayTitle(title) : title,
       order: i * 10,
       isRepeatable: secType === 'argument',
       generationInstruction: seed.generationInstruction,
@@ -249,6 +325,47 @@ export function buildTemplateSkeleton(tpl: DocumentTemplate, doc: UniversalLegal
       _provenance: 'GENERATED',
     });
   });
+}
+
+/**
+ * Contestación de agravios (parte apelada): estructura FIJA y un bloque por cada agravio del apelante. Los
+ * agravios salen de la ficha confirmada; sin ellos queda una sola sección que lo indica (no se inventan).
+ */
+function buildContestacionAgraviosSkeleton(tpl: DocumentTemplate, doc: UniversalLegalDocument): DocumentNode[] {
+  const base = buildTemplateSkeleton(tpl, doc);
+  const agravios = doc.generationMetadata.caseDossier?.agravios || [];
+  const typeOverride: Record<string, SectionType> = { 'constancias invocadas': 'evidence' };
+  const out: DocumentNode[] = [];
+  for (const node of base) {
+    const key = normalizeTitleKey(node.title);
+    if (key === normalizeTitleKey(AGRAVIOS_PLACEHOLDER_TITLE) && agravios.length > 0) {
+      for (const agravio of agravios) {
+        out.push(createDocumentNode({
+          id: `sec-${tpl.tipo}-agravio-${agravio.number}`,
+          type: 'argument',
+          title: agravioSectionTitle(agravio.number),
+          order: 0,
+          isRepeatable: true,
+          generationInstruction: agravioInstruction(agravio),
+          generation: { provider: null, model: null, fallbackUsed: false, generationReason: 'ISSUE_SCOPED_AGRAVIO_ANSWER', status: 'pending' },
+          content: [{
+            id: `blk-${tpl.tipo}-agravio-${agravio.number}`,
+            layer: 'USER_POSITION' as const,
+            trustLevel: 'VERIFIED' as const,
+            text: renderAgravioFallback(agravio),
+            isManuallyEdited: false,
+            generationRequirement: 'AI_REQUIRED' as const,
+            generationStatus: 'pending' as const,
+          }],
+          _templateId: tpl.tipo,
+          _provenance: 'GENERATED',
+        }));
+      }
+      continue;
+    }
+    out.push(typeOverride[key] ? { ...node, type: typeOverride[key] } : node);
+  }
+  return out.map((node, index) => ({ ...node, order: index * 10 }));
 }
 
 /**
@@ -378,7 +495,14 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
       _provenance: 'CANONICAL_GENERATED' as const,
     }));
     const agraviosSection = sections.find((section) => normalizeTitleKey(section.title) === 'agravios');
-    const appealAxes = caseAnalysis?.argumentAxes || [];
+    // Rich drafting units already represent these source decisions. Adding
+    // the legacy projection too creates an orphan, empty second grievance.
+    // Keep the legacy path unchanged if prior child sections have human edits.
+    const hasManualChild = previous.some(s => /agravio/i.test(s.title)
+      && (s.isManuallyEdited || s.content.some(b => b.isManuallyEdited)
+        || s.children?.some(c => c.isManuallyEdited || c.content.some(b => b.isManuallyEdited))));
+    const appealAxes = caseAnalysis?.richCaseAnalysis?.draftingProjection?.challenges.length && !hasManualChild
+      ? [] : caseAnalysis?.argumentAxes || [];
     if (agraviosSection && appealAxes.length > 0) {
       agraviosSection.children = appealAxes.map((axis, index) => ({
         ...createDocumentNode({
@@ -411,6 +535,9 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
       }));
     }
     planSource = 'CANONICAL_GENERATED';
+  } else if (template.tipo === 'contestacion_agravios') {
+    sections = buildContestacionAgraviosSkeleton(template, doc);
+    planSource = 'GENERATED';
   } else if (isContestacionRevisionAmparoDirectoType(template.tipo, doc.documentTypeLabel)) {
     sections = buildRevisionAmparoDirectoSkeleton(doc, caseAnalysis, template.tipo);
     planSource = 'GENERATED';
@@ -439,24 +566,42 @@ export function buildDocumentPlan(input: BuildPlanInput): DocumentPlanResult {
     && template.tipo !== 'contestacion_demanda_civil'
     && template.tipo !== 'contestacion_demanda_mercantil') {
     sections = buildCivilMercantileResponseSkeleton(doc, caseAnalysis, template.tipo);
+    if (isContestacionFlow && declaresDemandContestacionShape(template)) {
+      sections = reconcileDeclaredSections(sections, template, doc);
+    }
     planSource = 'GENERATED';
   } else if (isCivilMercantileEvidenceArgumentDocumentType(template.tipo)) {
     sections = buildCivilMercantileEvidenceArgumentSkeleton(doc, template.tipo);
     planSource = 'GENERATED';
-  } else if (isContestacionFlow) {
-    sections = buildContestacionSkeleton(doc, caseAnalysis, savedParties, template.tipo);
+  } else if (isContestacionFlow && declaresDemandContestacionShape(template)) {
+    sections = reconcileDeclaredSections(
+      buildContestacionSkeleton(doc, caseAnalysis, savedParties, template.tipo),
+      template,
+      doc,
+    );
     planSource = 'GENERATED';
   } else {
     sections = buildTemplateSkeleton(template, doc);
     planSource = 'GENERATED';
   }
 
+  // Hechos del análisis → sección de hechos de los escritos sustantivos
+  // (clase NARRATIVE_REQUIRED). Solo sustituye una semilla puramente pendiente;
+  // la demanda ejecutiva mercantil se excluye (solo admite su contexto confirmado).
+  if (caseAnalysis?.facts?.length && template.tipo !== 'demanda_ejecutiva_mercantil') {
+    const entry = getCatalogDocument(template.tipo);
+    const familyId = entry && entry.kind === 'DOCUMENT_TYPE' ? entry.familyId : '';
+    const { policy } = factsPolicyFor({ id: template.tipo, familyId, requiredSections: template.estructura });
+    if (policy === 'NARRATIVE_REQUIRED') sections = injectNarrativeFacts(sections, caseAnalysis.facts);
+  }
   // FASE 11 — canonicidad garantizada EN EL PLAN.
   sections = ensureCanonicalSections(sections);
   // FASE 12 — herencia de IDs y ediciones manuales.
   sections = inheritFromPrevious(sections, previous);
 
-  if (caseAnalysis) {
+  // La parte apelada responde agravios: el análisis del caso (hechos, «actos impugnados») es el de quien apela y no
+  // debe generar cobertura ni asuntos jurídicos propios; sus bloques salen de la ficha confirmada.
+  if (caseAnalysis && template.tipo !== 'contestacion_agravios') {
     const matrix = buildCoverageMatrix(caseAnalysis, { ...doc, sections }, sections);
     const legalIssueMatrix = buildLegalIssueMatrix({ caseAnalysis, coverageMatrix: matrix });
     const binding = caseAnalysis.richCaseAnalysis

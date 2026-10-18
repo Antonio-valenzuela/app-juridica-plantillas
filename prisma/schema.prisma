@@ -2,9 +2,13 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Persistencia local (Fase 1, 2026-10-13): SQLite en la carpeta de datos del
+// usuario. En runtime la URL la calcula lib/db/localDatabase.ts; esta variable
+// solo la usa el CLI de Prisma (migrate diff/deploy) con una ruta explícita.
+// Las migraciones históricas de Postgres/Neon viven en prisma/migrations-postgres-historical/.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = env("LEXPLANTILLAS_DATABASE_URL")
 }
 
 enum TemplateVisibility {
@@ -41,8 +45,8 @@ model LegalTemplate {
   practiceArea   String?
   documentType   String             @default("machote")
   description    String?
-  content        String?            @db.Text
-  originalText   String?            @db.Text
+  content        String?           
+  originalText   String?           
   legalBasis     String?
   variables      Json?
   structureJson  Json?
@@ -50,8 +54,8 @@ model LegalTemplate {
   warnings       Json?
   disclaimer     String?
   exportFormats  Json?
-  aiInstructions String?            @db.Text
-  systemPrompt   String?            @db.Text
+  aiInstructions String?           
+  systemPrompt   String?           
   contentHash    String?
   version        Int                @default(1)
   visibility     TemplateVisibility @default(ORG)
@@ -84,7 +88,7 @@ model LegalDraft {
   matter             String?
   jurisdiction       String?        @default("federal")
   formData           Json?
-  renderedText       String?        @db.Text
+  renderedText       String?       
   pendingMarkers     Json?
   structuredDoc      Json?
   pipelineState      Json?
@@ -92,9 +96,13 @@ model LegalDraft {
   validationResults  Json?
   generationMetadata Json?
   status             String         @default("DRAFT")
+  // Clave de idempotencia del guardado (header Idempotency-Key, body o id del
+  // documento estructurado). Reintentar el mismo guardado no crea duplicados.
+  idempotencyKey     String?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
+  @@unique([organizationId, userId, idempotencyKey])
   @@index([organizationId, status])
   @@index([userId, status])
   @@index([organizationId, updatedAt])
@@ -141,6 +149,8 @@ model CaseParty {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
+  // Una parte por rol y expediente (upsert lógico de /api/legal-engine/parties).
+  @@unique([organizationId, caseKey, role])
   @@index([organizationId, caseKey])
   @@map("workspace_case_party")
 }
@@ -183,7 +193,7 @@ model AiUsageLog {
   promptTokens     Int?
   completionTokens Int?
   totalTokens      Int?
-  estimatedCostUsd Decimal? @db.Decimal(12, 6)
+  estimatedCostUsd Decimal?
   costSource       String?
   durationMs       Int
   fallbackUsed     Boolean  @default(false)
@@ -211,7 +221,7 @@ model AiUsageEvent {
   inputTokens   Int?
   outputTokens  Int?
   totalTokens   Int?
-  estimatedCost Decimal? @db.Decimal(12, 6)
+  estimatedCost Decimal?
   latencyMs     Int
   success       Boolean
   errorCode     String?

@@ -203,13 +203,20 @@ describe('FASE 3 — Matriz de Cobertura Documental y Document Plan Profundo', (
     ];
 
     const analysis = reconstructCaseAnalysis(sources, 'analizar juicio ejecutivo mercantil', '', { includeReferenceInAnalysis: false });
-    expect(analysis.evidence.length).toBe(2);
+    expect(analysis.evidence.length, JSON.stringify({
+      legacy: analysis.evidence.map((item) => ({ type: item.type, description: item.description })),
+      rich: analysis.richCaseAnalysis?.evidenceMentions.map((item) => ({ type: item.type, description: item.description })),
+      groundedCaseText: analysis.sourceGrounding?.map((item) => item.caseText),
+      caseEvidence: analysis.sourceGrounding?.flatMap((item) => item.caseEvidence.map((span) => span.text)),
+      proofCandidates: analysis.richCaseAnalysis?.candidates.filter((candidate) => /TESTIMONIAL|pagaré/i.test(candidate.rawText)).map((candidate) => ({ text: candidate.rawText, section: candidate.provenance[0]?.section, kind: candidate.kind })),
+    })).toBe(2);
 
     const doc = mockDoc();
     const matrix = buildCoverageMatrix(analysis, doc, doc.sections);
 
     const evItems = matrix.items.filter((i) => i.category === 'EVIDENCE');
     expect(evItems.length).toBe(2);
+    expect(analysis.evidence.map((item) => item.type)).toEqual(expect.arrayContaining(['DOCUMENTAL PRIVADA', 'TESTIMONIAL']));
 
     // La prueba documental debe estar vinculada al hecho 1
     const docPrueba = evItems.find((e) => /DOCUMENTAL/i.test(e.description));

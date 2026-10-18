@@ -15,11 +15,11 @@ The first release is intentionally a single-user system. It keeps the current Pr
 
 ### Goals
 
-- Execute six genuinely different real cases from `C:\Users\yahir\Desktop\Datos.zip` through the complete source-to-export pipeline.
+- Execute six genuinely different real cases from `RUTA_LOCAL` through the complete source-to-export pipeline.
 - Produce one matching DOCX and PDF pair for each approved case, with the same factual content and traceable source metadata.
 - Prevent invented names, dates, parties, authorities, facts, legal citations, precedents, or procedural acts.
 - Allow `REQUIERE_REVISIÓN` drafts when essential information is missing while blocking a misleading `FINAL` export.
-- Compare generated documents against the supplied Galarza Meza DOCX references for hierarchy, prose, layout, and professional presentation.
+- Compare generated documents against the supplied Actor Sintético Uno DOCX references for hierarchy, prose, layout, and professional presentation.
 - Preserve useful PowerShell evidence: stage duration, provider/model, requests, errors, warnings, retries, semantic status, byte lengths, and output paths.
 - Leave the current web/local app stable and documented for a later Windows packaging phase.
 
@@ -99,7 +99,7 @@ APP-plantillas/
     e2e/                              # Pipeline and generation E2E suites
     browser/                           # Playwright browser workflows
     fixtures/                          # Controlled fixtures, not the six real case outputs
-  audit/final-legal-readiness-2026/   # New isolated evidence tree for six real runs
+  audit/banco-prueba/   # New isolated evidence tree for six real runs
     cases/01..06/                     # Source, metadata, logs, analysis, plans, outputs, renders
   docs/
     blueprints/                       # This architecture blueprint
@@ -148,7 +148,7 @@ Store provider/model, operation, status, fallback, duration, token/cost metadata
 
 ### Audit-only entities and files
 
-The six cases are stored in `audit/final-legal-readiness-2026/cases/NN/`, not in the production database as permanent seed data. The runner may persist derived metadata and generated artifacts in the audit tree, but the source ZIP must never be copied into the production upload directory or treated as a database.
+The six cases are stored in `audit/banco-prueba/cases/NN/`, not in the production database as permanent seed data. The runner may persist derived metadata and generated artifacts in the audit tree, but the source ZIP must never be copied into the production upload directory or treated as a database.
 
 ### Required per-case manifest
 
@@ -363,7 +363,7 @@ This is the execution order for the current working tree. It is an audit-and-rep
 ### Baseline and validation commands
 
 ```powershell
-Set-Location 'C:\Users\yahir\Desktop\APP-plantillas'
+Set-Location 'RUTA_LOCAL'
 
 git status --short --branch
 node --version
@@ -377,7 +377,7 @@ npm run build
 npm run dev
 ```
 
-The final runner should be invoked from PowerShell and should write all case evidence under `audit/final-legal-readiness-2026/`.
+The final runner should be invoked from PowerShell and should write all case evidence under `audit/banco-prueba/`.
 
 ---
 
@@ -505,8 +505,8 @@ Do not add case-specific hardcodes or weaken gates to make six cases pass. If a 
 
 ## 16. Non-Negotiable Rules
 
-1. The six test cases come from `Datos.zip` only as isolated audit inputs; they are not production seed data.
-2. The two Galarza Meza DOCX files are style and quality references. Their case facts, authorities, names, dates, and internal review notes must not leak into unrelated outputs.
+1. The six test cases come from `banco-de-pruebas.zip` only as isolated audit inputs; they are not production seed data.
+2. The two Actor Sintético Uno DOCX files are style and quality references. Their case facts, authorities, names, dates, and internal review notes must not leak into unrelated outputs.
 3. Six cases must be genuinely different. The selection manifest must explain the difference in matter, document family, source format, or completeness.
 4. A missing essential fact produces `REQUIERE_REVISIÓN`; it never becomes a guessed fact and never becomes a silent FINAL.
 5. Every concrete legal claim requires source evidence or a verified official legal source. Model output alone is not verification.
@@ -526,7 +526,7 @@ Do not add case-specific hardcodes or weaken gates to make six cases pass. If a 
 ## 17. Required Deliverables
 
 ```text
-audit/final-legal-readiness-2026/
+audit/banco-prueba/
   cases/01/
     source/metadata.json
     logs/powershell.log

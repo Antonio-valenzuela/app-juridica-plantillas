@@ -63,6 +63,7 @@ describe('Provider metadata — NVIDIA vs documento recién cargado', () => {
       jurisdiction: 'Local',
       documentTypeLabel: 'Demanda',
       allowUnvalidatedSource: true,
+      externalProviderOptIn: true,
     });
 
     expect(doc.generationMetadata.aiUsed).toBe(true);

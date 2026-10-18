@@ -11,6 +11,7 @@ import { createFederalLegislationAdapter, type FederalLegislationAdapterConfig }
 import { createScjnAdapter, type ScjnAdapterConfig } from './adapters/scjn';
 import { createDofAdapter, type DofAdapterConfig } from './adapters/dof';
 import { createLexMxAdapter, type LexMxAdapterConfig } from './adapters/lexMx';
+import { createJaliscoAdapter, isJaliscoRegime, type JaliscoAdapterConfig } from './adapters/jalisco';
 
 export interface ResearchProviderRouterConfig {
   discoveryProvider: LegalResearchProvider | LegalResearchProvider[];
@@ -51,6 +52,19 @@ export function createResearchProviderRouter(config: ResearchProviderRouterConfi
     version: '1',
     supportedAuthorityTypes: Array.from(new Set(config.officialProviders.flatMap((provider) => provider.supportedAuthorityTypes))),
     async search(input: LegalResearchSearchInput): Promise<ProviderSearchResult> {
+      // Direct institutional discovery for Jalisco must not depend on a secondary API.
+      const jalisco = isJaliscoRegime(input) ? config.officialProviders.find(provider => provider.id === 'STATE_OFFICIAL') : undefined;
+      if (jalisco && input.request.requestedAuthorityTypes.some(type => jalisco.supportedAuthorityTypes.includes(type))) {
+        const direct = await jalisco.search(input);
+        if (direct.candidates.length) {
+          for (const candidate of direct.candidates) {
+            officialByDiscoveryId.set(candidate.id, candidate);
+            providerByOfficialCandidateId.set(candidate.id, jalisco);
+            requestByDiscoveryId.set(candidate.id, input.request.id);
+          }
+          return direct;
+        }
+      }
       // 1. Descubrimiento secundario (Corpus Iuris / lex-mx)
       const discoveryResults = await Promise.all(
         discoveryProviders.map(async (provider) => {
@@ -83,6 +97,7 @@ export function createResearchProviderRouter(config: ResearchProviderRouterConfi
 
       // 2. Verificación en fuentes oficiales primarias (Cámara de Diputados / SCJN / DOF)
       const officialEntries = config.officialProviders
+        .filter((provider) => provider.id !== 'STATE_OFFICIAL')
         .filter((provider) => input.request.requestedAuthorityTypes.some((type) => provider.supportedAuthorityTypes.includes(type)));
       const officialSearches = await Promise.all(officialEntries.map(async (provider) => {
         try { return await provider.search(input); }
@@ -137,6 +152,7 @@ export interface DefaultResearchProviderRouterConfig {
   federal?: FederalLegislationAdapterConfig;
   scjn?: ScjnAdapterConfig;
   dof?: DofAdapterConfig;
+  jalisco?: JaliscoAdapterConfig;
 }
 
 export function createDefaultResearchProviderRouter(config: DefaultResearchProviderRouterConfig = {}): LegalResearchProvider {
@@ -145,6 +161,7 @@ export function createDefaultResearchProviderRouter(config: DefaultResearchProvi
     createLexMxAdapter(config.lexMx || {}),
   ];
   const officialProviders: LegalResearchProvider[] = [
+    createJaliscoAdapter(config.jalisco || {}),
     createFederalLegislationAdapter(config.federal || {}),
     createScjnAdapter(config.scjn || {}),
     createDofAdapter(config.dof || {}),

@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,7 +7,7 @@ import { createSourceDocument } from '@/lib/legal-engine/context';
 import { reconstructCaseAnalysis } from '@/lib/legal-engine/caseAnalysis';
 import { buildSourceGrounding } from '@/lib/legal-engine/sourceGrounding';
 
-const auditRoot = path.resolve(process.cwd(), 'audit/final-legal-readiness-2026');
+const auditRoot = path.resolve(process.cwd(), 'audit/banco-prueba');
 
 async function realCase(caseNumber: string) {
   const sourceDirectory = path.join(auditRoot, 'cases', caseNumber, 'source');
@@ -28,7 +29,7 @@ async function realCase(caseNumber: string) {
   });
 }
 
-describe('FASE 2 provenance regressions from the six real sources', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('FASE 2 provenance regressions from the six real sources', () => {
   it('case 04 keeps jurisprudence Hechos outside the current case facts', async () => {
     const source = await realCase('04');
     const analysis = reconstructCaseAnalysis([source]);
@@ -65,7 +66,7 @@ describe('FASE 2 provenance regressions from the six real sources', () => {
   });
 });
 
-describe('FASE 2 adversarial source separation', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('FASE 2 adversarial source separation', () => {
   it('does not let ten amparo jurisprudences dominate a civil demand', () => {
     const extractedText = [
       'DEMANDA ORDINARIA CIVIL',

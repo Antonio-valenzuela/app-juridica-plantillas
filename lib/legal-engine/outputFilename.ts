@@ -72,6 +72,14 @@ export function extractDownloadFilename(contentDisposition: string | null): stri
     : safe;
 }
 
+/** ASCII fallback plus RFC 5987 UTF-8 name: HTTP header bytes must not corrupt accents. */
+export function buildDownloadContentDisposition(filename: string): string {
+  const safe = extractDownloadFilename(`attachment; filename*=UTF-8''${encodeURIComponent(filename)}`) || 'documento';
+  const ascii = safe.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '_');
+  const encoded = encodeURIComponent(safe).replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 /**
  * Uses the filename selected by the document-routing metadata and sanitizes it
  * only at the filesystem boundary. The source PDF name is never used as a

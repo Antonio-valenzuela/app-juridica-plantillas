@@ -9,6 +9,7 @@ import {
   inferSourceOutputType,
 } from '@/lib/legal-engine/sourceOutputCompatibility';
 import { buildSourceGrounding, type SourceGrounding } from '@/lib/legal-engine/sourceGrounding';
+import { proceduralActsOf } from '@/lib/legal-engine/proceduralActs';
 
 export interface AnalyzeResult {
   ok: boolean;
@@ -200,6 +201,10 @@ export async function analyzeUploadedDocument(input: {
     sourceDocumentType,
     materia,
     tipo_documento: canonicalClassificationLabel(sourceDocumentType, classificationBase.tipo_documento),
+    // Actos procesales detectados con su rango de páginas (PDF con varios actos).
+    actos: proceduralActsOf(sourceDocument)
+      .filter((act) => act.kind !== 'DESCONOCIDO')
+      .map((act) => ({ tipo: act.kind, paginaInicial: act.startPage, paginaFinal: act.endPage, confianza: act.confidence })),
   };
   const analysis = reconstructCaseAnalysis([sourceDocument]);
   const templateAnalysis = analyzePersonalTemplateText(result.text, {

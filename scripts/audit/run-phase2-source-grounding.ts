@@ -50,8 +50,8 @@ export type Phase2CaseResult = {
 };
 
 const repoRoot = process.cwd();
-const sourceAuditRoot = path.resolve(repoRoot, 'audit/final-legal-readiness-2026');
-const phase2Root = path.resolve(repoRoot, 'audit/final-legal-readiness-2026-phase2');
+const sourceAuditRoot = path.resolve(repoRoot, 'audit/banco-prueba');
+const phase2Root = path.resolve(repoRoot, 'audit/banco-prueba');
 const manifestPath = path.join(sourceAuditRoot, 'selected-cases.json');
 
 function nowIso(): string { return new Date().toISOString(); }
@@ -327,7 +327,7 @@ export async function runPhase2SourceGrounding(): Promise<unknown> {
     sourceAuditRoot,
     phase2Root,
     productionDatabaseExcluded: true,
-    testBankZip: 'C:\\Users\\yahir\\Desktop\\Datos.zip',
+    testBankZip: 'RUTA_LOCAL',
     counts: { total: results.length, passReviewable: results.filter((result) => result.status === 'PASS_REVIEWABLE').length, blockedReview: results.filter((result) => result.status === 'BLOCKED_REVIEW').length, failed: results.filter((result) => result.status === 'FAILED').length, docx: results.filter((result) => result.files.docx).length, pdf: results.filter((result) => result.files.pdf).length },
     results,
   };

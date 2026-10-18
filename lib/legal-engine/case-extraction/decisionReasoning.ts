@@ -30,6 +30,17 @@ interface ReasoningSpan {
   referenceNumber?: string;
 }
 
+/** A labeled actual decision, not a request for a future resolution. The
+ * excerpt is source content; no illegality or normative premise is inferred. */
+export function explicitDecisionStatements(text: string): Array<{ start: number; end: number; proposition: string }> {
+  return [...text.matchAll(/(?:^|[.\n]\s*)RESOLUCI[ÓO]N(?:\s+fechada\s+[^:\n.]{1,85})?\s*:\s*([^\n.]{10,800})/gi)]
+    .map(match => {
+      const raw = match[1];
+      const start = match.index! + match[0].lastIndexOf(raw);
+      return { start, end: start + raw.length, proposition: raw.trim() };
+    });
+}
+
 function normalizedText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -77,6 +88,10 @@ function reasoningSpans(candidate: ExtractionCandidate): ReasoningSpan[] {
   if (candidate.decision === 'REJECTED' || !candidate.rawText.trim()) return [];
   const text = candidate.rawText;
   const spans: ReasoningSpan[] = [];
+
+  for (const statement of explicitDecisionStatements(text)) {
+    if (!isInsideQuotedText(text, statement.start)) spans.push({ ...statement, type: 'DECISION_REASONING' });
+  }
 
   for (const match of text.matchAll(HOLDING_ANCHOR_RE)) {
     const start = match.index ?? -1;

@@ -1,23 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
-import { exportUniversalToPdf } from '@/lib/legal-engine/exportPdfUniversal';
+import { exportUniversalToPdf, exportUniversalToPdfWithMold } from '@/lib/legal-engine/exportPdfUniversal';
+import { loadLawyerTemplateSource } from '@/lib/templates/templateMoldSource';
+import { inspectDocxMold, moldPdfSettings } from '@/lib/templates/docxMold';
 import { isExportGuardError, prepareUniversalDocumentForExport } from '@/lib/legal-engine/exportGuards';
 import { UniversalLegalDocument } from '@/lib/legal-engine/types';
-import { resolveDocumentOutputFilename } from '@/lib/legal-engine/outputFilename';
+import { resolveDocumentOutputFilename, buildDownloadContentDisposition } from '@/lib/legal-engine/outputFilename';
 import { documentBelongsToPrincipal } from '@/lib/legal-engine/documentOwnership';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
 import { resolveExportMode } from '@/lib/legal-engine/exportModes';
+import { isLocalSameOriginDraftExportRequest, UNSAVED_DRAFT_EXPORT_HEADER } from '@/lib/security/localDraftExport';
+import { desktopDraftRepository } from '@/lib/workspace/desktopDraftRepository';
+import { authorizeFinalExport, finalExportBlockedBody } from '@/lib/legal-engine/finalExportAuthorization';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const requestId = req.headers.get('x-request-id')?.trim() || generateRequestId();
-  const auth = await requireLawyerAccess(req);
-  if (!auth.ok) return auth.response;
-  const rateLimit = checkRequestRateLimit(req, 'export:pdf', 20, `${auth.context.organizationId}:${auth.context.userId}`);
+  const local = desktopDraftRepository(req);
+  if (local && !local.ok) return local.response;
+  const unsavedDraftRequested = req.headers.get(UNSAVED_DRAFT_EXPORT_HEADER) === 'true';
+  if (unsavedDraftRequested && !isLocalSameOriginDraftExportRequest(req)) {
+    return NextResponse.json({ ok: false, errorCode: 'UNSAVED_DRAFT_EXPORT_LOCAL_ONLY', message: 'La exportación no guardada solo está disponible desde esta aplicación local.' }, { status: 403 });
+  }
+  let principal: { organizationId: string; userId: string } | null = null;
+  if (!unsavedDraftRequested && !local?.ok) {
+    const auth = await requireLawyerAccess(req);
+    if (!auth.ok) return auth.response;
+    principal = auth.context;
+  }
+  const rateLimit = checkRequestRateLimit(
+    req,
+    'export:pdf',
+    20,
+    principal ? `${principal.organizationId}:${principal.userId}` : 'local-unsaved-draft',
+  );
   if (!rateLimit.ok) return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas exportaciones. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
 
   try {
@@ -40,22 +60,72 @@ export async function POST(req: NextRequest) {
     if (!exportMode) {
       return NextResponse.json({ ok: false, errorCode: 'INVALID_EXPORT_MODE', message: 'El modo de exportación debe ser DRAFT o FINAL.' }, { status: 400 });
     }
-    if (typeof inputDocument.id !== 'string' || !await documentBelongsToPrincipal({
-      organizationId: auth.context.organizationId,
-      userId: auth.context.userId,
-      documentId: inputDocument.id,
-    })) {
+// FINAL nunca es automático. Un tipo sin certificación técnica queda
+    // bloqueado en cualquier vía. Un tipo técnicamente certificado pero sin
+    // aprobación humana también queda bloqueado cuando no hay contrato de
+    // documento que evalúe (exportación efímera); cuando el documento está
+    // guardado, el guard de exportación del documento es la autoridad y decide
+    // con pendingFields, autoridades, provenance, coverage y qualityGate.
+    // FINAL nunca es automático ni depende de flags del cliente: la autorización
+    // (PASS técnico + aprobación jurídica del catálogo) se decide aquí, en el
+    // servidor, para documentos guardados y no guardados. Los tipos sin
+    // certificar se rechazan de inmediato; el resto se vuelve a exigir tras el
+    // guard documental para conservar los hallazgos del documento.
+    const finalAuthorization = exportMode === 'FINAL' ? authorizeFinalExport(inputDocument.documentType) : null;
+    if (finalAuthorization && !finalAuthorization.ok && inputDocument.documentType
+      && (unsavedDraftRequested || finalAuthorization.reason !== 'HUMAN_REVIEW_PENDING')) {
+      return NextResponse.json(finalExportBlockedBody(finalAuthorization), { status: finalAuthorization.status });
+    }
+    // Local persistence has a separate authenticated DRAFT contract. It does
+    // not fabricate a WEB principal or authorize FINAL.
+    if (local?.ok && exportMode !== 'DRAFT') {
+      return NextResponse.json({ ok: false, error: 'DESKTOP_FINAL_REVIEW_REQUIRED' }, { status: 422 });
+    }
+    if (unsavedDraftRequested && exportMode !== 'DRAFT') {
+      return NextResponse.json({ ok: false, errorCode: 'UNSAVED_DRAFT_EXPORT_REQUIRES_DRAFT', message: 'La exportación no guardada solo admite el modo DRAFT.' }, { status: 400 });
+    }
+    if (typeof inputDocument.id !== 'string') {
       return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
     }
+    if (local?.ok && !unsavedDraftRequested) {
+      let owned: boolean;
+      try {
+        owned = (await local.store.list()).some(record => {
+          const document = record.structuredDoc;
+          return document && typeof document === 'object' && 'id' in document && document.id === inputDocument.id;
+        });
+      } catch {
+        return NextResponse.json({ ok: false, errorCode: 'EXPORT_PERSISTENCE_UNAVAILABLE', message: 'No se pudo verificar el borrador guardado. Puedes descargar una copia DRAFT local.' }, { status: 503 });
+      }
+      if (!owned) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
+    } else if (!unsavedDraftRequested) {
+      if (!principal) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
+      let belongsToPrincipal: boolean;
+      try {
+        belongsToPrincipal = await documentBelongsToPrincipal({
+          organizationId: principal.organizationId,
+          userId: principal.userId,
+          documentId: inputDocument.id,
+        });
+      } catch (error) {
+        console.warn('[export/pdf] no se pudo verificar la persistencia del borrador:', error instanceof Error ? error.message : 'unknown');
+        return NextResponse.json({ ok: false, errorCode: 'EXPORT_PERSISTENCE_UNAVAILABLE', message: 'No se pudo verificar el borrador guardado. Puedes descargar una copia DRAFT local.' }, { status: 503 });
+      }
+      if (!belongsToPrincipal) return NextResponse.json({ ok: false, error: 'DOCUMENT_NOT_FOUND' }, { status: 404 });
+    }
+    const exportOptions = { exportMode, ...(unsavedDraftRequested ? { unsavedDraft: true } : {}) };
     let docForPdf: UniversalLegalDocument;
     try {
-      docForPdf = await prepareUniversalDocumentForExport(inputDocument, { exportMode }).then((prepared) => prepared.document);
+      docForPdf = await prepareUniversalDocumentForExport(inputDocument, exportOptions).then((prepared) => prepared.document);
     } catch (error) {
       if (isExportGuardError(error)) {
+        const sourceOnly = error.result.errors.some(item => item.startsWith('SOURCE_DOCUMENT_NOT_GENERATED:'));
         return NextResponse.json({
           ok: false,
           error: error.code,
-          friendlyMessage: 'El documento no pasó el contrato común de exportación.',
+          friendlyMessage: sourceOnly
+            ? 'El archivo cargado todavía es la fuente del expediente. Genera primero el escrito solicitado; no se descargó una copia de la sentencia como borrador.'
+            : 'El documento no pasó el contrato común de exportación.',
           details: error.result.errors,
           warnings: error.result.warnings,
         }, { status: 422 });
@@ -63,18 +133,55 @@ export async function POST(req: NextRequest) {
       throw error;
     }
 
+    // El documento superó el guard, pero PASS no sustituye la aprobación jurídica.
+    if (finalAuthorization && !finalAuthorization.ok) {
+      return NextResponse.json(finalExportBlockedBody(finalAuthorization), { status: finalAuthorization.status });
+    }
+
     // No hay fallback a HTML/Chromium: si falla el exporter binario, se devuelve
     // un error honesto y no se utiliza renderedSections como bypass.
     try {
-      const pdfBuffer = await exportUniversalToPdf(docForPdf, undefined, { exportMode });
+      // «Usar mi plantilla»: PDF aproximado con página, márgenes, letra e interlineado de la plantilla .docx.
+      const templateNotices: string[] = [];
+      let templateDesign: 'APPROXIMATE' | 'STANDARD' | undefined;
+      let pdfBuffer: Buffer | undefined;
+      const templateId = docForPdf.generationMetadata.generationMode === 'personal_template' && body.useTemplateDesign !== false
+        ? docForPdf.generationMetadata.selectedTemplateId
+        : null;
+      if (templateId) {
+        const source = await loadLawyerTemplateSource({
+          templateId,
+          organizationId: principal?.organizationId,
+          userId: principal?.userId,
+          local: Boolean(local?.ok),
+        });
+        if (source?.kind === 'docx' && source.bytes) {
+          try {
+            const settings = moldPdfSettings(await inspectDocxMold(source.bytes));
+            const imageNotices: string[] = [];
+            pdfBuffer = await exportUniversalToPdfWithMold(docForPdf, settings, undefined, exportOptions, imageNotices);
+            templateNotices.push(...settings.warnings, ...imageNotices);
+            templateDesign = 'APPROXIMATE';
+          } catch (error) {
+            console.warn('[export/pdf] no se pudo aplicar el diseño de la plantilla:', error instanceof Error ? error.message : 'unknown');
+          }
+        }
+        if (!pdfBuffer) {
+          templateDesign = 'STANDARD';
+          templateNotices.push('No se pudo copiar el diseño de tu plantilla (solo los .docx lo permiten): el PDF usa el diseño estándar.');
+        }
+      }
+      pdfBuffer ??= await exportUniversalToPdf(docForPdf, undefined, exportOptions);
       if (pdfBuffer && pdfBuffer.length > 500 && pdfBuffer.subarray(0, 4).toString() === '%PDF') {
         return new NextResponse(new Uint8Array(pdfBuffer), {
           headers: {
             'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="${resolveDocumentOutputFilename(docForPdf, 'pdf')}"`,
+            'Content-Disposition': buildDownloadContentDisposition(resolveDocumentOutputFilename(docForPdf, 'pdf')),
             'Content-Length': String(pdfBuffer.length),
             'X-Export-Method': 'pdf',
             'X-Export-Mode': exportMode,
+            ...(templateDesign ? { 'X-Template-Design': templateDesign, 'X-Template-Notices': encodeURIComponent(JSON.stringify(templateNotices)) } : {}),
+            ...(unsavedDraftRequested ? { 'X-Export-Persistence': 'UNSAVED_LOCAL_DRAFT' } : {}),
             ...(exportMode === 'DRAFT' ? { 'X-Export-Review-Override': 'true' } : {}),
           },
         });

@@ -1,0 +1,43 @@
+import { launchDesktopLocal, assertPortAvailable } from '../desktop/local-launcher.mjs';
+import { chromium } from '@playwright/test';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const original = path.resolve('audit/final-pre-windows-readiness/inflight/run-2026-10-02T01-55-22.320Z');
+const dir = path.resolve('audit/final-pre-windows-readiness/inflight/reopen-after-fix'); await mkdir(dir, { recursive: true });
+const store = path.join(dir, `copy-${Date.now()}`); await cp(path.join(original, 'synthetic-store'), store, { recursive: true });
+const checkpoint = JSON.parse(await readFile(path.join(original, 'checkpoint-after-stop.json'), 'utf8'));
+await writeFile(path.join(store, 'data', 'legal-workspace', 'desktop-jobs-v1', `${checkpoint.jobId}.json`), JSON.stringify({ version: 1, record: checkpoint }));
+process.env.LEXPLANTILLAS_STORAGE_ROOT = store;
+process.env.LEGAL_CASES_USER_EMAIL = ''; process.env.LEGAL_CASES_ORG_SLUG = ''; process.env.DEMO_MODE_ENABLED = 'false';
+let session, browser; const report = { status: 'PARTIAL', externalProviderCalls: 0, source: original };
+try {
+  session = await launchDesktopLocal({ projectDir: process.cwd(), port: 3201 });
+  browser = await chromium.launch({ headless: true, channel: 'chrome' }); const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  assert.equal((await context.request.post(`${session.baseUrl}/api/desktop-local/session`, { headers: { 'x-lex-desktop-capability': session.capability } })).status(), 204);
+  await context.route('**/api/legal-engine/generate', route => route.abort());
+  await context.route('**/api/legal-engine/generate-section', route => route.abort());
+  await context.addInitScript(value => localStorage.setItem('jr_active_gen_job', JSON.stringify(value)), { jobId: checkpoint.jobId, status: 'processing', total: checkpoint.total, completed: checkpoint.completed, percentage: checkpoint.percentage });
+  const page = await context.newPage(); await page.goto(`${session.baseUrl}/machotes?tab=universal`);
+  await page.getByText(/La generación falló|La generación no pudo completarse|Interrumpido por reinicio/).first().waitFor();
+  await writeFile(path.join(dir, 'ui-text.txt'), await page.locator('body').innerText());
+  report.uiInterruptedMessage = await page.getByText(/La generación falló|La generación no pudo completarse|Interrumpido por reinicio/).count();
+  await page.screenshot({ path: path.join(dir, 'interrupted-ui.png') });
+  const get = async url => { const response = await context.request.get(`${session.baseUrl}${url}`); assert.equal(response.status(), 200); return response.json(); };
+  const drafts = (await get('/api/legal-drafts')).drafts; assert.equal(drafts.length, 1);
+  const draft = drafts[0]; assert.equal(draft.structuredDoc.id, checkpoint.checkpointDocument.id);
+  assert.deepEqual(draft.structuredDoc.sections, checkpoint.checkpointDocument.sections);
+  assert.notEqual(draft.structuredDoc.status, 'final');
+  const status = await get(`/api/legal-engine/generate/status?jobId=${checkpoint.jobId}`); assert.equal(status.status, 'failed'); assert.equal(status.errorCode, 'DESKTOP_BACKEND_RESTARTED');
+  const reopened = await get(`/api/legal-engine/documents/${draft.structuredDoc.id}`); assert.ok(reopened);
+  await get(`/api/legal-engine/generate/status?jobId=${checkpoint.jobId}`); assert.equal((await get('/api/legal-drafts')).drafts.length, 1);
+  assert.equal((await context.request.delete(`${session.baseUrl}/api/legal-drafts/${draft.id}`)).status(), 200);
+  await session.close(); await assertPortAvailable(3201);
+  session = await launchDesktopLocal({ projectDir: process.cwd(), port: 3201 });
+  assert.equal((await context.request.post(`${session.baseUrl}/api/desktop-local/session`, { headers: { 'x-lex-desktop-capability': session.capability } })).status(), 204);
+  await get(`/api/legal-engine/generate/status?jobId=${checkpoint.jobId}`);
+  assert.equal((await get('/api/legal-drafts')).drafts.length, 0);
+  report.controlledDiscardAfterRestart = 'PASS';
+  report.status = report.uiInterruptedMessage ? 'PASS_REOPENABLE_REVIEW_CHECKPOINT' : 'PARTIAL_UI_INTERRUPTION_NOT_VISIBLE'; report.jobId = checkpoint.jobId; report.documentId = checkpoint.checkpointDocument.id; report.draftRecordId = draft.id; report.completed = checkpoint.completed; report.behavior = 'FAILED interruption; original checkpoint preserved and accessible as DRAFT for explicit review. Explicit discard persists after restart. No automatic resume claimed.';
+} catch (error) { report.error = error.message; process.exitCode = 1; }
+finally { if (browser) await browser.close(); if (session) await session.close(); await assertPortAvailable(3201); await writeFile(path.join(dir, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report)); }

@@ -1,9 +1,15 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
+import { isCivilFamilyAppeal } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { TaxonomySelect } from '@/components/legal-taxonomy/TaxonomySelect';
-import type { DraftDepth } from '@/lib/legal-engine/draftDepth';
+import type { PageTarget } from '@/lib/legal-engine/pageTarget';
+import { PageTargetSelector } from './PageTargetSelector';
 import type { TemplateItem } from './TemplateLibraryManager';
+import { TemplateDesignNotice } from '@/components/machotes/TemplateDesignNotice';
+import { TemplateSectionPreview } from '@/components/machotes/TemplateSectionPreview';
+import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
 
 interface ContestacionesConfigPanelProps {
   selectedDocumentType: string;
@@ -11,175 +17,289 @@ interface ContestacionesConfigPanelProps {
   documentTypeOptions: Array<{ value: string; label: string }>;
   generationMode: 'automatic' | 'personal_template' | 'reference_document';
   onGenerationModeChange: (mode: 'automatic' | 'personal_template' | 'reference_document') => void;
-  draftDepth: DraftDepth;
-  onDraftDepthChange: (depth: DraftDepth) => void;
+  pageTarget: PageTarget;
+  onPageTargetChange: (target: PageTarget) => void;
   customTemplates?: TemplateItem[];
   selectedTemplateId?: string;
   onSelectTemplateId?: (id: string) => void;
   userInstructions: string;
   onUserInstructionsChange: (val: string) => void;
   disabled?: boolean;
+  /** Muestra en el selector los tipos aún no certificados (solo como borrador asistido). */
+  showUncertifiedDrafts?: boolean;
+  onShowUncertifiedDraftsChange?: (value: boolean) => void;
+  /** Abre el modal para subir y guardar una plantilla (machote) del abogado. */
+  onUploadTemplate?: () => void;
+  /** Correcciones del abogado a qué secciones de su plantilla se conservan o se reescriben. */
+  templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
+  onTemplateSectionKindsChange?: (kinds: Record<string, 'FORMULA' | 'SUSTANTIVA'>) => void;
 }
 
-const GENERATION_METHODS = [
-  { value: 'automatic', label: 'Estándar', description: 'Redacción guiada por IA' },
-  { value: 'personal_template', label: 'Plantilla', description: 'Usar tu machote' },
-  { value: 'reference_document', label: 'Referencia', description: 'Basado en otro documento' },
-] as const;
-
+/**
+ * Configuración del escrito, primera tarjeta del inspector:
+ *  1. Tipo de escrito.
+ *  2. Cómo redactar: automáticamente o sobre la plantilla del abogado, cuya
+ *     estructura y estilo se conservan y cuyo contenido se sustituye por el del caso.
+ *  3. Opciones avanzadas (extensión e instrucción directa), plegadas.
+ */
 export function ContestacionesConfigPanel({
   selectedDocumentType,
   onDocumentTypeChange,
   documentTypeOptions,
   generationMode,
   onGenerationModeChange,
-  draftDepth,
-  onDraftDepthChange,
+  pageTarget,
+  onPageTargetChange,
   customTemplates = [],
   selectedTemplateId,
   onSelectTemplateId,
   userInstructions,
   onUserInstructionsChange,
   disabled = false,
+  showUncertifiedDrafts,
+  onShowUncertifiedDraftsChange,
+  onUploadTemplate,
+  templateSectionKinds = {},
+  onTemplateSectionKindsChange,
 }: ContestacionesConfigPanelProps) {
+  const isAppeal = isCivilFamilyAppeal(selectedDocumentType);
+  const title = isAppeal
+    ? 'Configuración de la apelación'
+    : /^contestacion/.test(selectedDocumentType) ? 'Configuración de la contestación' : 'Configuración del escrito';
+  const usesTemplate = generationMode === 'personal_template';
+  const [optionsOpen, setOptionsOpen] = React.useState(false);
+  const moreOptionsButtonRef = React.useRef<HTMLButtonElement>(null);
+  const depthLabel = `obj. ${pageTarget.pages} pp.`;
+
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-white p-3.5 shadow-xs transition hover:border-slate-300/80">
-      <div className="mb-2 flex items-center justify-between border-b border-slate-100 pb-2">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </div>
-          <h2 className="text-base font-bold text-slate-900">
-            Configuración de la contestación
-          </h2>
-        </div>
+    <section data-testid="contestaciones-config-panel" className="lex-card">
+      <div className="lex-card-header">
+        <h2 className="lex-card-title">{title}</h2>
       </div>
 
-      <div className="contestaciones-config-grid">
-        {/* Row 1, Col 1: Tipo de escrito */}
-        <div>
-          <TaxonomySelect
-            label="Tipo de escrito"
-            value={selectedDocumentType}
-            options={documentTypeOptions}
-            onChange={onDocumentTypeChange}
-            required
-          />
-        </div>
-
-        {/* Row 1, Col 2: Modo de generación */}
-        <div>
-          <label className="mb-2 flex items-center gap-1 text-sm font-medium text-slate-600">
-            <span>Modo de generación</span>
-            <span className="text-slate-400 cursor-help" title="Selecciona el estilo y base para redactar la respuesta">ⓘ</span>
+      <div className="lex-config-primary">
+        <TaxonomySelect
+          label="Tipo de escrito"
+          value={selectedDocumentType}
+          options={documentTypeOptions}
+          onChange={onDocumentTypeChange}
+          required
+        />
+        {onShowUncertifiedDraftsChange && (
+          <label className="lex-checkbox" title="Muestra también tipos aún no certificados; se generan solo como borrador asistido y no admiten versión FINAL.">
+            <input
+              type="checkbox"
+              checked={Boolean(showUncertifiedDrafts)}
+              disabled={disabled}
+              onChange={(event) => onShowUncertifiedDraftsChange(event.target.checked)}
+            />
+            <span>En desarrollo (sin certificar)</span>
           </label>
+        )}
 
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            {GENERATION_METHODS.map((method) => {
-              const active = generationMode === method.value;
-              return (
-                <label
-                  key={method.value}
-                  className={`inline-flex cursor-pointer select-none items-center gap-2 text-sm font-semibold ${
-                    active ? 'text-[#0B2545]' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="generationMode"
-                    value={method.value}
-                    checked={active}
-                    disabled={disabled}
-                    onChange={() => onGenerationModeChange(method.value)}
-                    className="h-4 w-4 text-[#0B2545] focus:ring-[#0B2545] border-slate-300"
-                  />
-                  <span>{method.label}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Row 1, Col 3: Profundidad jurídica con límite de soporte */}
-        <div>
-          <label className="mb-2 flex items-center gap-1 text-sm font-medium text-slate-600">
-            <span>Profundidad del escrito</span>
-            <span className="text-slate-400 cursor-help" title="El rango es orientativo. El sistema se detiene si las fuentes no permiten desarrollar más contenido sin inventar.">ⓘ</span>
-          </label>
-          <div className="flex flex-wrap items-center gap-3 pt-1">
+        <fieldset className="lex-fieldset">
+          <legend>Cómo redactar</legend>
+          <div className="lex-segmented lex-segmented-full" role="radiogroup" aria-label="Cómo redactar">
             {([
-              { value: 'PROFESSIONAL_20', label: 'Profesional (18 a 24 páginas)' },
-              { value: 'EXTENSIVE_40', label: 'Extensa (35 a 45 páginas)' },
+              { value: 'automatic', label: 'Automáticamente' },
+              { value: 'personal_template', label: USE_MY_TEMPLATE_LABEL },
             ] as const).map((option) => (
-              <label
-                key={option.value}
-                className={`inline-flex cursor-pointer select-none items-center gap-2 text-sm font-semibold ${draftDepth === option.value ? 'text-[#0B2545]' : 'text-slate-600 hover:text-slate-900'}`}
-              >
+              <label key={option.value} className={generationMode === option.value ? 'is-active' : undefined}>
                 <input
                   type="radio"
-                  name="draftDepth"
+                  name="generationMode"
                   value={option.value}
-                  checked={draftDepth === option.value}
+                  checked={generationMode === option.value}
                   disabled={disabled}
-                  onChange={() => onDraftDepthChange(option.value)}
-                  className="h-4 w-4 border-slate-300 text-[#0B2545] focus:ring-[#0B2545]"
+                  onChange={() => onGenerationModeChange(option.value)}
                 />
                 <span>{option.label}</span>
               </label>
             ))}
           </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">
-            Son rangos aproximados, no una meta para rellenar páginas. La generación termina y señala revisión si faltan datos, posturas o soporte verificable.
-          </p>
-        </div>
 
-        {/* Row 2, Col 1: Machote / plantilla */}
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-600">
-            Machote / plantilla (opcional)
-          </label>
-
-          <select
-            value={selectedTemplateId || ''}
-            onChange={(e) => onSelectTemplateId?.(e.target.value)}
-            disabled={disabled}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-[#0B2545]"
-          >
-            <option value="">Seleccionar plantilla…</option>
-            {customTemplates.map((tpl) => (
-              <option key={tpl.id} value={tpl.id}>
-                {tpl.name} {tpl.category ? `(${tpl.category})` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Row 2, Col 2: Instrucción directa */}
-        <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <label className="block text-sm font-bold text-[#0B2545]">
-              Instrucción directa — ¿Qué quieres generar? <span className="font-normal text-slate-500">(opcional)</span>
-            </label>
-            <span className="text-[11px] font-mono text-slate-400">
-              {userInstructions.length}/2000
-            </span>
-          </div>
-
-          <textarea
-            value={userInstructions}
-            onChange={(e) => onUserInstructionsChange(e.target.value.slice(0, 2000))}
-            placeholder="Ej. Elabora recurso de apelación contra el Auto de 12/ago/2026 que desecha incidente y cita a sentencia en Exp. 1152/2013 BIS. Argumenta falta de fundamentación y..."
-            maxLength={2000}
-            rows={3}
-            disabled={disabled}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-[#0B2545] resize-y min-h-[84px]"
-          />
-          <p className="mt-1 text-[11px] text-slate-500">Escribe directamente tu petición. Si llenas este campo, podrás generar aunque la fuente no sea 100% compatible (ej. sentencia → apelación).</p>
-        </div>
+          {usesTemplate && <TemplateDesignNotice />}
+          {usesTemplate && (
+            <div className="lex-template-picker">
+              <label htmlFor="contestaciones-template" className="lex-field-label">Plantilla (machote)</label>
+              <select
+                id="contestaciones-template"
+                value={selectedTemplateId || ''}
+                onChange={(e) => onSelectTemplateId?.(e.target.value)}
+                disabled={disabled}
+                className="lex-select"
+              >
+                <option value="">{customTemplates.length ? 'Elige una plantilla…' : 'Aún no tienes plantillas'}</option>
+                {customTemplates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>
+                    {tpl.name} {tpl.category ? `(${tpl.category})` : ''}
+                  </option>
+                ))}
+              </select>
+              {onUploadTemplate && (
+                <button type="button" className="lex-button lex-button-secondary lex-button-compact" onClick={onUploadTemplate} disabled={disabled}>
+                  Subir plantilla
+                </button>
+              )}
+              <p className="lex-help">
+                El borrador conserva la estructura, encabezados y estilo de tu plantilla y sustituye su contenido por la contestación del caso.
+              </p>
+            </div>
+          )}
+          {usesTemplate && onTemplateSectionKindsChange && (
+            <TemplateSectionPreview
+              templateText={customTemplates.find((tpl) => tpl.id === selectedTemplateId)?.content || ''}
+              overrides={templateSectionKinds}
+              onChange={onTemplateSectionKindsChange}
+              disabled={disabled}
+            />
+          )}
+        </fieldset>
       </div>
+
+      <div className="lex-config-extension">
+        <PageTargetSelector value={pageTarget} onChange={onPageTargetChange} disabled={disabled} />
+      </div>
+
+      <button
+        ref={moreOptionsButtonRef}
+        type="button"
+        className="lex-more-options-trigger"
+        onClick={() => setOptionsOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={optionsOpen}
+        data-testid="contestaciones-more-options"
+      >
+        <span>Más opciones</span>
+        <span className="lex-disclosure-hint">{userInstructions.trim() ? 'Con instrucción · ' : ''}{depthLabel}</span>
+      </button>
+      {optionsOpen && (
+        <DraftingOptionsDialog
+          onClose={() => { setOptionsOpen(false); moreOptionsButtonRef.current?.focus(); }}
+          userInstructions={userInstructions}
+          onUserInstructionsChange={onUserInstructionsChange}
+          pageTarget={pageTarget}
+          onPageTargetChange={onPageTargetChange}
+          disabled={disabled}
+          isAppeal={isAppeal}
+        />
+      )}
     </section>
+  );
+}
+
+const INSTRUCTION_LIMIT = 2000;
+
+/** Atajos que insertan una pauta para que el abogado la complete; no aportan hechos ni citas. */
+const INSTRUCTION_SHORTCUTS: Array<{ label: string; text: string; appealOnly?: boolean; answerOnly?: boolean }> = [
+  { label: 'Postura sobre los hechos', text: 'Postura sobre los hechos: ', answerOnly: true },
+  { label: 'Excepciones a oponer', text: 'Excepciones y defensas a oponer: ', answerOnly: true },
+  { label: 'Agravios a desarrollar', text: 'Agravios a desarrollar: ', appealOnly: true },
+  { label: 'Pruebas a ofrecer', text: 'Pruebas a ofrecer o relacionar: ' },
+  { label: 'Puntos petitorios', text: 'Puntos petitorios que debe incluir: ' },
+  { label: 'Tono y estilo', text: 'Tono y estilo: ' },
+];
+
+function DraftingOptionsDialog({
+  onClose, userInstructions, onUserInstructionsChange, pageTarget, onPageTargetChange, disabled, isAppeal,
+}: {
+  onClose: () => void;
+  userInstructions: string;
+  onUserInstructionsChange: (value: string) => void;
+  pageTarget: PageTarget;
+  onPageTargetChange: (target: PageTarget) => void;
+  disabled: boolean;
+  isAppeal: boolean;
+}) {
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  React.useEffect(() => {
+    textareaRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = previousOverflow; };
+  }, [onClose]);
+
+  const insertShortcut = (text: string) => {
+    const base = userInstructions.trimEnd();
+    const next = `${base}${base ? '\n' : ''}${text}`.slice(0, INSTRUCTION_LIMIT);
+    onUserInstructionsChange(next);
+    requestAnimationFrame(() => {
+      const area = textareaRef.current;
+      if (!area) return;
+      area.focus();
+      area.setSelectionRange(next.length, next.length);
+    });
+  };
+
+  const shortcuts = INSTRUCTION_SHORTCUTS.filter((item) => (isAppeal ? !item.answerOnly : !item.appealOnly));
+
+  return createPortal(
+    <div className="lex-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="drafting-options-title" aria-describedby="drafting-options-desc" className="lex-modal" data-testid="drafting-options-dialog">
+        <header className="lex-modal-header">
+          <div>
+            <p className="lex-modal-eyebrow">Configuración del borrador</p>
+            <h2 id="drafting-options-title" className="lex-modal-title">Opciones de redacción</h2>
+            <p id="drafting-options-desc" className="lex-help">Los cambios se aplican al momento. El sistema no inventará hechos, pruebas ni citas: lo que no indiques quedará marcado para tu revisión.</p>
+          </div>
+          <button type="button" className="lex-modal-close" onClick={onClose} aria-label="Cerrar opciones de redacción">×</button>
+        </header>
+
+        <div className="lex-modal-body">
+          <section>
+            <div className="lex-field-label-row">
+              <label htmlFor="contestaciones-instruction" className="lex-field-label">Instrucción directa (opcional)</label>
+              <span className="lex-counter" aria-live="polite">{userInstructions.length}/{INSTRUCTION_LIMIT}</span>
+            </div>
+            <textarea
+              ref={textareaRef}
+              id="contestaciones-instruction"
+              value={userInstructions}
+              onChange={(e) => onUserInstructionsChange(e.target.value.slice(0, INSTRUCTION_LIMIT))}
+              placeholder={isAppeal
+                ? 'Ej. Elabora recurso de apelación contra el auto que desecha el incidente. Argumenta falta de fundamentación y motivación…'
+                : 'Ej. Niega el hecho 3 porque el pago se realizó; opón la excepción de pago; relaciona el recibo de la foja 12…'}
+              maxLength={INSTRUCTION_LIMIT}
+              rows={10}
+              disabled={disabled}
+              className="lex-textarea lex-modal-textarea"
+            />
+            <p className="lex-help">Indica tu postura y los puntos que el escrito debe desarrollar. Usa un atajo para agregar una pauta y complétala.</p>
+            <div className="lex-chip-row" role="group" aria-label="Atajos de instrucción">
+              {shortcuts.map((item) => (
+                <button key={item.label} type="button" className="lex-chip" onClick={() => insertShortcut(item.text)} disabled={disabled || userInstructions.length >= INSTRUCTION_LIMIT}>
+                  + {item.label}
+                </button>
+              ))}
+              {userInstructions && (
+                <button type="button" className="lex-chip lex-chip-muted" onClick={() => onUserInstructionsChange('')} disabled={disabled}>Limpiar</button>
+              )}
+            </div>
+          </section>
+
+          <section className="lex-modal-section" aria-label="Extensión máxima del escrito">
+            <PageTargetSelector value={pageTarget} onChange={onPageTargetChange} disabled={disabled} />
+          </section>
+        </div>
+
+        <footer className="lex-modal-footer">
+          <button type="button" className="lex-button lex-button-primary" onClick={onClose}>Listo</button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
   );
 }

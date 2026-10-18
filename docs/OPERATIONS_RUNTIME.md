@@ -8,7 +8,7 @@ La aplicación se construye como Next.js standalone (`next.config.ts`, `output: 
 - Prisma Client generado y el esquema/migraciones de `prisma/`.
 - `spa.traineddata` y el worker de `tesseract.js` si se habilita OCR local.
 - Un volumen persistente y escribible en `data/uploads/templates`.
-- PostgreSQL accesible mediante `DATABASE_URL`.
+- Base de datos local SQLite en la carpeta de datos del usuario (`%LOCALAPPDATA%\LexPlantillas\data`); las migraciones SQL de `prisma/migrations` viajan con el artefacto.
 
 No se deben incluir `.env`, documentos de expedientes, backups locales, `scratch/`, `.tmp/` ni salidas de pruebas en el artefacto.
 
@@ -23,11 +23,11 @@ npm run distribution:validate
 npm start
 ```
 
-`db:migrate`, backup y restore requieren una instancia aislada autorizada. La ausencia de esa instancia mantiene el estado de operación en `ENVIRONMENT_VERIFICATION_BLOCKED`; no se debe probar contra la base productiva como sustituto.
+`db:migrate` aplica las migraciones a la base local; `db:backup`, `db:validate-backup` y `db:restore` operan sobre el archivo SQLite (ver `docs/persistencia-local.md`). Pruebe respaldos con `npm run db:backup-restore-smoke`, que usa una base temporal sintética.
 
 ## Readiness
 
-`GET /api/health/readiness` informa `READY` o `NOT_READY` y expone únicamente estados operativos no secretos. El endpoint no conecta ni modifica `DATABASE_URL`: una base configurada queda como `CONFIGURED_NOT_VERIFIED` hasta que una verificación operativa separada la confirme.
+`GET /api/health/readiness` informa `READY` o `NOT_READY` y expone únicamente estados operativos no secretos. El endpoint no abre ni modifica la base: informa `READY` si el archivo SQLite local existe y es escribible, y `CONFIGURED_NOT_VERIFIED` si todavía no se ha creado (se crea y migra en el primer uso).
 
 Para OCR local, `OCR_PROVIDER=tesseract` o `auto` requiere worker, datos de idioma y `pdftoppm`. Si falta Poppler, las fuentes escaneadas deben quedar en revisión manual; no se genera texto jurídico de sustitución.
 

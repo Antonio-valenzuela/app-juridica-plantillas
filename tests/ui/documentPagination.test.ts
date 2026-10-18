@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyDocument, type DocumentNode } from '@/lib/legal-engine/types';
-import { paginateDocument } from '@/app/machotes/components/documentPagination';
+import { paginateDocument, uploadedSourcePageSectionType } from '@/app/machotes/components/documentPagination';
+import { materializeDocumentForPageMeasurement } from '@/lib/legal-engine/finalDocumentMaterialization';
 
 describe('paginateDocument', () => {
   it('splits a long single-section generated document into multiple pages', () => {
@@ -108,5 +109,29 @@ describe('paginateDocument', () => {
     expect(pages.length).toBe(5);
     expect(pages[0].sections[0].section.id).toBe('sec-page-1');
     expect(pages[4].sections[0].section.id).toBe('sec-page-5');
+  });
+
+  it('keeps the first uploaded source page in the exported document body instead of the Word header', () => {
+    const sourceText = 'CONTENIDO SINTETICO DE LA PRIMERA PAGINA';
+    const section: DocumentNode = {
+      id: 'sec-page-1',
+      type: uploadedSourcePageSectionType(),
+      title: 'Página 1',
+      order: 1,
+      content: [{ id: 'source-page-1', layer: 'USER_POSITION', text: sourceText }],
+      children: [],
+      isRepeatable: false,
+      isEditable: true,
+      isGenerated: false,
+      isManuallyEdited: false,
+      variables: [],
+      validationErrors: [],
+      validationWarnings: [],
+    };
+    const document = createEmptyDocument({ sections: [section], originalPageCount: 1 });
+    const renderModel = materializeDocumentForPageMeasurement(document);
+
+    expect(renderModel.header.map((paragraph) => paragraph.text)).not.toContain(sourceText);
+    expect(renderModel.sections.flatMap((item) => item.paragraphs).map((paragraph) => paragraph.text)).toContain(sourceText);
   });
 });

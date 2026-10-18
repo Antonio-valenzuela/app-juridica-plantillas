@@ -20,11 +20,11 @@ function createTestSentenciaSourceDocument() {
       chars: 600,
       text: [
         'SEGUNDO TRIBUNAL COLEGIADO EN MATERIA ADMINISTRATIVA DEL TERCER CIRCUITO',
-        'AMPARO DIRECTO 800/2024',
+        'AMPARO DIRECTO 999/2099',
         'QUEJOSO: EMPRESA DEMANDANTE S.A. DE C.V.',
         'SENTENCIA DEFINITIVA',
         'ANTECEDENTES',
-        'El 3 de enero de 2024 se presentó demanda de amparo directo en el expediente AMPARO DIRECTO 800/2024.',
+        'El 3 de enero de 2024 se presentó demanda de amparo directo en el expediente AMPARO DIRECTO 999/2099.',
         'El 10 de febrero de 2024 se dictó la sentencia definitiva recurrida.',
         'El 15 de marzo de 2024 se interpuso en tiempo el presente recurso de revisión.',
       ].join('\n'),
@@ -68,9 +68,22 @@ describe('FALLBACK E2E — Deterministic Fallback Delivery Across All Sections',
     expect(result.sections.length).toBe(10);
     expect(assembly).toBeDefined();
 
+    const pruebasSection = result.sections.find((section) => section.title === 'PRUEBAS');
+    const pruebasPendingText = (pruebasSection?.content || []).map((block) => block.text).join('\n\n');
+    expect(pruebasPendingText).toContain('[DATO PENDIENTE / GENERACIÓN PENDIENTE DE REVISIÓN]');
+    expect(pruebasPendingText).not.toMatch(/Se ofrecen como pruebas|LA DOCUMENTAL PÚBLICA|LA INSTRUMENTAL DE ACTUACIONES/i);
+    expect(result.validation.warnings).toContainEqual(expect.objectContaining({
+      checkId: 'REQUIRED_SECTION_GENERATION_PENDING',
+      sectionId: pruebasSection?.id,
+    }));
+    expect((result.generationMetadata as any).auditTrace?.warnings)
+      .toContain(`REQUIRED_SECTION_GENERATION_PENDING:${pruebasSection?.id}`);
+    expect(assembly?.findings.some((finding) => finding.code === 'EMPTY_REQUIRED_SUBSTANTIVE_SECTION')).toBe(true);
+    expect((attached as any).documentAssemblyQualityGate?.passed).toBe(false);
+
     // 2. Cero secciones vacías: todas deben tener al menos 1 bloque de contenido
     for (const sec of result.sections) {
-      expect((sec.content || []).length).toBeGreaterThanOrEqual(1);
+      expect((sec.content || []).length, `Sección sin bloque: ${sec.id} — ${sec.title}`).toBeGreaterThanOrEqual(1);
       const secText = (sec.content || []).map((b) => b.text).join('\n\n');
       expect(secText.trim().length).toBeGreaterThan(0);
     }
@@ -78,7 +91,7 @@ describe('FALLBACK E2E — Deterministic Fallback Delivery Across All Sections',
     // 3. ANTECEDENTES proviene determinísticamente de la fuente
     const antecedentesText = getSectionContent(result, /antecedente/i);
     expect(antecedentesText).toMatch(/3 de enero de 2024|se presentó demanda/i);
-    expect(result.caseRefs.expediente).toBe('800/2024');
+    expect(result.caseRefs.expediente).toBe('999/2099');
 
     // 4. Secciones sustantivas clave tienen desarrollo sustantivo y fondo jurídico real
     const interesText = getSectionContent(result, /inter[eé]s\s+excepcional/i);
@@ -102,6 +115,13 @@ describe('FALLBACK E2E — Deterministic Fallback Delivery Across All Sections',
 
     // 5. El assembly del documento también conserva todas las secciones con texto sustantivo
     for (const assemblySec of assembly?.sections || []) {
+      if (assemblySec.title === 'PRUEBAS') {
+        expect(assemblySec.blocks).toHaveLength(0);
+        expect(assembly?.findings.some((finding) =>
+          finding.code === 'EMPTY_REQUIRED_SUBSTANTIVE_SECTION' && finding.sectionIds.includes(assemblySec.sectionId),
+        )).toBe(true);
+        continue;
+      }
       expect(assemblySec.blocks.length).toBeGreaterThanOrEqual(1);
       const text = assemblySec.blocks.map((b) => b.text).join('\n\n');
       expect(text.trim().length).toBeGreaterThan(0);

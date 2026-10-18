@@ -1,7 +1,7 @@
 # FASE 1 — CaseAnalysis Extraction + Provenance
 
 **Fecha:** 2026-09-07  
-**Proyecto:** `C:\Users\yahir\Desktop\APP-plantillas`  
+**Proyecto:** `RUTA_LOCAL`  
 **Fase:** 1 — extracción jurídica robusta y `CaseAnalysis` con provenance  
 **Estado:** diseño aprobado en conversación; pendiente de revisión escrita antes de `writing-plans`
 

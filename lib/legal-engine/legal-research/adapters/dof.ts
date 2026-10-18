@@ -11,6 +11,7 @@
 
 import { createHash } from 'node:crypto';
 import { sha256ResearchValue, stableResearchId } from '../canonical';
+import { withOfficialRetry, type OfficialRetryOptions } from '../officialFetch';
 import type {
   AuthorityCandidate,
   OfficialSourceEvidence,
@@ -32,6 +33,8 @@ export const DOF_OFFICIAL_DOMAINS = [
 ] as const;
 
 export interface DofAdapterConfig {
+  /** Reintentos y ritmo de peticiones a la fuente oficial. */
+  retry?: OfficialRetryOptions;
   sidofBaseUrl?: string;
   dofWebBaseUrl?: string;
   alertsUrl?: string;
@@ -62,6 +65,18 @@ interface SidofNota {
   descripcion?: string;
   codEstatus?: number;
   buscarEn?: string;
+  /** Campos de la respuesta real de `/notas/{dd-mm-aaaa}` (medida 2026-10-13). */
+  nombreCodOrgaUno?: string;
+  codOrgaDos?: string;
+}
+
+/** SIDOF responde `NotasMatutinas` / `NotasVespertinas` / `NotasExtraordinarias`; `Notas` se conserva por compatibilidad. */
+function sidofNotesFromPayload(payload: unknown): SidofNota[] {
+  if (Array.isArray(payload)) return payload as SidofNota[];
+  const record = (payload || {}) as Record<string, unknown>;
+  if (Array.isArray(record.Notas)) return record.Notas as SidofNota[];
+  return ['NotasMatutinas', 'NotasVespertinas', 'NotasExtraordinarias']
+    .flatMap((key) => (Array.isArray(record[key]) ? record[key] as SidofNota[] : []));
 }
 
 function formatDate(d: Date): string {
@@ -72,7 +87,7 @@ function formatDate(d: Date): string {
 }
 
 export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchProvider {
-  const fetcher = config.fetch || fetch;
+  const fetcher = withOfficialRetry(config.fetch || fetch, config.retry);
   const clock = config.clock || (() => new Date());
   const timeoutMs = config.timeoutMs || 15000;
   const sidofBase = (config.sidofBaseUrl || DEFAULT_SIDOF_BASE).replace(/\/+$/, '');
@@ -87,7 +102,8 @@ export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchPr
       const res = await fetcher(url, {
         headers: {
           'User-Agent': USER_AGENT,
-          Accept: 'application/json',
+          // SIDOF responde 406 a `Accept: application/json` exacto en GET /notas (medido 2026-10-13).
+          Accept: 'application/json, */*',
         },
         signal: controller.signal,
       });
@@ -137,7 +153,9 @@ export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchPr
       }
 
       // Si el régimen o query especifica fecha relevante, consultar la edición del DOF de esa fecha
-      const targetDate = input.regime.relevantDate ? new Date(input.regime.relevantDate) : clock();
+      // Una fecha civil AAAA-MM-DD se fija al mediodía local: `new Date('AAAA-MM-DD')` es medianoche UTC y en México cae en el día anterior.
+      const relevant = input.regime.relevantDate;
+      const targetDate = relevant ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(relevant) ? `${relevant}T12:00:00` : relevant) : clock();
       const dateStr = formatDate(targetDate);
       const candidates: AuthorityCandidate[] = [];
 
@@ -176,17 +194,19 @@ export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchPr
           };
         }
 
-        const payload = await getJson(`${sidofBase}/notas/${dateStr}`) as Record<string, unknown>;
-        const notasRaw = Array.isArray(payload?.Notas) ? payload.Notas : Array.isArray(payload) ? payload : [];
+        const notasRaw = sidofNotesFromPayload(await getJson(`${sidofBase}/notas/${dateStr}`));
         const queryTerms = input.query.explicitTerms.map((t) => t.toLowerCase());
 
         for (const raw of notasRaw as SidofNota[]) {
-          const titulo = raw.titulo || '';
+          const titulo = (raw.titulo || '').trim();
+          // SIDOF incluye entradas sin título (separadores de sección): no son publicaciones citables.
+          if (!titulo) continue;
           const codNota = raw.codNota ? String(raw.codNota) : undefined;
           const matchesTerm = queryTerms.length === 0 || queryTerms.some((term) => titulo.toLowerCase().includes(term));
-          if (!matchesTerm && notasRaw.length > 5) continue;
+          if (!matchesTerm) continue;
 
-          const sourceUrl = `${dofWebBase}/nota_detalle.php?codigo=${codNota || ''}`;
+          // Página pública de la nota (la URL sin `fecha` no abre la edición correcta).
+          const sourceUrl = `${dofWebBase}/nota_detalle.php?codigo=${codNota || ''}&fecha=${dateStr.split('-').join('/')}`;
           const candidate: AuthorityCandidate = {
             id: stableResearchId('candidate', {
               adapterId: 'DOF',
@@ -204,7 +224,7 @@ export function createDofAdapter(config: DofAdapterConfig = {}): LegalResearchPr
             sourceUrl,
             sourceDomain: 'dof.gob.mx',
             sourceTier: 'OFFICIAL_PRIMARY',
-            issuingAuthority: raw.organo || 'Diario Oficial de la Federación',
+            issuingAuthority: raw.organo || raw.codOrgaDos || raw.nombreCodOrgaUno || 'Diario Oficial de la Federación',
             jurisdiction: 'FEDERAL',
             publicationDate: dateStr,
             retrievedAt: clock().toISOString(),

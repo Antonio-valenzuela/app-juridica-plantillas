@@ -1,7 +1,9 @@
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
+import { postureDirectiveLines } from './posturePrompt';
 import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { GenerationTask } from './generationTasks';
 import type { CaseAnalysis } from './caseAnalysis';
+import { MISSING_DATA_CONSTRAINTS, type LegalDraftingContract } from './draftingPropagation';
 import { buildCoverageMatrix, type CoverageMatrix, type DocumentCoverageItem } from './coverageMatrix';
 import { buildLegalIssueMatrix, type LegalIssueItem, type LegalIssueMatrix, type LegalIssueStatus, type LegalIssueType } from './legalIssueMatrix';
 import type { DerivedIssueReadiness, LegalResearchBundle, VerifiedAuthority } from './legal-research/types';
@@ -15,6 +17,7 @@ import type {
   SourceProvenance,
 } from './case-extraction/types';
 import { runFastMode } from '@/lib/ai/orchestrator';
+import { retrieveManualRules, type ManualIndex, type ManualMatter } from '../operational-manual/core';
 import type { AIProviderResult, AIRequest } from '@/lib/ai/providers/types';
 import {
   draftBlockFromIssueResult,
@@ -324,8 +327,11 @@ export class IssueContextScopeError extends Error {
 }
 
 export interface IssueContextPack {
+  legalDraftingContract?: LegalDraftingContract;
   legalIssue: Pick<LegalIssueItem, 'id' | 'issueType' | 'question' | 'status' | 'relationStatus' | 'required'>;
   contentRole: SectionContract['contentRole'];
+  /** Tipo del documento: decide la directiva de postura según su rol procesal. */
+  documentPosture?: { documentType?: string; documentTypeLabel?: string };
   draftContract?: IssueDraftContract;
   coverage: DocumentCoverageItem[];
   claims: Array<{ id: string; text: string; status?: string }>;
@@ -337,6 +343,7 @@ export interface IssueContextPack {
   clientPosition?: { status: string; propositionIds: string[] };
   provenance: SourceProvenance[];
   contextHash: string;
+  operationalManual?: { manualVersion: string; manualHash: string; rules: Array<{ id: string; physicalPage: number; originalText: string }> };
   verifiedResearch?: VerifiedResearchContext;
 }
 
@@ -549,6 +556,7 @@ export function buildIssueContextPack(
   matrix: LegalIssueMatrix,
   options: { verifiedResearch?: VerifiedResearchContext } = {},
 ): IssueContextPack {
+  if (matrix.documentId !== doc.id) throw new IssueContextScopeError('MATTER_DOCUMENT_MISMATCH');
   const rich = caseAnalysis.richCaseAnalysis;
   if (!rich) throw new IssueContextScopeError('RICH_ANALYSIS_REQUIRED');
   const issueIds = issueIdsOf(task);
@@ -609,7 +617,15 @@ export function buildIssueContextPack(
     ...selectedAuthorities.flatMap((item) => item.provenance),
     ...selectedCoverage.flatMap((item) => item.provenance || []),
   ];
+  // Only explicit source ownership is checked here; this does not verify a span.
+  if (doc.sourceDocuments?.length) {
+    const sources = new Set(doc.sourceDocuments.map((source) => source.id));
+    if (linkedProvenance.some((p) => !sources.has(p.sourceId))) {
+      throw new IssueContextScopeError('MATTER_SOURCE_OUT_OF_SCOPE');
+    }
+  }
   const packWithoutHash = {
+    ...(task.legalDraftingContract ? { legalDraftingContract: task.legalDraftingContract } : {}),
     legalIssue: {
       id: issue.id,
       issueType: issue.issueType,
@@ -632,7 +648,7 @@ export function buildIssueContextPack(
       : undefined,
     provenance: uniqueProvenance(linkedProvenance),
   };
-  return { ...packWithoutHash, contextHash: contextHash(packWithoutHash) };
+  return { ...packWithoutHash, documentPosture: { documentType: doc.documentType, documentTypeLabel: doc.documentTypeLabel }, contextHash: contextHash({ ...packWithoutHash, documentPosture: { documentType: doc.documentType, documentTypeLabel: doc.documentTypeLabel } }) };
 }
 
 export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): IssuePrompt {
@@ -725,12 +741,17 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
   const targetWords = Number.isFinite(task.targetWords) && Number(task.targetWords) > 0
     ? Math.ceil(Number(task.targetWords))
     : undefined;
-  const lengthDirective = targetWords ? [
+  const maxWords = !targetWords && Number.isFinite(task.maxWords) && Number(task.maxWords) > 0 ? Math.ceil(Number(task.maxWords)) : undefined;
+  const lengthDirective = maxWords ? [
+    `LENGTH MAXIMUM: no excedas aproximadamente ${maxWords} palabras. Es un máximo, no una meta: escribe solo lo que el contexto permitido sostiene y termina antes si no hay más material.`,
+    'Nunca repitas, parafrasees en bucle ni agregues relleno; no escribas encabezados, firma ni notas al abogado.',
+  ] : targetWords ? [
     `LENGTH TARGET: desarrolla aproximadamente ${targetWords} palabras sustantivas y específicas para esta issue; la salida no es completa si queda por debajo de ${Math.ceil(targetWords * 0.8)} palabras.`,
     'Cada párrafo debe aportar una función distinta prevista por el contrato de salida; no repitas, no parafrasees en bucle ni agregues relleno para alcanzar la extensión.',
     'La extensión nunca autoriza hechos, pruebas, posturas ni autoridades no incluidas en el contexto. Si el soporte permitido no alcanza, conserva una respuesta más breve, añade UNSUPPORTED_REQUIRED_ELEMENT o el requisito pendiente aplicable y no simules completitud.',
   ] : [];
   const systemPrompt = [
+    ...MISSING_DATA_CONSTRAINTS,
     'Genera únicamente un IssueDraftResult estructurado para una sola LegalIssue.',
     'Devuelve exactamente un objeto JSON y la respuesta completa debe ser JSON válido.',
     'La respuesta debe ser sin markdown, sin cercas de código y sin ```json; sin texto antes ni después del objeto, sin explicaciones ni comentarios.',
@@ -741,6 +762,7 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
     'Escapa correctamente las cadenas para producir JSON válido.',
     'Usa ÚNICAMENTE el contexto allowlisted recibido.',
     'No inventes derecho, hechos materiales, autoridades, evidencia, EvidenceOffer ni postura de cliente.',
+    'operationalManual es guía interna de metodología: nunca sirve como hecho del expediente, postura del cliente, autoridad jurídica verificada ni ID de cobertura.',
     'Conserva SOURCE_CITED como no verificado y usa REQUIRES_LEGAL_RESEARCH cuando corresponda.',
     'Si falta información, declara el requisito pendiente en lugar de completarlo.',
     ...lengthDirective,
@@ -750,12 +772,7 @@ export function buildIssuePrompt(pack: IssueContextPack, task: GenerationTask): 
       'Conserva supportLevel, temporalidad, jurisdicción y limitations; no afirmes obligatoriedad no respaldada por bindingCharacter.',
       'No inventes una autoridad ni conviertas una proposición jurídica en un hecho del expediente.',
     ] : []),
-    ...((!pack.clientPosition || pack.clientPosition.status === 'UNKNOWN') ? [
-      'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
-      'No existe postura confirmada de la parte demandada para este punto.',
-      'ESTÁ PERMITIDO ÚNICAMENTE: cuestionar la acreditación probatoria de lo afirmado por la contraria, invocar la carga de la prueba, señalar falta de precisión o suficiencia, analizar presupuestos legales, alcance probatorio y formular argumentos subsidiarios estrictamente jurídicos.',
-      'ESTÁ TERMINANTEMENTE PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad, inventar una versión fáctica del demandado (como contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados), inventar documentos inexistentes, fechas no mencionadas o causas de terminación laboral no comprobadas en autos, o inventar acontecimientos materiales.',
-    ] : []),
+    ...((!pack.clientPosition || pack.clientPosition.status === 'UNKNOWN') ? (pack.documentPosture ? postureDirectiveLines(pack.documentPosture) : ['DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:', 'No existe postura confirmada de la parte demandada para este punto.']) : []),
     strategy,
   ].join('\n');
   const userMessage = [
@@ -834,6 +851,7 @@ export interface IssueExecutorOptions extends IssueResearchExecutionInputs {
   invokeProvider?: IssueProviderInvoker;
   maxConcurrency?: number;
   trace?: import('./generationTrace').GenerationTraceContext;
+  operationalManualIndex?: ManualIndex;
 }
 
 function researchTraceFor(
@@ -1330,9 +1348,40 @@ export async function executeIssueScopedGeneration(
   if (!eligibility.eligible) return traceOutcome(localIssueOutcome(task, eligibility.reason, 'BLOCKED'));
 
   const coverageMatrix = doc.coverageMatrix || requireCoverageMatrix(caseAnalysis, doc);
-  const pack = buildIssueContextPack(task, { ...doc, coverageMatrix }, caseAnalysis, matrix!, {
+  const basePack = buildIssueContextPack(task, { ...doc, coverageMatrix }, caseAnalysis, matrix!, {
     verifiedResearch: eligibility.verifiedResearch,
   });
+  const manual = options.operationalManualIndex;
+  const matterName = String(doc.matter || '').toLocaleUpperCase('es-MX').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const manualMatter = (['CIVIL', 'FAMILIAR', 'MERCANTIL', 'PENAL', 'ADMINISTRATIVO', 'AMPARO', 'FEDERAL'] as ManualMatter[]).find((matter) => matterName.includes(matter)) || 'GENERAL';
+  const selection = manual ? retrieveManualRules(manual, {
+    matter: manualMatter, caseType: doc.documentType, stage: task.sectionTitle,
+    task: `${task.title || ''} ${task.objective || ''} ${basePack.legalIssue.question}`, budgetChars: 4500,
+    measureContext: (rules) => JSON.stringify({ operationalManual: {
+      manualVersion: manual.manifest.version, manualHash: manual.manifest.sourceHash,
+      rules: rules.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, originalText: item.originalText })),
+    } }).length,
+  }) : undefined;
+  const operationalManual = manual && selection?.selected.length ? {
+    manualVersion: manual.manifest.version, manualHash: manual.manifest.sourceHash,
+    rules: selection.selected.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, originalText: item.originalText })),
+  } : undefined;
+  const pack: IssueContextPack = operationalManual
+    ? { ...basePack, operationalManual, contextHash: contextHash({ ...basePack, contextHash: undefined, operationalManual }) }
+    : basePack;
+  if (manual && selection) {
+    const manualTrace = doc.generationMetadata.operationalManual ||= {
+      manualVersion: manual.manifest.version, manualHash: manual.manifest.sourceHash,
+      selectedRuleIds: [], selectedPages: [], selectedSections: [], retrievals: [], auditRuleIds: [], auditFindings: [],
+    };
+    const selectedRuleIds = selection.selected.map((item) => item.stableRuleId);
+    const selectedPages = [...new Set(selection.selected.map((item) => item.physicalPage))];
+    manualTrace.selectedRuleIds = [...new Set([...manualTrace.selectedRuleIds, ...selectedRuleIds])];
+    manualTrace.selectedPages = [...new Set([...manualTrace.selectedPages, ...selectedPages])];
+    manualTrace.selectedSections = [...new Set([...manualTrace.selectedSections, ...selection.selected.map((item) => item.section)])];
+    manualTrace.retrievals.push({ taskId: task.id, retrievalStage: 'ISSUE_SCOPED', selectedRuleIds, selectedPages, selectedRules: selection.selected.map((item) => ({ id: item.stableRuleId, physicalPage: item.physicalPage, section: item.section })), discardedRulesByContextLimit: selection.discardedRulesByContextLimit });
+    if (options.trace) options.trace.trace.operationalManual = manualTrace;
+  }
   const draftContract = selectIssueDraftContract(pack, task);
   if (!draftContract) return traceOutcome(localIssueOutcome(task, 'ISSUE_DRAFT_CONTRACT_UNRESOLVED', 'BLOCKED'));
   const prompt = buildIssuePrompt(pack, task);
@@ -1403,6 +1452,7 @@ export async function executeIssueScopedGeneration(
     };
     const request = {
       systemPrompt: activePrompt.systemPrompt,
+      purpose: 'LEGAL_GENERATION' as const,
       userMessage: activePrompt.userMessage,
       legalContext: requestPack,
       contextHash: pack.contextHash,

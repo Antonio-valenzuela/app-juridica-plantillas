@@ -9,6 +9,7 @@
 
 import { createHash } from 'node:crypto';
 import { sha256ResearchValue, stableResearchId } from '../canonical';
+import { withOfficialRetry } from '../officialFetch';
 import { createOfficialJsonAdapter, type OfficialAdapterConfig } from './officialJson';
 import type {
   AuthorityCandidate,
@@ -70,7 +71,7 @@ interface ScowResponse {
 }
 
 export function createScjnAdapter(config: ScjnAdapterConfig = {}): LegalResearchProvider {
-  const fetcher = config.fetch || fetch;
+  const fetcher = withOfficialRetry(config.fetch || fetch, config.retry);
   const clock = config.clock || (() => new Date());
   const timeoutMs = Number.isFinite(config.timeoutMs) && (config.timeoutMs || 0) >= 1000 ? Number(config.timeoutMs) : 15000;
   const allowedDomains = config.allowedDomains || SCJN_SJF_OFFICIAL_DOMAINS;

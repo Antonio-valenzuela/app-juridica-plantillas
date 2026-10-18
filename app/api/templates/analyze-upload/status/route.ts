@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess, executionOwnerKey, type ExecutionOwner } from '@/lib/security/workspaceExecutionAccess';
 import { getUploadAnalysisJob } from '@/lib/upload-analysis/jobs';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function ownerKey(context: { organizationId: string; userId: string }): string {
-  return `${context.organizationId}:${context.userId}`;
+function ownerKey(context: ExecutionOwner): string {
+  return executionOwnerKey(context);
 }
 
 export async function GET(request: NextRequest) {
-  const access = await requireLawyerAccess(request);
+  const access = await requireWorkspaceExecutionAccess(request);
   if (!access.ok) return access.response;
   const jobId = new URL(request.url).searchParams.get('jobId')?.trim() || '';
   if (!jobId) return NextResponse.json({ ok: false, error: 'MISSING_JOBID' }, { status: 400 });

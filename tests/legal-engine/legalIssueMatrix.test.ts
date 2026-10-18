@@ -194,8 +194,9 @@ it('blocks an issue when the required client position is missing', () => {
   const { matrix } = buildFixtureMatrix();
   const factIssue = matrix.issues.find((issue) => issue.issueType === 'FACT_DISPUTE' && issue.factIds.includes('fixture-f-fact-1'))!;
   expect(factIssue.clientPositionStatus).toBe('UNKNOWN');
-  expect(factIssue.status).toBe('NEEDS_CLIENT_POSITION');
-  expect(factIssue.blocking).toBe(true);
+  expect(factIssue.status).toBe('GENERATABLE_REQUIRES_REVIEW');
+  expect(factIssue.statusReason).toBe('SOURCE_BACKED_DRAFT_CLIENT_POSITION_PENDING');
+  expect(factIssue.blocking).toBe(false);
 });
 
 it('does not block confirmed client position for the explicitly confirmed proposition', () => {
@@ -342,6 +343,8 @@ it('propagates Coverage and canonical issue IDs through the document plan', () =
     etiquetas: [document.documentTypeLabel],
     materia: document.matter,
     jurisdiccion: document.jurisdiction,
+    // DocumentTemplate exige «estructura»: el plan deriva de ella las secciones donde se propagan los problemas jurídicos.
+    estructura: ['HECHOS', 'EXCEPCIONES Y DEFENSAS'],
     procedimiento: 'contestación',
     rolAutor: 'demandado',
     objetivoProcesal: 'contestar',

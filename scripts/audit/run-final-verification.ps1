@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [string]$VerificationRoot = 'audit/final-legal-readiness-2026/final-verification'
+  [string]$VerificationRoot = 'audit/banco-prueba/final-verification'
 )
 
 $ErrorActionPreference = 'SilentlyContinue'

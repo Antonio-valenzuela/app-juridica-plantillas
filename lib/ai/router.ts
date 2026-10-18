@@ -13,7 +13,7 @@ import { buildLegalAiPrompt, sanitizeLegalAiAnalysis, extractJsonObject } from "
 import { runLegalAI } from "./orchestrator";
 import { logger, generateRequestId } from "../logger";
 
-// NVIDIA ONLY wrapper — delega a runLegalAI, no duplicar fetch/provider logic
+// Wrapper — delega a runLegalAI (cadena de proveedores con respaldo), no duplicar fetch/provider logic
 export async function routeLlmCompletion(
   prompt: string,
   operation: string,

@@ -235,6 +235,7 @@ describe('LOOP 8B FASE 2A — guard común y lifecycle de exportación', () => {
       method: 'POST',
       body: JSON.stringify({
         document,
+        exportMode: 'DRAFT',
         renderedSections: [{ title: 'LEGACY QUE NO DEBE USARSE', content: 'Contenido legacy no autorizado.' }],
       }),
       headers: { 'content-type': 'application/json' },

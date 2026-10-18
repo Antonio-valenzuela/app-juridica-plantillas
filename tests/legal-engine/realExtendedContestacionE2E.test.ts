@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
@@ -19,7 +20,7 @@ const REAL_PUBLIC_PDF = path.resolve(
 
 const hasLiveProvider = Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GROQ_API_KEY?.trim());
 
-describe('E2E real — contestación jurídica extensa', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('E2E real — contestación jurídica extensa', () => {
   it.skipIf(!hasLiveProvider)('genera una contestación source-grounded, exporta PDF/DOCX y mide 36–44 páginas reales', async () => {
     const buffer = fs.readFileSync(REAL_PUBLIC_PDF);
     const extraction = await extractPdfTextServer(buffer);

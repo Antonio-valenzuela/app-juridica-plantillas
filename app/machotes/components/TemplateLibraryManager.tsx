@@ -1,9 +1,12 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { USE_MY_TEMPLATE_LABEL } from '@/lib/templates/templateDesignCopy';
 import { LEGAL_MATTERS_CATALOG } from '@/lib/catalog/legalCatalog';
 import { TemplateVersion } from '@/lib/legal-engine/types';
 import type { PersonalTemplateStructure, PersonalTemplateVariable } from '@/lib/templates/personalTemplateBuilder';
+import { LexIcon } from '@/components/layout/LexIcon';
+import { DetailDrawer } from './DetailDrawer';
 
 export interface TemplateItem {
   id: string;
@@ -154,26 +157,26 @@ export function TemplateLibraryManager({
     <div className="templates-page space-y-5 w-full mx-auto">
       <header className="templates-hero">
         <div className="templates-hero-copy">
-          <div className="templates-hero-icon" aria-hidden="true">▤</div>
+          <div className="templates-hero-icon" aria-hidden="true"><LexIcon name="library" size={20} /></div>
           <div>
             <h1>Mis Plantillas y Machotes</h1>
             <p>Biblioteca de documentos oficiales y plantillas reutilizables para redacción judicial.</p>
           </div>
         </div>
-        <div className="templates-hero-note">La tecnología al servicio de la justicia <span aria-hidden="true" /></div>
+        <div className="templates-hero-note">Biblioteca personal <span aria-hidden="true" /></div>
       </header>
 
       <section className="templates-metrics" aria-label="Resumen de la biblioteca">
         <div className="templates-metric-card">
-          <div className="templates-metric-icon templates-metric-icon-blue" aria-hidden="true">▤</div>
+          <div className="templates-metric-icon templates-metric-icon-blue" aria-hidden="true"><LexIcon name="document" size={18} /></div>
           <div><strong>{templates.length}</strong><span>Plantillas en mi biblioteca</span></div>
         </div>
         <div className="templates-metric-card">
-          <div className="templates-metric-icon templates-metric-icon-green" aria-hidden="true">▥</div>
+          <div className="templates-metric-icon templates-metric-icon-green" aria-hidden="true"><LexIcon name="library" size={18} /></div>
           <div><strong>{matterTotal}</strong><span>Materias</span></div>
         </div>
         <div className="templates-metric-card">
-          <div className="templates-metric-icon templates-metric-icon-slate" aria-hidden="true">◷</div>
+          <div className="templates-metric-icon templates-metric-icon-slate" aria-hidden="true"><LexIcon name="calendar" size={18} /></div>
           <div><strong>{recentTemplate ? 'Recientes' : 'Sin registros'}</strong><span>{recentTemplate ? formatDateSafe(recentTemplate.updatedAt) : 'Aún no hay plantillas'}</span></div>
         </div>
         {profileSlot ? <div className="templates-profile-slot">{profileSlot}</div> : null}
@@ -182,7 +185,7 @@ export function TemplateLibraryManager({
       <section className="templates-library-card">
         <div className="templates-controls">
           <label className="templates-search-field">
-            <span aria-hidden="true">⌕</span>
+            <LexIcon aria-hidden="true" name="search" size={17} />
             <input
               type="text"
               value={searchQuery}
@@ -203,7 +206,7 @@ export function TemplateLibraryManager({
             </select>
           </label>
           <button onClick={onCreateNewTemplate} className="templates-create-button">
-            <span aria-hidden="true">＋</span> Crear Machote / Plantilla
+            <LexIcon aria-hidden="true" name="plus" size={16} /> Crear Machote / Plantilla
           </button>
         </div>
 
@@ -216,7 +219,7 @@ export function TemplateLibraryManager({
 
         {filteredTemplates.length === 0 && (
           <div className="templates-empty-state">
-            <div className="templates-empty-icon" aria-hidden="true">▤</div>
+            <div className="templates-empty-icon" aria-hidden="true"><LexIcon name="document" size={28} /></div>
             <h3>No se encontraron plantillas coincidentes</h3>
             <p>Prueba ajustando el término de búsqueda o seleccionando otra materia en el filtro.</p>
             <button
@@ -262,17 +265,17 @@ export function TemplateLibraryManager({
                     <h3 onClick={() => setPreviewTemplate(tpl)} title={tpl.name}>{tpl.name}</h3>
                     <p>{tpl.description?.trim() || 'Plantilla personal revisada para documentos jurídicos.'}</p>
                     <div className="templates-row-meta">
-                      <span aria-label="Páginas">▧ {pageCount} {pageCount === 1 ? 'pág.' : 'págs.'}</span>
-                      <span aria-label="Actualización">◷ {formatDateSafe(tpl.updatedAt)}</span>
+                      <span aria-label="Páginas"><LexIcon aria-hidden="true" name="document" size={14} /> {pageCount} {pageCount === 1 ? 'pág.' : 'págs.'}</span>
+                      <span aria-label="Actualización"><LexIcon aria-hidden="true" name="calendar" size={14} /> {formatDateSafe(tpl.updatedAt)}</span>
                     </div>
                   </div>
 
                   <div className="templates-row-actions">
                     <p className="templates-row-summary">{tpl.description?.trim() || `Documento ${matterStyle.tag.toLowerCase()} reutilizable.`}</p>
                     <div className="templates-action-buttons">
-                      <button type="button" onClick={() => onUseTemplate(tpl)} className="templates-use-button">⚡ Usar</button>
-                      <button type="button" onClick={() => onEditTemplate(tpl)} className="templates-icon-button" title="Editar plantilla" aria-label={`Editar ${tpl.name}`}>✎</button>
-                      <button type="button" onClick={() => handleDelete(tpl.id, tpl.name)} disabled={deletingId === tpl.id} className="templates-icon-button templates-delete-button" title="Eliminar plantilla" aria-label={`Eliminar ${tpl.name}`}>🗑</button>
+                      <button type="button" onClick={() => onUseTemplate(tpl)} className="templates-use-button"><LexIcon name="document" size={15} /><span>{USE_MY_TEMPLATE_LABEL}</span></button>
+                      <button type="button" onClick={() => onEditTemplate(tpl)} className="templates-icon-button" title="Editar plantilla" aria-label={`Editar ${tpl.name}`}>Editar</button>
+                      <button type="button" onClick={() => handleDelete(tpl.id, tpl.name)} disabled={deletingId === tpl.id} className="templates-icon-button templates-delete-button" title="Eliminar plantilla" aria-label={`Eliminar ${tpl.name}`}>Eliminar</button>
                     </div>
                   </div>
                 </article>
@@ -318,24 +321,9 @@ export function TemplateLibraryManager({
         </div>
       )}
 
-      {previewTemplate && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-              <div>
-                <h4 className="text-xs font-black text-[#0B2545] uppercase tracking-wider">
-                  Vista Previa del Machote
-                </h4>
-                <p className="text-xs text-slate-600 font-bold mt-0.5">{previewTemplate.name}</p>
-              </div>
-              <button
-                onClick={() => setPreviewTemplate(null)}
-                className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
+      <DetailDrawer open={Boolean(previewTemplate)} eyebrow="Vista Previa del Machote" title={previewTemplate?.name} onClose={() => setPreviewTemplate(null)}>
+        {previewTemplate && (
+          <div className="flex flex-col">
             <div className="p-6 overflow-y-auto flex-1 bg-[#f5f2eb] flex justify-center">
               <div className="bg-white p-8 rounded-lg shadow-md border border-slate-300 w-full max-w-lg min-h-[400px] text-xs font-serif text-slate-800 leading-relaxed">
                 <div className="text-center font-bold mb-4 border-b pb-2">
@@ -387,8 +375,8 @@ export function TemplateLibraryManager({
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </DetailDrawer>
     </div>
   );
 }

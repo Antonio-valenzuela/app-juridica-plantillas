@@ -177,7 +177,7 @@ export function classifySectionClaims(text: string, packet: SectionContextPacket
 export interface SectionGenerationOptions {
   invokeProvider?: (request: AIRequest) => Promise<AIProviderResult>;
   trace?: GenerationTraceContext;
-  providerFlags?: Pick<AIRequest, 'externalProviderOptIn' | 'privateCaseContext'>;
+  providerFlags?: Pick<AIRequest, 'externalProviderOptIn' | 'privateCaseContext' | 'authorizedExternalProviders'>;
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -501,6 +501,7 @@ export async function generateSectionDraft(packet: SectionContextPacket, options
     legalContext: packet as unknown as Record<string, unknown>,
     requestId: `section:${packet.section.id}:${packet.contextHash}`,
     externalProviderOptIn: options.providerFlags?.externalProviderOptIn === true,
+    ...(options.providerFlags?.authorizedExternalProviders ? { authorizedExternalProviders: options.providerFlags.authorizedExternalProviders } : {}),
     privateCaseContext: options.providerFlags?.privateCaseContext ?? true,
   };
   const invokeProvider = options.invokeProvider || runFastMode;

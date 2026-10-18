@@ -33,7 +33,9 @@ describe('workspace agenda contract', () => {
 
   it('aísla el calendario mensual del estilo global .grid para mantener siete columnas compactas', () => {
     expect(modulesView).toContain('!grid-cols-7');
-    expect(modulesView).toContain('!mb-0');
+    expect(modulesView).toContain('workspace-terms-calendar-layout');
+    expect(modulesView).toContain('workspace-terms-weekdays');
+    expect(modulesView).toContain('max-w-[360px]');
     expect(modulesView).toContain('min-h-[34px]');
     expect(modulesView).toContain('self-start');
   });

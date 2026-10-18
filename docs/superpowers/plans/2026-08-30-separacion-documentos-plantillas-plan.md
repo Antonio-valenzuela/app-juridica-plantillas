@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Garantizar que las fuentes, borradores, documentos finales y referencias nunca aparezcan como plantillas salvo mediante una acción explícita de creación, eliminar de forma dirigida el registro de prueba asociado al PDF de `800/2024` cuando Neon esté disponible y demostrarlo con pruebas y navegador.
+**Goal:** Garantizar que las fuentes, borradores, documentos finales y referencias nunca aparezcan como plantillas salvo mediante una acción explícita de creación, eliminar de forma dirigida el registro de prueba asociado al PDF de `999/2099` cuando Neon esté disponible y demostrarlo con pruebas y navegador.
 
 **Architecture:** Se reutilizarán `LegalTemplate`, `LegalDraft`, `UploadedSourceDocument` y los metadatos JSON existentes. Un contrato pequeño de ciclo documental definirá `SOURCE_DOCUMENT`, `DRAFT`, `FINAL_DOCUMENT`, `TEMPLATE` y `REFERENCE_DOCUMENT`, además de clasificar plantillas como `system`, `user`, `legacy` o `test_demo`. La API de plantillas exigirá una intención explícita y será la última barrera de privacidad; la carga normal de fuentes seguirá pasando por `/api/templates/analyze-upload` sin escribir en `LegalTemplate`.
 
@@ -159,7 +159,7 @@ const visible = filterVisibleTemplates(
 expect(visible.map((item) => item.id)).toEqual(['user', 'system']);
 ```
 
-La prueba debe mantener un `800/2024` en una fila legacy para demostrar que la decisión se toma por metadata/origen, no por número de expediente.
+La prueba debe mantener un `999/2099` en una fila legacy para demostrar que la decisión se toma por metadata/origen, no por número de expediente.
 
 - [ ] **Step 2: Ejecutar pruebas y confirmar RED**
 
@@ -194,7 +194,7 @@ Run:
 npm test -- --run tests/templates/templateOrigin.test.ts tests/templates/customTemplatesApi.test.ts
 ```
 
-Expected: clasificación y API pasan sin depender de una coincidencia de `800/2024`.
+Expected: clasificación y API pasan sin depender de una coincidencia de `999/2099`.
 
 ---
 
@@ -416,13 +416,13 @@ Expected: la cadena fuente → borrador → final permanece fuera de plantillas;
 
 - [ ] **Step 1: Añadir una prueba de selección por identidad, no por expediente**
 
-La prueba usará una lista simulada de registros y verificará que la función de selección requiere un ID confirmado o el nombre exacto del archivo, nunca `content.includes('800/2024')`:
+La prueba usará una lista simulada de registros y verificará que la función de selección requiere un ID confirmado o el nombre exacto del archivo, nunca `content.includes('999/2099')`:
 
 ```ts
 const candidates = [
   { id: 'real-test-row', sourceFileName: 'Recurso_Revision_Amparo_Directo_800-2024_Version_Ampliada__1_.pdf', title: 'Recurso de Revision Amparo Directo 800-2024 Version Ampliada' },
   { id: 'real-template', sourceFileName: 'demanda-civil.docx', title: 'Demanda civil' },
-  { id: 'unrelated-800', sourceFileName: 'oficio.docx', title: 'Oficio del expediente 800/2024' },
+  { id: 'unrelated-800', sourceFileName: 'oficio.docx', title: 'Oficio del expediente 999/2099' },
 ];
 
 expect(selectIdentifiedAccidentalTemplate(candidates, {
@@ -456,7 +456,7 @@ await prisma.legalTemplate.findMany({
 });
 ```
 
-Si el flujo antiguo guardó otro nombre (`machote-real.pdf` o `800/2024`), usar el ID/título mostrado por la consulta previa y revisar el `structureJson.storage.originalFileName`, fecha, organización y contenido antes de borrar. No usar una consulta de borrado por texto del contenido ni tocar `data/uploads/templates`.
+Si el flujo antiguo guardó otro nombre (`machote-real.pdf` o `999/2099`), usar el ID/título mostrado por la consulta previa y revisar el `structureJson.storage.originalFileName`, fecha, organización y contenido antes de borrar. No usar una consulta de borrado por texto del contenido ni tocar `data/uploads/templates`.
 
 - [ ] **Step 4: Borrar solo el ID confirmado y verificar**
 
@@ -468,7 +468,7 @@ const remaining = await prisma.legalTemplate.findUnique({ where: { id: CONFIRMED
 if (remaining) throw new Error('El registro de prueba no fue eliminado');
 ```
 
-Registrar el ID eliminado, mantener intacto el PDF original y no eliminar las plantillas reales ni filas que solo compartan el número `800/2024`.
+Registrar el ID eliminado, mantener intacto el PDF original y no eliminar las plantillas reales ni filas que solo compartan el número `999/2099`.
 
 - [ ] **Step 5: Limpiar localStorage solo por el registro identificado**
 

@@ -8,6 +8,8 @@
 
 import type { UniversalLegalDocument } from './types';
 import { enqueueGenerationJobPersistence } from './generationJobPersistence';
+import { GenerationCancelledError } from '../ai/abortContext';
+import { ownsExecution, type ExecutionOwner } from '@/lib/security/workspaceExecutionAccess';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -19,8 +21,9 @@ export type GenerationTerminalStatus = 'COMPLETED' | 'COMPLETED_WITH_WARNINGS' |
 
 export interface GenerationJob {
   jobId: string;
-  organizationId: string;
-  userId: string;
+  organizationId?: string;
+  userId?: string;
+  desktopOwnerId?: string;
   status: GenerationJobStatus;
   /** Compatibilidad legacy: status conserva completed/failed/cancelled. */
   terminalStatus?: GenerationTerminalStatus;
@@ -81,15 +84,16 @@ import { randomUUID as nodeRandomUUID } from 'crypto';
 function genId(): string {
   try { return (globalThis as any).crypto?.randomUUID?.() || nodeRandomUUID(); } catch { return `${Date.now()}-${Math.random().toString(36).slice(2,8)}`; }
 }
-export function createGenerationJob(input: { organizationId?: string; userId?: string; fingerprint?: string | null; idempotencyKey?: string | null; total?: number; stage?: string }): GenerationJob {
+export function createGenerationJob(input: ExecutionOwner & { fingerprint?: string | null; idempotencyKey?: string | null; total?: number; stage?: string }): GenerationJob {
   cleanup();
   const jobId = genId();
   const now = Date.now();
   const total = input.total ?? 0;
   const job: GenerationJob = {
     jobId,
-    organizationId: input.organizationId || 'unknown-organization',
-    userId: input.userId || 'unknown-user',
+    organizationId: input.desktopOwnerId ? undefined : input.organizationId || 'unknown-organization',
+    userId: input.desktopOwnerId ? undefined : input.userId || 'unknown-user',
+    desktopOwnerId: input.desktopOwnerId,
     status: 'processing',
     terminalStatus: undefined,
     total,
@@ -139,12 +143,12 @@ export function restoreGenerationJob(job: GenerationJob): GenerationJob {
 export function findActiveJobByFingerprint(
   fingerprint: string | null,
   idempotencyKey: string | null,
-  owner?: { organizationId: string; userId: string },
+  owner?: ExecutionOwner,
 ): GenerationJob | undefined {
   cleanup();
   for (const j of JOBS.values()) {
     if (j.status !== 'processing') continue;
-    if (owner && (j.organizationId !== owner.organizationId || j.userId !== owner.userId)) continue;
+    if (owner && !ownsExecution(j, owner)) continue;
     if (idempotencyKey && j.idempotencyKey === idempotencyKey) return j;
     if (fingerprint && j.fingerprint === fingerprint) return j;
   }
@@ -221,7 +225,10 @@ export function completeJob(
     || (doc.status === 'draft' || !doc.generationMetadata?.pipelineState?.isComplete ? 'REQUIRES_REVIEW' : 'READY');
 
   job.status = 'completed';
-  job.terminalStatus = options?.terminalStatus || (derivedReadiness === 'READY' ? 'COMPLETED' : 'NEEDS_REVIEW');
+  // Meta no alcanzada, timeout o fallo de medición: nunca «completado».
+  const pageResult = (completionDoc.generationMetadata as { pageTargetResult?: { outcome?: string; failureCause?: string } } | undefined)?.pageTargetResult;
+  const targetNotMet = pageResult?.outcome === 'BELOW_TARGET' || Boolean(pageResult?.failureCause);
+  job.terminalStatus = options?.terminalStatus || (derivedReadiness === 'READY' && !targetNotMet ? 'COMPLETED' : 'NEEDS_REVIEW');
   job.document = doc;
   job.checkpointDocument = doc;
   job.documentId = doc.id;
@@ -231,7 +238,7 @@ export function completeJob(
   job.percentage = 100;
   job.warnings = Array.from(new Set([...(job.warnings || []), ...(options?.warnings || [])]));
 
-  if (derivedReadiness === 'READY') {
+  if (derivedReadiness === 'READY' && !targetNotMet) {
     job.stage = 'Documento generado y listo para revisión final';
   } else if (derivedReadiness === 'BLOCKED' || derivedReadiness === 'INVALID') {
     job.stage = 'Documento generado con bloqueos estructurales (requiere subsanación)';
@@ -270,10 +277,23 @@ export function failJob(
   return job;
 }
 
+/** Controlador de cancelación de cada trabajo en curso: cancelJob lo aborta para detener el pipeline. */
+const ABORT_CONTROLLERS = new Map<string, AbortController>();
+
+export function registerJobAbort(jobId: string, controller: AbortController): void {
+  ABORT_CONTROLLERS.set(jobId, controller);
+}
+
+export function unregisterJobAbort(jobId: string): void {
+  ABORT_CONTROLLERS.delete(jobId);
+}
+
 export function cancelJob(jobId: string): GenerationJob | undefined {
   const job = JOBS.get(jobId);
   if (!job) return undefined;
   if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') return job;
+  // Aborta el pipeline: deja de llamar a proveedores y el checkpoint ya no cambia.
+  ABORT_CONTROLLERS.get(jobId)?.abort(new GenerationCancelledError());
   job.status = 'cancelled';
   job.terminalStatus = 'CANCELLED';
   job.cancelRequested = true;

@@ -1,0 +1,23 @@
+# Finales de línea LF en todo el repositorio, sin importar core.autocrlf de cada equipo.
+* text=auto eol=lf
+
+# Binarios: nunca convertir ni comparar como texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.docx binary
+*.doc binary
+*.xlsx binary
+*.pptx binary
+*.zip binary
+*.traineddata binary
+*.db binary
+*.sqlite binary

@@ -8,7 +8,7 @@ describe('API error contract', () => {
       status: 500,
       errorCode: 'INTERNAL_ERROR',
       message: 'No fue posible completar la operación.',
-      internalError: new Error('P2024 C:\\Users\\yahir\\secret.db'),
+      internalError: new Error('P2024 RUTA_LOCAL'),
     });
 
     expect(response.status).toBe(500);

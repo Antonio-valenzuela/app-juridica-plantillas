@@ -44,6 +44,19 @@ function amountFor(text: string, candidate: ExtractionCandidate) {
   return amount.normalizedValue !== undefined ? amount : undefined;
 }
 
+/** Fórmulas de transición o introducción («en consecuencia, se solicita lo siguiente»): no son pretensiones. */
+const TRANSITION_FORMULA_RE = /^(?:en\s+(?:consecuencia|virtud|m[ée]rito)|por\s+lo\s+(?:anterior|expuesto|tanto|cual)|de\s+lo\s+anterior|con\s+base\s+en\s+lo\s+anterior|lo\s+anterior|se\s+solicita\s+lo\s+siguiente|en\s+ese\s+sentido)(?!\p{L})/iu;
+/** Verbo o sustantivo de pretensión (condena, declaración, pago, nulidad…). */
+const RELIEF_TERM_RE = /(?<!\p{L})(?:conden\p{L}*|pag\p{L}*|declar\p{L}*|reclam\p{L}*|orden\p{L}*|absolv\p{L}*|reconoc\p{L}*|nulidad|rescisi\p{L}*|cumplimiento|indemnizaci\p{L}*|prestaci\p{L}*|pago|devoluci\p{L}*|entrega)(?!\p{L})/iu;
+/** Un texto que no es pretensión: termina en «:», es una fórmula de transición, o carece de inciso y de término de pretensión. */
+function isNonClaimFormula(body: string): boolean {
+  const text = body.trim();
+  if (/:\s*$/.test(text)) return true;
+  if (TRANSITION_FORMULA_RE.test(text)) return true;
+  const hasIncise = /(?:^|\s)[a-z]\)\s|(?:^|\s)[ivxlc]+\.\s/i.test(text);
+  return !hasIncise && !RELIEF_TERM_RE.test(text);
+}
+
 export function extractClaims(
   candidates: ExtractionCandidate[],
   context: ClaimExtractionContext,
@@ -56,6 +69,7 @@ export function extractClaims(
     if (candidate.kind !== 'CLAIM' && !CLAIM_SECTION_RE.test(candidate.rawText) && section !== 'PRESTACIONES') continue;
     const body = claimBody(candidate.rawText);
     if (!body) continue;
+    if (isNonClaimFormula(body)) continue;
     if (/^(?:CONTESTACI[OÓ]N\s+(?:DE\s+|A\s+LAS\s+)?PRESTACIONES|PRESTACIONES|PRETENSIONES|PETICIONES)$/i.test(body.replace(/[:.\-]+$/, '').trim())) {
       continue;
     }

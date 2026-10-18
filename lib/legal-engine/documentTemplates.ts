@@ -47,6 +47,8 @@ export type FamiliaDocumental =
   | 'PROPIEDAD_INTELECTUAL';
 
 export type RolProcesal =
+  | 'apelante'
+  | 'apelado'
   | 'demandado'
   | 'actor'
   | 'quejoso'
@@ -446,6 +448,19 @@ const RECURSO_STRUCTURE = [
   'ANTECEDENTES',
   'AGRAVIOS',
   'PETITORIOS',
+  'FIRMA',
+];
+
+/** Estructura FIJA de la contestación de agravios (parte apelada): solo estas secciones y en este orden. */
+export const CONTESTACION_AGRAVIOS_STRUCTURE = [
+  'RUBRO Y DESTINATARIO',
+  'PROEMIO',
+  'OPORTUNIDAD',
+  'SÍNTESIS DE LA SENTENCIA APELADA',
+  'CONTESTACIÓN A LOS AGRAVIOS',
+  'CONSTANCIAS INVOCADAS',
+  'PUNTOS PETITORIOS',
+  'LUGAR Y FECHA',
   'FIRMA',
 ];
 
@@ -1968,12 +1983,12 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   recurso_administrativo: def({
     tipo: 'recurso_administrativo',
+    rolAutor: 'recurrente',
     etiquetas: ['recurso administrativo', 'recurso de inconformidad administrativo'],
     materia: 'ADMINISTRATIVO',
     jurisdiccion: 'administrativa',
     via: 'recurso administrativo (inconformidad/revisión)',
     procedimiento: 'impugnación ante la autoridad emisora o superior',
-    rolAutor: 'parte_interesada',
     rolContraparte: 'autoridad administrativa emisora',
     destinatario: 'autoridad administrativa competente',
     objetivoProcesal: 'Revocar o modificar la resolución administrativa impugnada',
@@ -2358,6 +2373,7 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   apelacion_civil: specializedProceduralTemplate({
     tipo: 'apelacion_civil',
+    rolAutor: 'apelante',
     etiquetas: ['recurso de apelación civil', 'apelación civil'],
     materia: 'CIVIL',
     procedimiento: 'APELACION_CIVIL',
@@ -2368,6 +2384,38 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
     reglas: ['Identifica la resolución impugnada, fecha de notificación y oportunidad procesal en que se interpone.'],
     reglasArgumentacion: ['Cada agravio debe expresar la parte de la resolución combatida, el precepto violado y el concepto de violación.'],
     reglasPrueba: ['Remite a las constancias de autos que demuestren la infracción legal cometida por el juzgador de origen.'],
+  }),
+
+  contestacion_agravios: def({
+    tipo: 'contestacion_agravios',
+    etiquetas: ['contestación de agravios', 'contestación a los agravios', 'contestación a la apelación', 'respuesta a la apelación'],
+    materia: 'CIVIL',
+    jurisdiccion: 'local civil',
+    via: 'segunda instancia civil',
+    procedimiento: 'CONTESTACION_AGRAVIOS',
+    subtipo: 'contestación de agravios (parte apelada)',
+    rolAutor: 'apelado',
+    rolContraparte: 'apelante',
+    destinatario: 'órgano jurisdiccional competente',
+    objetivoProcesal: 'Contestar uno por uno los agravios del apelante y solicitar que se confirme la sentencia apelada.',
+    estructura: CONTESTACION_AGRAVIOS_STRUCTURE,
+    voz: ['Habla la PARTE APELADA (a quien favoreció la sentencia) respondiendo los agravios del apelante.'],
+    vozPrompt: 'Actúa como abogado postulante de la PARTE APELADA. Contesta los agravios del apelante: defiende la sentencia apelada, nunca la combatas ni interpongas recurso.',
+    camposObligatorios: ['órgano jurisdiccional', 'expediente', 'parte apelada', 'parte apelante', 'sentencia apelada', 'agravios del apelante', 'contestación a cada agravio', 'petitorios'],
+    camposOpcionales: ['anexos', 'domicilio para notificaciones'],
+    reglas: [
+      'Responde un agravio por bloque, en su orden, y califícalo como infundado, inoperante o inatendible solo con apoyo en lo que la sentencia resolvió y en constancias del expediente.',
+      'No inventes agravios: si falta la apelación del contrario, pide el documento.',
+      'Termina solicitando que se confirme la sentencia apelada.',
+    ],
+    reglasArgumentacion: ['Cada respuesta identifica el agravio, la razón por la que no prospera y la parte de la sentencia o la constancia que la respalda.'],
+    reglasPrueba: ['Remite solo a constancias que obran en el expediente; no ofrezcas pruebas nuevas sin instrucción del abogado.'],
+    reglasFirma: ['La firma corresponde EXCLUSIVAMENTE a la parte apelada o a su apoderado; nunca al apelante.'],
+    prohibiciones: [
+      ...PROHIBICIONES_BASE,
+      'PROHIBIDO interponer recurso, expresar agravios propios o pedir que se revoque o modifique la sentencia: quien habla es la parte apelada.',
+      'PROHIBIDO incluir notas, riesgos o consejos al abogado dentro del escrito.',
+    ],
   }),
 
   revocacion_civil: specializedProceduralTemplate({
@@ -2400,6 +2448,7 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   apelacion_mercantil: specializedProceduralTemplate({
     tipo: 'apelacion_mercantil',
+    rolAutor: 'apelante',
     etiquetas: ['recurso de apelación mercantil', 'apelación mercantil'],
     materia: 'MERCANTIL',
     procedimiento: 'APELACION_MERCANTIL',
@@ -2864,12 +2913,12 @@ export const DocumentTemplates: Record<string, DocumentTemplate> = {
 
   apelacion_familiar: specializedFamiliarTemplate({
     tipo: 'apelacion_familiar',
+    rolAutor: 'apelante',
     etiquetas: ['apelación familiar', 'recurso de apelación familiar', 'expresión de agravios familiar'],
     procedimiento: 'APELACION_FAMILIAR',
     subtipo: 'recurso de apelación en materia familiar',
     objetivoProcesal: 'Interponer apelación y expresar agravios contra sentencia definitiva o auto dictado por juez familiar.',
     estructura: FAMILIAR_RECURSO_STRUCTURE,
-    rolAutor: 'parte_interesada',
     rolContraparte: 'contraparte procesal',
     camposObligatorios: ['juzgado de lo familiar o sala familiar', 'expediente o toca', 'recurrente', 'contraparte', 'resolución recurrida', 'agravios y violaciones procesales', 'petitorios'],
     reglas: ['Formula agravios combatiendo cada consideración de la resolución impugnada, señalando normas y jurisprudencias violadas.'],
@@ -6298,6 +6347,119 @@ export function buildReferenceOnlyDirective(tpl: DocumentTemplate): string {
 }
 
 /** Plantilla por defecto (fallback seguro). */
+/* ══ MOTOR DE FAMILIAS ═══════════════════════════════════════════════════
+ *
+ * Un tipo canónico del catálogo puede no tener plantilla propia y sí tener
+ * una FAMILIA con comportamiento procesal definido. En lugar de 250
+ * plantillas copiadas, el catálogo registra aquí las plantillas derivadas por
+ * familia (FAMILY ENGINE → TYPE CONFIG → MATTER CONFIG → BLUEPRINT).
+ *
+ * Se invierte la dependencia porque legalCatalog ya importa este módulo: el
+ * catálogo inyecta la relación tipo→familia y este módulo la usa para derivar
+ * la plantilla. Así un tipo canónico deja de ser una opción sin backend.
+ */
+const FAMILY_DERIVED_TEMPLATES: Record<string, DocumentTemplate> = {};
+
+/** Registra las plantillas derivadas de familia. Lo invoca legalCatalog. */
+export function registerFamilyDerivedTemplates(
+  entries: ReadonlyArray<{ tipo: string; familyId: string; template: DocumentTemplate }>,
+): void {
+  for (const entry of entries) FAMILY_DERIVED_TEMPLATES[entry.tipo] = entry.template;
+}
+
+export function familyDerivedTemplateFor(documentType?: string): DocumentTemplate | undefined {
+  const t = (documentType || '').trim();
+  return t ? FAMILY_DERIVED_TEMPLATES[t] : undefined;
+}
+
+export function familyDerivedTemplateIds(): string[] {
+  return Object.keys(FAMILY_DERIVED_TEMPLATES).sort();
+}
+
+/** Fábrica de plantilla derivada de familia, expuesta para el catálogo. */
+export function createFamilyDerivedTemplate(spec: {
+  tipo: string;
+  etiqueta: string;
+  familyId: string;
+  materia: string;
+  via: string;
+  procedimiento: string;
+  subtipo: string;
+  objetivoProcesal: string;
+  estructura: string[];
+  camposObligatorios: string[];
+  reglas: readonly string[];
+  reglasArgumentacion?: readonly string[];
+  reglasPrueba?: readonly string[];
+  rolAutor?: RolProcesal;
+  destinatario?: Destinatario;
+}): DocumentTemplate {
+  const materia = (spec.materia || 'GENERAL') as FamiliaDocumental;
+  const destinoPorMateria: Record<string, Destinatario> = {
+    CIVIL: 'Juez de lo civil competente',
+    MERCANTIL: 'Juez de lo mercantil competente',
+    FAMILIAR: 'Juez de lo familiar competente',
+    LABORAL: 'Tribunal Laboral competente',
+    AMPARO: 'Órgano MATERIAL DEL AMPARO',
+    CONSTITUCIONAL: 'Órgano competente en materia constitucional o electoral',
+    ADMINISTRATIVO: 'Órgano jurisdiccional administrativo competente',
+    FISCAL: 'Autoridad fiscal competente',
+    PENAL: 'Juzgado o Tribunal competente en materia penal',
+  };
+  const jurisdiccionPorMateria: Record<string, string> = {
+    CIVIL: 'local civil', MERCANTIL: 'local mercantil', FAMILIAR: 'local familiar',
+    LABORAL: 'local o federal del trabajo', AMPARO: 'federal', CONSTITUCIONAL: 'federal',
+    ADMINISTRATIVO: 'federal o local', FISCAL: 'federal', PENAL: 'local o federal',
+    AGRARIO: 'federal', INMOBILIARIO: 'local', CORPORATIVO: 'local mercantil',
+    CONTRACTUAL: 'local mercantil', PROPIEDAD_INTELECTUAL: 'federal', GENERAL: 'según autoridad competente',
+  };
+  const subtipo = spec.subtipo || spec.etiqueta;
+  return def({
+    tipo: spec.tipo,
+    etiquetas: [spec.etiqueta, subtipo],
+    materia,
+    jurisdiccion: jurisdiccionPorMateria[materia] || 'según autoridad competente',
+    via: spec.via,
+    procedimiento: spec.procedimiento,
+    subtipo,
+    objetivoProcesal: spec.objetivoProcesal,
+    rolAutor: spec.rolAutor || 'parte_interesada',
+    rolContraparte: 'contraparte',
+    destinatario: spec.destinatario || destinoPorMateria[materia] || 'Autoridad competente',
+    estructura: spec.estructura,
+    camposObligatorios: [...spec.camposObligatorios],
+    camposOpcionales: ['anexos', 'domicilio para notificaciones'],
+    reglas: [
+      ...spec.reglas,
+      `Blueprint de familia: ${spec.familyId}.`,
+      'Toda petición, argumento y referencia procesal debe derivar de las constancias confirmadas o de instrucciones expresas del abogado.',
+    ],
+    reglasArgumentacion: spec.reglasArgumentacion ? [...spec.reglasArgumentacion] : [],
+    reglasPrueba: spec.reglasPrueba ? [...spec.reglasPrueba] : [],
+    prohibiciones: PROHIBICIONES_BASE,
+    voz: [`Actúa como abogado postulante de la parte ${spec.rolAutor || 'promovente'}.`, `Salida procesal especializada: ${subtipo}.`],
+    vozPrompt: `Actúa como abogado postulante especializado en ${spec.via}. Redacta exclusivamente ${subtipo}, sin inventar hechos, acuerdos, resoluciones, pruebas ni consecuencias no sustentadas.`,
+  });
+}
+
+/**
+ * Rol procesal del autor por tipo. Excepciones explícitas para tipos del catálogo sin plantilla propia:
+ * su rol no puede heredarse de la familia (p. ej. parte interesada).
+ */
+export const ROL_AUTOR_OVERRIDES: Readonly<Record<string, RolProcesal>> = Object.freeze({
+  contestacion_proveedor: 'demandado',
+});
+
+/** Rol del autor de un tipo: excepción explícita, o el de su plantilla. Nunca lanza. */
+export function rolAutorOf(documentType?: string, documentTypeLabel?: string): RolProcesal | undefined {
+  if (documentType && ROL_AUTOR_OVERRIDES[documentType]) return ROL_AUTOR_OVERRIDES[documentType];
+  try {
+    return getDocumentTemplate(documentType, documentTypeLabel)?.rolAutor;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getDocumentTemplate(
   documentType?: string,
   documentTypeLabel?: string
@@ -6307,6 +6469,11 @@ export function getDocumentTemplate(
   if (t && DocumentTemplates[t]) return DocumentTemplates[t];
   const strategy = t ? getDocumentStrategy(t) : undefined;
   if (strategy && DocumentTemplates[strategy.id]) return DocumentTemplates[strategy.id];
+  // PRIORIDAD 2.5 — motor de familias: el tipo canónico sin plantilla propia
+  // se materializa desde el blueprint de su familia. Un tipo catalogado nunca
+  // cae al fallback genérico por falta de plantilla.
+  const familyDerived = familyDerivedTemplateFor(t);
+  if (familyDerived) return familyDerived;
   if (t) {
     throw new DocumentRoutingError(
       'UNKNOWN_DOCUMENT_TYPE',
@@ -6362,7 +6529,13 @@ export function resolveTemplateByExplicitLabel(label?: string): DocumentTemplate
 }
 
 /** true si el tipo pertenece a la familia CONTESTACIÓN (esqueleto dedicado). */
+/** Contestación de agravios (parte apelada): contesta una apelación, no una demanda. */
+export function isAgraviosAnswerType(documentType?: string, documentTypeLabel?: string): boolean {
+  return documentType === 'contestacion_agravios' || /contestaci[oó]n\s+(?:de|a\s+los)\s+agravios/i.test(documentTypeLabel || '');
+}
+
 export function isContestacionType(documentType?: string, documentTypeLabel?: string): boolean {
+  if (isAgraviosAnswerType(documentType, documentTypeLabel)) return false;
   return /contestaci/i.test(documentType || '') || /contestaci/i.test(documentTypeLabel || '');
 }
 
@@ -6375,6 +6548,11 @@ export function isDemandContestacionType(documentType?: string, documentTypeLabe
 export function isContestacionRevisionAmparoDirectoType(documentType?: string, documentTypeLabel?: string): boolean {
   return documentType === 'contestacion_revision_extraordinaria_amparo_directo'
     || documentTypeLabel === 'contestacion_revision_extraordinaria_amparo_directo';
+}
+
+/** ¿La plantilla declara que el escrito se presenta por conducto del órgano que dictó la resolución recurrida? */
+export function presentsThroughIssuingCourt(documentType?: string): boolean {
+  return Boolean(documentType) && DocumentTemplates[documentType as string]?.presentacionPor === 'ORGANO_RESOLUCION_RECURRIDA';
 }
 
 /** FASE 3 — Taxonomía real DERIVADA del catálogo (sin duplicar datos). */

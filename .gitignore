@@ -6,6 +6,10 @@ build/
 .env.local
 .env.production
 *.log
+*.local.json
+audit/apelaciones-fase-2b/appeal-gold.local.json
+audit/apelaciones-fase-2b/appeal-provider-real-input.local.json
+audit/apelaciones-fase-2b/appeal-provider-real-result.local.json
 npm-debug.log*
 .DS_Store
 *.tsbuildinfo
@@ -14,13 +18,14 @@ next-env.d.ts
 _backups_originales/
 backups/
 data/uploads/templates/
-Datos.zip
+*.zip
 data/legal-workspace/
 data/documents/
 data/imports/
 data/index/
 data/logs/
 coverage/
+graphify-out/
 
 # Public-repository safety: local analysis artifacts and generated case documents
 scratch/
@@ -55,3 +60,6 @@ docs/superpowers/plans/2026-09-13-strategic-legal-drafting-mvp.md
 /reporte_cambios.txt
 /scripts/verify-factual-source-grounding.mts
 /scripts/audit/__pycache__/
+
+# Salidas de Playwright: pueden contener datos de casos; no versionar
+/test-results/

@@ -5,6 +5,7 @@ const root = process.cwd();
 const requiredSourceAssets = [
   'next.config.ts',
   'prisma/schema.prisma',
+  'prisma/migrations/202610130001_sqlite_local_baseline/migration.sql',
   'spa.traineddata',
   'node_modules/tesseract.js/src/worker-script/node/index.js',
   'data/uploads/templates',

@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.Net.Http
 $uploadUrl = 'http://localhost:3200/api/templates/analyze-upload'
 $generateUrl = 'http://localhost:3200/api/legal-engine/generate'
 $statusUrl = 'http://localhost:3200/api/legal-engine/generate/status'
-$sourcePath = 'C:\Users\yahir\Documents\DOC092126-09212026150739,papa.pdf'
+$sourcePath = 'RUTA_LOCAL,papa.pdf'
 $sourceFileName = [IO.Path]::GetFileName($sourcePath)
 $sourceId = 'source-papa-real-20260924'
 $transportPath = Join-Path $env:TEMP ('app-plantillas-papa-' + [Guid]::NewGuid().ToString('N') + '.pdf')

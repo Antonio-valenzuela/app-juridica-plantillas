@@ -1,3 +1,4 @@
+import { sanitizeSectionKinds } from '../templates/templatePreview';
 import type {
   AnalyzedFact,
   AnalyzedClaim,
@@ -17,6 +18,7 @@ export interface CaseWorkflowInput {
   generationMode: GenerationMode;
   templateId?: string;
   referenceDocumentId?: string;
+  sectionKinds?: CaseWorkflowSelection['sectionKinds'];
   structuredDoc?: UniversalLegalDocument;
 }
 
@@ -28,7 +30,8 @@ function clampConfidence(value: unknown): number {
 export function chooseGenerationSource(input: CaseWorkflowSelection): CaseWorkflowSelection {
   if (input.mode === 'personal_template') {
     if (!input.templateId?.trim()) throw new Error('PERSONAL_TEMPLATE_ID_REQUIRED');
-    return { mode: input.mode, templateId: input.templateId.trim(), referenceDocumentId: undefined };
+    const sectionKinds = sanitizeSectionKinds(input.sectionKinds);
+    return { mode: input.mode, templateId: input.templateId.trim(), referenceDocumentId: undefined, ...(sectionKinds ? { sectionKinds } : {}) };
   }
 
   if (input.mode === 'reference_document') {
@@ -100,6 +103,7 @@ export function buildCaseWorkflow(input: CaseWorkflowInput): CaseWorkflow {
     mode: input.generationMode,
     templateId: input.templateId,
     referenceDocumentId: input.referenceDocumentId,
+    sectionKinds: input.sectionKinds,
   });
 
   const analysis = {

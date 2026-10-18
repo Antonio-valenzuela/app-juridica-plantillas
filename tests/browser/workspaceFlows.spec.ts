@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { acceptExternalConsentOnce } from '../helpers/externalConsent';
 
 const analyticsFixture = {
   ok: true,
@@ -67,6 +68,9 @@ async function mockAnalytics(page: Page) {
 }
 
 async function mockGeneration(page: Page, outcome: { readiness: string; terminalStatus?: string } | { error: true }) {
+  // These mocked E2E flows explicitly consent to the external-provider notice.
+  // Without consent the UI correctly returns before reaching the intercepted generation endpoint.
+  void acceptExternalConsentOnce(page);
   await page.route('**/api/legal-engine/generate', async (route) => {
     if ('error' in outcome) {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'GENERATION_FAILED' }) });
@@ -143,6 +147,33 @@ test.describe('E2E-03 NEEDS_REVIEW', () => {
   });
 });
 
+test.describe('E2E-09 editor responsive', () => {
+  test('mantiene visible el título, evita desbordamiento de toolbar y conserva ancho de hoja carta', async ({ page }) => {
+    await mockGeneration(page, { readiness: 'READY' });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await startUniversalGeneration(page);
+    await expect(page.locator('.workspace-editor-shell')).toBeVisible();
+
+    for (const [width, height] of [[1440, 900], [1920, 1080]] as const) {
+      await page.setViewportSize({ width, height });
+      const layout = await page.evaluate(() => {
+        const toolbar = document.querySelector<HTMLElement>('[data-testid="editor-toolbar-row-primary"]');
+        const titleZone = toolbar?.firstElementChild as HTMLElement | null;
+        const sheet = document.querySelector<HTMLElement>('.legal-document-sheet');
+        return {
+          toolbarClientWidth: toolbar?.clientWidth || 0,
+          toolbarScrollWidth: toolbar?.scrollWidth || 0,
+          titleWidth: titleZone?.getBoundingClientRect().width || 0,
+          paperWidth: sheet?.getBoundingClientRect().width || 0,
+        };
+      });
+      expect.soft(layout.titleWidth, `${width}x${height}: zona de título`).toBeGreaterThanOrEqual(140);
+      expect.soft(layout.toolbarScrollWidth, `${width}x${height}: primera fila de toolbar`).toBeLessThanOrEqual(layout.toolbarClientWidth + 1);
+      expect.soft(layout.paperWidth, `${width}x${height}: hoja carta`).toBeGreaterThanOrEqual(700);
+    }
+  });
+});
+
 test.describe('E2E-04 error de backend', () => {
   test('muestra un error entendible y termina el estado de carga', async ({ page }) => {
     await mockGeneration(page, { error: true });
@@ -198,13 +229,13 @@ test.describe('E2E-07 importador local', () => {
       }
       const body = route.request().postDataJSON() as { action?: string };
       if (body.action === 'analyze') {
-        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, scanId: 'scan-e2e', source: { kind: 'ZIP', name: 'Datos.zip', limited: false }, summary: { analyzed: 1, importable: 1, duplicates: 0, excluded: 0, damaged: 0, review: 0, unclassified: 0, categoryCounts: { ACUERDO: 1 }, matterCounts: { CIVIL: 1 } }, records: [record] }) });
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, scanId: 'scan-e2e', source: { kind: 'ZIP', name: 'banco-de-pruebas.zip', limited: false }, summary: { analyzed: 1, importable: 1, duplicates: 0, excluded: 0, damaged: 0, review: 0, unclassified: 0, categoryCounts: { ACUERDO: 1 }, matterCounts: { CIVIL: 1 } }, records: [record] }) });
       } else {
         await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, imported: [{ ...record, imported: true }], skipped: [] }) });
       }
     });
     await page.goto('/machotes?tab=biblioteca');
-    await page.getByLabel('Ruta local de carpeta o ZIP').fill('C:\\Users\\yahir\\Desktop\\Datos.zip');
+    await page.getByLabel('Ruta local de carpeta o ZIP').fill('RUTA_LOCAL');
     await page.getByRole('button', { name: 'Analizar fuente local' }).click();
     await expect(page.getByText('Importables', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Seleccionar importables' }).click();

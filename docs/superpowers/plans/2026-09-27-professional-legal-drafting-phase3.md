@@ -4,7 +4,7 @@
 
 ## Objetivo y límites
 
-Mejorar la generación de contestaciones jurídicas mediante dos perfiles verificables (`PROFESSIONAL_20` y `EXTENSIVE_40`), planes y matrices trazables, desarrollo por pasadas con soporte real, medición de repetición y gates de revisión. Mantener Prisma y la persistencia actuales; el ZIP `C:\Users\yahir\Desktop\Datos.zip` es exclusivamente un banco E2E, con artefactos de prueba en `audit/professional-drafting-phase3/`, nunca datos permanentes ni productivos. La versión continúa siendo local y para un abogado individual. Diseñar límites internos que no impidan una futura ampliación; no crear cuentas, roles, equipos, facturación ni permisos multiusuario.
+Mejorar la generación de contestaciones jurídicas mediante dos perfiles verificables (`PROFESSIONAL_20` y `EXTENSIVE_40`), planes y matrices trazables, desarrollo por pasadas con soporte real, medición de repetición y gates de revisión. Mantener Prisma y la persistencia actuales; el ZIP `RUTA_LOCAL` es exclusivamente un banco E2E, con artefactos de prueba en `audit/professional-drafting-phase3/`, nunca datos permanentes ni productivos. La versión continúa siendo local y para un abogado individual. Diseñar límites internos que no impidan una futura ampliación; no crear cuentas, roles, equipos, facturación ni permisos multiusuario.
 
 No usar los expedientes o hechos de los dos recursos de apelación de referencia. Usarlos únicamente para observar presentación y densidad profesional. No inventar hechos, posturas, pruebas, actos procesales, autoridades o peticiones; las posiciones del abogado que falten se consolidan como preguntas pendientes y conservan `NEEDS_REVIEW`/bloqueo de exportación final.
 
@@ -57,7 +57,7 @@ Se inspeccionaron visualmente los seis DOCX/PDF de Fase 2, sin modificarlos. PDF
 
 ### 5. Ejecutar 12 pruebas E2E y revisar artefactos
 
-- Usar exactamente los seis expedientes ya seleccionados de Datos.zip, validando ID/hash y leyendo los documentos desde el árbol de auditoría; no escribir filas productivas. Mantener DB/fixtures E2E aislados si la ruta de aplicación necesita Prisma.
+- Usar exactamente los seis expedientes ya seleccionados de banco-de-pruebas.zip, validando ID/hash y leyendo los documentos desde el árbol de auditoría; no escribir filas productivas. Mantener DB/fixtures E2E aislados si la ruta de aplicación necesita Prisma.
 - Correr una vez por expediente en cada perfil, conservando log completo, request/response, traza, origen de proveedor, tiempo por fase, warnings, límites y hashes.
 - Exportar DOCX y PDF reales mediante exportadores actuales. Extraer texto del DOCX completo/OOXML y del PDF final con herramientas disponibles; comprobar páginas/metadata/validez, placeholders raros, caracteres de control y páginas vacías.
 - Revisar página 1, página media y página final de cada par DOCX/PDF; contrastar portada/encabezados, jerarquía, cuerpo legible, citas/listas, pies/numeración, firmas y cierre. No copiar la apariencia de la apelación si el tipo de escrito requiere otra estructura.
@@ -74,5 +74,5 @@ Se inspeccionaron visualmente los seis DOCX/PDF de Fase 2, sin modificarlos. PDF
 
 - La secuencia cubre los 38 bloques de la especificación adjunta y sus 24 criterios de terminado: baseline, arquitectura, 2 profundidades, plan/matriz, agrupación de posiciones, pases, seguridad factual/jurídica, calidad, coherencia, editor/UI, Prisma, cobertura, exportaciones, 6×2 E2E, medición, evidencia visual, regresión, reportes y prohibición Windows.
 - Los objetivos de página son bandas aproximadas subordinadas a soporte real; las pruebas no exigen rellenar o inventar contenido para alcanzarlas.
-- `Datos.zip` y las muestras son inputs de prueba/referencia, no datos permanentes ni contenido fuente del escrito generado.
+- `banco-de-pruebas.zip` y las muestras son inputs de prueba/referencia, no datos permanentes ni contenido fuente del escrito generado.
 - Las rutas y nombres `draftDepth`, `LegalDocumentPlan`, `FactResponseMatrix`, `CONTENT_LIMIT_REACHED` y las rutas de reportes son consistentes en pruebas, metadata y documentación.

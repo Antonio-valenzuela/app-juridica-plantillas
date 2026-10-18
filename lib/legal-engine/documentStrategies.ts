@@ -58,6 +58,32 @@ export const COMMERCIAL_ENFORCEMENT_REQUIRED_SECTION_IDS = [
 
 export type CommercialEnforcementRequiredSectionId = (typeof COMMERCIAL_ENFORCEMENT_REQUIRED_SECTION_IDS)[number];
 
+/**
+ * Rótulo legible de las secciones cuyos IDs son contrato (demanda civil y
+ * mercantil). El ID nunca deja de viajar en `section.id`/`estructura`: solo el
+ * TÍTULO visible deja de ser el identificador interno (`via_accion`).
+ */
+export const STRATEGY_SECTION_TITLES: Record<string, string> = {
+  destinatario: 'AUTORIDAD DESTINATARIA',
+  comparecencia: 'COMPARECENCIA',
+  personalidad: 'PERSONALIDAD',
+  identificacion_partes: 'IDENTIFICACIÓN DE PARTES',
+  via_accion: 'VÍA DE LA ACCIÓN O PROCEDIMIENTO',
+  documento_base: 'DOCUMENTO BASE DE LA ACCIÓN',
+  obligaciones_y_cantidades: 'OBLIGACIONES Y CANTIDADES',
+  prestaciones: 'PRESTACIONES',
+  hechos: 'HECHOS',
+  derecho: 'FUNDAMENTOS DE DERECHO',
+  pruebas: 'PRUEBAS',
+  petitorios: 'PETITORIOS',
+  firma: 'FIRMA',
+};
+
+/** Título visible de una sección cuando su ID es un identificador interno del contrato. */
+export function sectionDisplayTitle(sectionId: string): string {
+  return STRATEGY_SECTION_TITLES[sectionId] || sectionId;
+}
+
 export const COMMERCIAL_ENFORCEMENT_REQUIRED_FIELD_IDS = [
   'creditor',
   'debtor',
@@ -107,6 +133,8 @@ export interface DocumentStrategyDefinition {
     | 'actor'
     | 'demandado'
     | 'parte_interesada'
+    | 'apelado'
+    | 'apelante'
     | 'quejoso'
     | 'recurrente'
     | 'promovente'
@@ -396,6 +424,15 @@ const RECURSO_FIELD_IDS = [
 export const CIVIL_APELACION_STRATEGY = responseStrategy(
   'apelacion_civil', 'CIVIL', 'APELACION_CIVIL', 'parte_interesada', RECURSO_FIELD_IDS, RECURSO_REQUIRED_SECTION_IDS,
 );
+const CONTESTACION_AGRAVIOS_SECTION_IDS = [
+  'rubro', 'proemio', 'oportunidad', 'sintesis_sentencia', 'agravios', 'constancias', 'petitorios', 'lugar_fecha', 'firma',
+] as const;
+const CONTESTACION_AGRAVIOS_FIELD_IDS = [
+  'destinatario', 'expediente', 'parte_apelada', 'parte_apelante', 'sentencia_apelada', 'agravios', 'petitorios',
+] as const;
+export const CIVIL_CONTESTACION_AGRAVIOS_STRATEGY = responseStrategy(
+  'contestacion_agravios', 'CIVIL', 'CONTESTACION_AGRAVIOS', 'apelado', CONTESTACION_AGRAVIOS_FIELD_IDS, CONTESTACION_AGRAVIOS_SECTION_IDS,
+);
 export const CIVIL_REVOCACION_STRATEGY = responseStrategy(
   'revocacion_civil', 'CIVIL', 'REVOCACION_CIVIL', 'parte_interesada', RECURSO_FIELD_IDS, RECURSO_REQUIRED_SECTION_IDS,
 );
@@ -682,6 +719,7 @@ const LABORAL_CONTESTACION_REQUIRED_SECTION_IDS = [
   'prestaciones',
   'excepciones_defensas',
   'pruebas',
+  'derecho',
   'argumentos',
   'petitorios',
   'firma',
@@ -1573,6 +1611,7 @@ export const DOCUMENT_STRATEGIES: Readonly<Record<string, DocumentStrategyDefini
   solicitud_embargo_precautorio: CIVIL_EMBARGO_PRECAUTORIO_STRATEGY,
   providencias_precautorias_mercantiles: MERCANTILE_PROVIDENCIAS_PRECAUTORIAS_STRATEGY,
   apelacion_civil: CIVIL_APELACION_STRATEGY,
+  contestacion_agravios: CIVIL_CONTESTACION_AGRAVIOS_STRATEGY,
   revocacion_civil: CIVIL_REVOCACION_STRATEGY,
   aclaracion_sentencia_civil: CIVIL_ACLARACION_SENTENCIA_STRATEGY,
   apelacion_mercantil: MERCANTILE_APELACION_STRATEGY,
@@ -1774,4 +1813,21 @@ function canonicalizeStrategyId(value: string): string {
 
 export function getDocumentStrategy(documentType: string): DocumentStrategyDefinition | undefined {
   return DOCUMENT_STRATEGIES[canonicalizeStrategyId(documentType)];
+}
+
+/** IDs de contrato de sección: solo los de demanda civil y mercantil (ver documentPlan.buildTemplateSkeleton). */
+export function isSectionContractId(id: string): boolean {
+  return (CIVIL_DEMAND_REQUIRED_SECTION_IDS as readonly string[]).includes(id)
+    || (COMMERCIAL_ENFORCEMENT_REQUIRED_SECTION_IDS as readonly string[]).includes(id);
+}
+
+/**
+ * Título visible que debe tener una sección requerida. Un ID de contrato sin título mapeado LANZA:
+ * no hay fallback silencioso. Los rótulos legibles se devuelven tal cual.
+ */
+export function requiredSectionTitle(id: string): string {
+  if (!isSectionContractId(id)) return id;
+  const title = STRATEGY_SECTION_TITLES[id];
+  if (!title) throw new Error(`SECTION_TITLE_UNMAPPED: el ID de contrato ${id} no tiene título visible`);
+  return title;
 }

@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Next.js, Vitest, pipeline legal universal y catálogo `DocumentTemplates`.
 
-**Spec:** `C:\Users\yahir\Downloads\Plan_5_Loops_Restantes_APP_Plantillas.docx`, sección LOOP 3.
+**Spec:** `RUTA_LOCAL`, sección LOOP 3.
 
 ## Global Constraints
 

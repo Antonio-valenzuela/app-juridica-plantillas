@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateFactualClaimGate } from '@/lib/legal-engine/factualClaimGate';
+import { buildDeterministicFactualClaimAudit, evaluateFactualClaimGate, populateDeterministicFactualClaimAudit } from '@/lib/legal-engine/factualClaimGate';
 import type { SourceGrounding } from '@/lib/legal-engine/sourceGrounding';
 import { createEmptyDocument } from '@/lib/legal-engine/types';
 import { runQualityGateCheck } from '@/lib/legal-engine/qualityGate';
@@ -12,6 +12,91 @@ const source = {
 } as SourceGrounding;
 
 describe('factual claim gate', () => {
+  it('deterministically records an exact source allegation as an allegation, not an established fact', () => {
+    const text = 'La actora alega que laboró hasta el 4 de abril de 2024.';
+    const grounded = {
+      ...source,
+      sourceText: text,
+      segments: [{ role: 'CASE_DOCUMENT', startOffset: 0, endOffset: text.length, text }],
+    } as SourceGrounding;
+
+    const records = buildDeterministicFactualClaimAudit([{ id: 'b-allegation', text }], [grounded]);
+
+    expect(records).toMatchObject([{
+      blockId: 'b-allegation',
+      claim: text,
+      status: 'OPPOSING_PARTY_ALLEGATION',
+      classification: 'OPPOSING_ALLEGATION',
+      sourceSpans: [{ sourceId: 'demanda-1', startOffset: 0, endOffset: text.length, text }],
+    }]);
+  });
+
+  it('marks a generated time that conflicts with an otherwise exact source sentence as contradictory', () => {
+    const sourceSentence = 'La jornada inició a las 16:30 horas.';
+    const generatedSentence = 'La jornada inició a las 16:00 horas.';
+    const grounded = {
+      ...source,
+      sourceText: sourceSentence,
+      container: { ...source.container, documentFamily: 'CONTESTACION' },
+      segments: [{ role: 'CASE_DOCUMENT', startOffset: 0, endOffset: sourceSentence.length, text: sourceSentence }],
+    } as SourceGrounding;
+    const records = buildDeterministicFactualClaimAudit([{ id: 'b-time', text: generatedSentence }], [grounded]);
+    const result = evaluateFactualClaimGate({ blocks: [{ id: 'b-time', text: generatedSentence }], sourceGrounding: [grounded], claims: records });
+
+    expect(records[0]).toMatchObject({
+      status: 'CONTRADICTORY',
+      classification: 'SOURCE_CONFLICT',
+      sourceSpans: [{ sourceId: 'demanda-1', startOffset: 0, endOffset: sourceSentence.length, text: sourceSentence }],
+    });
+    expect(result.status).toBe('BLOCKED');
+    expect(result.contradictoryClaims).toBe(1);
+    expect(result.issues).toContain('SOURCE_CONTRADICTION:b-time');
+  });
+
+  it('records unsupported prose as UNVERIFIED and removes only the missing-audit error, not the factual blocker', () => {
+    const claim = 'El demandado reconoció la deuda en una reunión privada.';
+    const records = buildDeterministicFactualClaimAudit([{ id: 'b-unverified', text: claim }], [source]);
+    const result = evaluateFactualClaimGate({ blocks: [{ id: 'b-unverified', text: claim }], sourceGrounding: [source], claims: records });
+
+    expect(records[0]).toMatchObject({ status: 'UNVERIFIED', classification: 'CLIENT_POSTURE', sourceSpans: [] });
+    expect(result.issues).toContain('CLAIM_UNVERIFIED:b-unverified');
+    expect(result.issues).not.toContain('CLAIM_AUDIT_MISSING:b-unverified');
+    expect(result.unverifiedClaims).toBe(1);
+  });
+
+  it('does not use an authority-only span as factual support', () => {
+    const text = 'La tesis aislada sostiene una interpretación determinada.';
+    const grounded = {
+      ...source,
+      sourceText: text,
+      segments: [{ role: 'JURISPRUDENCE', startOffset: 0, endOffset: text.length, text }],
+    } as SourceGrounding;
+    const records = buildDeterministicFactualClaimAudit([{ id: 'b-authority', text }], [grounded]);
+
+    expect(records[0]).toMatchObject({ status: 'UNVERIFIED', classification: 'LEGAL_ARGUMENT', sourceSpans: [] });
+  });
+
+  it('populates the document audit before Quality Gate without turning unverified text into support', () => {
+    const doc = createEmptyDocument();
+    const supportedAsAllegation = 'La actora alega que entregó $500 el 4 de abril de 2024.';
+    doc.generationMetadata.draftDepth = 'PROFESSIONAL_20';
+    doc.generationMetadata.sourceGrounding = [source];
+    doc.sections.push({
+      id: 'facts', type: 'background', title: 'HECHOS', order: 1,
+      isRepeatable: false, isEditable: true, isGenerated: true, isManuallyEdited: false,
+      variables: [], validationErrors: [], validationWarnings: [],
+      content: [{ id: 'b-populate', layer: 'GENERATED_ARGUMENT', text: `${supportedAsAllegation} El demandado reconoció un hecho no descrito en la fuente.`, generatedBy: 'AI' }],
+    });
+
+    const records = populateDeterministicFactualClaimAudit(doc);
+    const quality = runQualityGateCheck(doc);
+
+    expect(records).toHaveLength(2);
+    expect(doc.generationMetadata.factualClaims).toHaveLength(2);
+    expect(quality.criticalErrors.some((error) => error.checkId === 'FACTUAL_CLAIM_AUDIT_MISSING')).toBe(false);
+    expect(quality.criticalErrors.some((error) => error.checkId === 'FACTUAL_CLAIM_UNVERIFIED')).toBe(true);
+  });
+
   it('prevents a depth-mode AI draft without claim audit from passing the document quality gate', () => {
     const doc = createEmptyDocument();
     doc.generationMetadata.draftDepth = 'PROFESSIONAL_20';

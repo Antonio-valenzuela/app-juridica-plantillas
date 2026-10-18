@@ -1,3 +1,4 @@
+import type { FederalLawEntry, FederalLawsCatalog } from '@/lib/legal/federalLawsIndex';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AuthorityCandidate, AuthorityType, LegalResearchRequest, LegalRegimeResolution, NormalizedResearchQuery, SupportedProposition } from '@/lib/legal-engine/legal-research/types';
@@ -30,9 +31,16 @@ export interface WorkspaceLibraryItem {
   title: string;
   abbreviation: string;
   lastReform?: string;
-  source: 'LEX_MX';
+  /** Texto del índice cuando la última reforma no es una fecha DOF («Sin reforma», «Sentencia SCJN»…). */
+  reformNote?: string;
+  /** Nota de vigencia del índice oficial (p. ej. abrogación programada). */
+  validityNote?: string;
+  publicationDate?: string;
+  source: 'LEX_MX' | 'DIPUTADOS_INDEX';
   officialUrl: string;
   referenceUrl?: string;
+  /** Fecha en que se consultó el índice oficial que respalda este registro. */
+  retrievedAt?: string;
 }
 
 export interface WorkspaceResearchInput extends LegalResearchSearchInput {
@@ -123,15 +131,39 @@ export function filterWorkspaceLibrary(items: WorkspaceLibraryItem[], rawQuery: 
   return items.filter((item) => `${item.title} ${item.abbreviation}`.toLocaleLowerCase().includes(query));
 }
 
+export function mapFederalLawToWorkspaceLibraryItem(entry: FederalLawEntry, retrievedAt?: string): WorkspaceLibraryItem {
+  return {
+    id: entry.sigla,
+    title: entry.titulo,
+    abbreviation: entry.sigla,
+    lastReform: entry.ultima_reforma,
+    reformNote: entry.ultima_reforma_nota,
+    validityNote: entry.nota_vigencia,
+    publicationDate: entry.publicacion_original,
+    source: 'DIPUTADOS_INDEX',
+    officialUrl: entry.pdf_url,
+    referenceUrl: entry.ref_url,
+    retrievedAt,
+  };
+}
+
+function readJson<T>(relativePath: string): T | null {
+  const absolute = path.resolve(process.cwd(), relativePath);
+  if (!fs.existsSync(absolute)) return null;
+  try { return JSON.parse(fs.readFileSync(absolute, 'utf8')) as T; } catch { return null; }
+}
+
+/**
+ * Catálogo de Biblioteca: índice oficial de Diputados (data/federal-laws, `scripts/import-federal-laws-catalog.mts`)
+ * y, para lo que no esté ahí, el catálogo LexMX local. El índice oficial prevalece por ser la fuente más reciente.
+ */
 export function loadWorkspaceLibrary(): WorkspaceLibraryItem[] {
-  const catalogPath = path.resolve(process.cwd(), 'data/lex-mx/catalog.json');
-  if (!fs.existsSync(catalogPath)) return [];
-  try {
-    const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as LexMxCatalogEntry[];
-    return Array.isArray(catalog) ? catalog.map(mapLexMxCatalogToWorkspaceLibraryItem) : [];
-  } catch {
-    return [];
-  }
+  const official = readJson<FederalLawsCatalog>('data/federal-laws/catalog.json');
+  const lexMx = readJson<LexMxCatalogEntry[]>('data/lex-mx/catalog.json');
+  const items = new Map<string, WorkspaceLibraryItem>();
+  for (const law of Array.isArray(official?.laws) ? official.laws : []) items.set(law.pdf_url, mapFederalLawToWorkspaceLibraryItem(law, official?.retrievedAt));
+  for (const entry of Array.isArray(lexMx) ? lexMx : []) if (!items.has(entry.pdf_url)) items.set(entry.pdf_url, mapLexMxCatalogToWorkspaceLibraryItem(entry));
+  return [...items.values()];
 }
 
 export async function searchWorkspaceJurisprudence(rawQuery: string): Promise<{
@@ -169,11 +201,15 @@ export async function searchWorkspaceDof(rawQuery: string, date?: string): Promi
   reasons: string[];
 }> {
   const input = await buildWorkspaceResearchInput(rawQuery, ['OFFICIAL_AGREEMENT'], date);
-  const provider = createDofAdapter();
-  const search = await provider.search(input);
-  const results = await Promise.all(search.candidates.slice(0, 20).map(async (candidate) => {
-    const detail = await provider.retrieve({ candidateId: candidate.id, requestId: input.request.id });
-    return mapAuthorityCandidateToWorkspaceResult(detail.candidate || candidate, detail.proposition);
-  }));
+  // Publicaciones reales de la edición del día (`/notas/{fecha}`); el endpoint de alertas solo
+  // devuelve categorías. No se pide el texto completo de cada nota: el abogado abre la nota oficial.
+  const provider = createDofAdapter({ legacyNotesByDate: true });
+  // El filtro de títulos usa solo lo que escribió el abogado (sin términos añadidos por el normalizador).
+  const explicitTerms = rawQuery.trim().toLowerCase().split(/\s+/).filter((term) => term.length >= 3);
+  const search = await provider.search({ ...input, query: { ...input.query, explicitTerms } });
+  const results = search.candidates.slice(0, 50).map((candidate) => mapAuthorityCandidateToWorkspaceResult(
+    candidate,
+    candidate.issuingAuthority ? { text: candidate.issuingAuthority } : undefined,
+  ));
   return { status: search.status, results, reasons: search.reasons };
 }

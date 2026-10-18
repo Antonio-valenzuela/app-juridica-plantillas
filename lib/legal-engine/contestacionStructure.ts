@@ -3,6 +3,9 @@ import { CaseAnalysis, ArgumentAxis } from './caseAnalysis';
 import { UniversalLegalDocument, type ContentBlock } from './types';
 import { formatCaseContextField } from './caseContext';
 import type { RichCaseAnalysis } from './case-extraction/types';
+import type { CaseDossier } from './caseDossier';
+import { firstIssuingAuthority } from './partyExtraction';
+import { closingText, signatureText } from './contestacionAgraviosStructure';
 
 /**
  * contestacionStructure.ts
@@ -53,23 +56,29 @@ export function resolveContestacionRoles(
   caseAnalysis?: CaseAnalysis,
   savedParties?: SavedParty[]
 ): ContestacionRoles {
-  const contesta =
+  const demandado =
     pickName(savedParties, 'demandado') ||
     doc.parties?.demandado ||
     caseAnalysis?.parties?.demandado ||
     PENDIENTE_DEMANDADO;
 
-  const contraparte =
+  const actor =
     pickName(savedParties, 'actor') ||
     doc.parties?.actor ||
     caseAnalysis?.parties?.actor ||
     PENDIENTE_ACTOR;
 
+  // En la contestación a la reconvención contesta el actor principal (demandado reconvencional) y la
+  // contraparte es quien reconvino (el demandado principal).
+  const reconvention = /reconvencion/i.test(String(doc.documentType || ''));
+  const contesta = reconvention ? actor : demandado;
+  const contraparte = reconvention ? demandado : actor;
+
   const autoridad =
     doc.parties?.autoridadDestinataria ||
     doc.parties?.autoridadResponsable ||
     caseAnalysis?.parties?.autoridadResponsable ||
-    (caseAnalysis?.authorities && caseAnalysis.authorities[0]) ||
+    firstIssuingAuthority(caseAnalysis?.authorities) ||
     'H. TRIBUNAL COMPETENTE EN TURNO';
 
   const rawExpediente =
@@ -87,8 +96,16 @@ export function resolveContestacionRoles(
 }
 
 /** Formal closing only; this does not verify a party's identity or authorize filing. */
-export function buildContestacionSignatureBlock(sectionId: string, signatory: string): ContentBlock {
+export function buildContestacionSignatureBlock(
+  sectionId: string,
+  signatory: string,
+  options: { includePendingSignatoryMarker?: boolean } = {},
+): ContentBlock {
   const hasName = Boolean(signatory.trim()) && !/\[\s*DATO\s+PENDIENTE\b/i.test(signatory);
+  const pendingSignatory = signatory.trim().replace(
+    /^\[\s*DATO\s+PENDIENTE(?:\s+DE\s+EXPEDIENTE)?\s*:\s*([^\]]+)\]$/i,
+    '[PENDIENTE: $1]',
+  );
   return {
     id: `${sectionId}-rolefix`,
     layer: 'USER_POSITION',
@@ -99,7 +116,9 @@ export function buildContestacionSignatureBlock(sectionId: string, signatory: st
     generationStatus: 'generated',
     text: hasName
       ? `PROTESTO LO NECESARIO.\n\n_________________________________________\n${signatory.trim()}`
-      : 'PROTESTO LO NECESARIO.\n\n_________________________________________\nNombre y calidad de quien firma: ____________________',
+      : options.includePendingSignatoryMarker
+        ? `PROTESTO LO NECESARIO.\n\n_________________________________________\n${pendingSignatory}`
+        : 'PROTESTO LO NECESARIO.\n\nNombre y calidad de quien firma: ____________________',
   };
 }
 
@@ -155,6 +174,39 @@ function replaceRichSeed(
   };
 }
 
+/** Rótulo propio del hecho/prestación en la demanda ("3.", "B)") o el ordinal de su posición. */
+function sourceOrdinal(text: string, index: number, letters = false): string {
+  const own = text.replace(/\s+/g, ' ').trim().match(/^(?:HECHO\s+)?(\d{1,3}|[A-Z]|[IVXLC]{1,6})\s*[.)\-]/i)?.[1];
+  if (own) return own.toUpperCase();
+  return letters && index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+
+/** Texto de la fuente en un solo párrafo y sin su rótulo, que ya se muestra como ordinal. */
+function withoutSourceLabel(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().replace(/^(?:HECHO\s+)?(?:\d{1,3}|[A-Z]|[IVXLC]{1,6})\s*[.)\-]\s*/i, '');
+}
+
+/**
+ * Contestación hecho por hecho: cada hecho de la demanda se transcribe con su
+ * propio espacio de postura. La contestación debe referirse a todos y cada uno
+ * de los hechos; solo el abogado puede afirmar, negar o declarar ajeno un hecho.
+ * Devuelve '' si la fuente no tiene hechos identificados.
+ */
+export function renderFactResponseProjection(rich: Pick<RichCaseAnalysis, 'facts'> | undefined): string {
+  return (rich?.facts || []).map((fact, index) => [
+    `HECHO ${sourceOrdinal(fact.proposition, index)}.— La parte actora manifiesta: «${withoutSourceLabel(fact.proposition)}»`,
+    'CONTESTACIÓN: [REQUIERE INSTRUCCIÓN DEL ABOGADO: afirmar, negar o manifestar que no es hecho propio.]',
+  ].join('\n')).join('\n\n');
+}
+
+/** Contestación prestación por prestación, con el mismo criterio que los hechos. */
+export function renderClaimResponseProjection(rich: Pick<RichCaseAnalysis, 'claims'> | undefined): string {
+  return (rich?.claims || []).map((claim, index) => [
+    `PRESTACIÓN ${sourceOrdinal(claim.requestedRelief, index, true)}).— La parte actora reclama: «${withoutSourceLabel(claim.requestedRelief)}»`,
+    'CONTESTACIÓN: [REQUIERE INSTRUCCIÓN DEL ABOGADO: precisar si se controvierte su procedencia y con qué excepciones.]',
+  ].join('\n')).join('\n\n');
+}
+
 /**
  * Rich-first contestación skeleton.  Only source-level propositions and
  * explicit IDs are copied into neutral seeds; legacy arrays are intentionally
@@ -171,14 +223,13 @@ function buildRichContestacionSkeleton(
   const isCivilContestacion = templateId === 'contestacion_demanda_civil';
   const isLaborContestacion = templateId === 'contestacion_demanda_laboral';
   const hasParties = !/\[\s*DATO\s+PENDIENTE/i.test(roles.contesta) && !/\[\s*DATO\s+PENDIENTE/i.test(roles.contraparte);
+  // La contestación debe referirse a todos y cada uno de los hechos y prestaciones:
+  // cada uno se transcribe y queda con su propio espacio de postura, que solo el
+  // abogado puede llenar (no se admite ni se niega nada sin instrucción).
   const hechosSection = mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', isCivilContestacion ? 5 : 4,
-    rich.facts.length > 0
-      ? 'HECHOS IDENTIFICADOS EN LA FUENTE:\n' + rich.facts.map((fact) => `• ${fact.proposition}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
-      : '[DATO PENDIENTE DE EXPEDIENTE: Hechos identificados]');
+    renderFactResponseProjection(rich) || '[DATO PENDIENTE DE EXPEDIENTE: Hechos identificados]');
   const prestacionesSection = mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', isCivilContestacion ? 4 : 5,
-    rich.claims.length > 0
-      ? 'PRESTACIONES IDENTIFICADAS EN LA FUENTE:\n' + rich.claims.map((claim) => `• ${claim.requestedRelief}`).join('\n') + '\nPOSTURA: pendiente de confirmación.'
-      : '[DATO PENDIENTE DE EXPEDIENTE: Prestaciones identificadas]');
+    renderClaimResponseProjection(rich) || '[DATO PENDIENTE DE EXPEDIENTE: Prestaciones identificadas]');
   const excepcionesSection = mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
     'Contenido pendiente de instrucción expresa del abogado.');
   const pruebasSection = mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7,
@@ -189,14 +240,18 @@ function buildRichContestacionSkeleton(
           : '[DATO PENDIENTE DE EXPEDIENTE: Menciones probatorias]'));
   const derechoSeed = isLaborContestacion
     ? 'FUNDAMENTOS DE DERECHO:\nLa fundamentación normativa y de autoridad requiere verificar el régimen aplicable y las fuentes oficiales, y relacionarlas con hechos y pruebas identificados en el expediente. No se incorpora cita ni conclusión jurídica que no haya sido verificada; la regla, aplicación y conclusión quedan sujetas a revisión del abogado.'
+    : isCivilContestacion
+      ? 'FUNDAMENTOS DE DERECHO:\n[DATO PENDIENTE: Fundamentos aplicables y verificación en fuente oficial]. No se afirma vigencia ni aplicabilidad sin investigación jurídica verificable.'
     : hasParties
       ? `FUNDAMENTOS DE DERECHO:\nSon aplicables las disposiciones sustantivas y adjetivas que rigen la materia procesal y la personería de la parte demandada ${roles.contesta}.`
       : 'Fundamentos de derecho pendientes de verificación y confirmación por el abogado.';
   const derechoSection = mkSection(templateId, 'sec-con-derecho', 'legal_grounds', 'DERECHO', 8, derechoSeed);
   const alegatosSection = mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
     hasParties
-      ? `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\nSe solicita la total absolución frente a las pretensiones de ${roles.contraparte}, al haberse desvirtuado la procedencia de la acción principal y acreditarse las defensas opuestas.`
+      ? `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: síntesis vinculada a las posturas, excepciones y pruebas efectivamente formuladas; no se presume absolución ni defensas acreditadas].`
       : 'Contenido pendiente de instrucción expresa del abogado.');
+  const argumentosSection = mkSection(templateId, 'sec-con-argumentos', 'argument', 'ARGUMENTOS', 8.5,
+    '[REQUIERE INSTRUCCIÓN DEL ABOGADO: Argumentos vinculados a las posturas, hechos y pruebas identificados; no se presume absolución ni defensas acreditadas].');
   const petitoriosSection = mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', isLaborContestacion ? 10 : 9,
     hasParties
       ? `PUNTOS PETITORIOS:\n\nPRIMERO. Tener por reconocida la personalidad de la parte demandada ${roles.contesta}, y por contestada en tiempo y forma la demanda promovida por ${roles.contraparte}.\nSEGUNDO. Tener por contestados los hechos y prestaciones, admitiendo las excepciones y defensas opuestas.\nTERCERO. Previos los trámites de ley, absolver a la parte demandada.`
@@ -225,7 +280,7 @@ function buildRichContestacionSkeleton(
     ...(isCivilContestacion ? [prestacionesSection, hechosSection] : [hechosSection, prestacionesSection]),
     excepcionesSection,
     pruebasSection,
-    ...(isCivilContestacion ? [derechoSection] : isLaborContestacion ? [derechoSection, { ...alegatosSection, order: 9 }] : [alegatosSection]),
+    ...(isCivilContestacion ? [derechoSection, argumentosSection] : isLaborContestacion ? [derechoSection, { ...alegatosSection, order: 9 }] : [alegatosSection]),
     petitoriosSection,
     firmaSection,
   ];
@@ -279,6 +334,11 @@ export const CONTESTACION_SECTION_INSTRUCTIONS: Record<string, string> = {
     'Cierre y firma: protesto de ley y lugar/fecha (si la fecha no consta usa [DATO PENDIENTE DE EXPEDIENTE: Fecha de presentación]), línea de firma con el nombre exacto de QUIEN CONTESTA (el demandado) y su carácter procesal. Nunca firmes con el nombre del actor ni de la autoridad.',
 };
 
+/** Quita la numeración original («1. ») y los puntos finales de un hecho de la demanda. */
+function cleanFactText(value: string | undefined): string {
+  return String(value || '').replace(/^\s*\d+\s*[.)-]\s*/, '').replace(/[.\s]+$/, '');
+}
+
 export function buildContestacionSkeleton(
   doc: UniversalLegalDocument,
   caseAnalysis?: CaseAnalysis,
@@ -294,7 +354,9 @@ export function buildContestacionSkeleton(
   // separados de la postura: una afirmación de la demanda nunca se presenta
   // como hecho propio del demandado.
   const hechosRef = (caseAnalysis?.facts || []).map((fact) => [
-    `AL HECHO ${fact.number}.- ${fact.number}. ${fact.sourceFact || fact.text}. La parte actora afirma: "${fact.sourceFact || fact.text}"`,
+    // El hecho conserva su numeración original ("1. …") y su punto final: sin limpiarlos salía
+    // «AL HECHO 1.- 1. … 4.. La parte actora afirma…». Se citan una sola vez y sin duplicar el número.
+    `AL HECHO ${fact.number}.- La parte actora afirma: "${cleanFactText(fact.sourceFact || fact.text)}."`,
     `POSTURA PROCESAL: ${fact.lawyerPosition === 'ADMIT' || fact.position === 'ADMIT' ? 'SE ADMITE' : fact.lawyerPosition === 'DENY' || fact.position === 'DENY' ? 'SE NIEGA' : fact.lawyerPosition === 'PARTIAL' || fact.position === 'PARTIAL' ? 'SE ADMITE PARCIALMENTE' : fact.lawyerPosition === 'NOT_KNOWN' || fact.position === 'IGNORE_PERSONAL_KNOWLEDGE' ? 'NO SE TIENE POR CONFIRMADO' : '[REQUIERE DEFINIR POSTURA DEL ABOGADO]'}`,
     `RESPUESTA: ${fact.lawyerObservation || fact.manualResponse || (fact.lawyerPosition && fact.lawyerPosition !== 'UNDEFINED' ? fact.lawyerPosition : fact.response) || '[REQUIERE DEFINIR POSTURA DEL ABOGADO]'}`,
     `FUENTE: ${fact.sourceReference?.documentId || fact.documentId || 'fuente-no-identificada'}${fact.sourceReference?.page || fact.page ? ` · página ${fact.sourceReference?.page || fact.page}` : ''}.`,
@@ -304,22 +366,23 @@ export function buildContestacionSkeleton(
     : (caseAnalysis?.claims || []).map((claim, i) => `PRESTACIÓN ${i + 1}.- La parte actora reclama: "${claim}"\nPOSTURA: [REQUIERE DEFINIR POSTURA DEL ABOGADO]`).join('\n\n');
 
   const proemioSeed = `${roles.autoridad || 'H. TRIBUNAL COMPETENTE EN TURNO'}\nEXPEDIENTE: ${roles.expediente}\nASUNTO: Contestación de demanda`;
-  const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: Con la personalidad que se tiene debidamente acreditada en autos y señalando como domicilio procesal el que obra en el expediente.`;
-  const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE (responder punto por punto; conserva redacciones *****):\n${hechosRef || 'Hechos identificados en las constancias del expediente.'}`;
+  const personality = doc.caseContext?.civil?.personality;
+  const comparecenciaSeed = `QUIEN CONTESTA (DEMANDADO): ${roles.contesta}\nPARTE CONTRARIA (ACTOR): ${roles.contraparte}\nPERSONALIDAD: ${personality?.status === 'CONFIRMED' && personality.value ? personality.value : '[PENDIENTE: confirmar personalidad y soporte con el abogado]'}\nDOMICILIO: [PENDIENTE: confirmar domicilio procesal].`;
+  const hechosSeed = `HECHOS AFIRMADOS POR LA CONTRAPARTE:\n${hechosRef || 'Hechos identificados en las constancias del expediente.'}`;
   const confirmedEvidence = (caseAnalysis?.evidence || []).filter((e) => e.confirmed === true);
   const pruebasSeed = confirmedEvidence.length > 0
     ? `PRUEBAS:\n\n${confirmedEvidence.map((e, i) => `${i + 1}. ${e.description}`).join('\n')}`
     : (caseAnalysis?.evidence || []).length > 0
-      ? `FUENTES PROBATORIAS DISPONIBLES EN EL EXPEDIENTE:\n${caseAnalysis!.evidence.map((e) => `- ${e.description}`).join('\n')}\n\nSe formaliza la relación de pruebas dentro del término procesal legal oportuno.`
-      : 'Se formaliza la relación de pruebas dentro del término procesal legal oportuno.';
+      ? `MENCIONES PROBATORIAS DE LA FUENTE SIN OFRECIMIENTO CONFIRMADO:\n${caseAnalysis!.evidence.map((e) => `- ${e.description}`).join('\n')}\n\n[REQUIERE DEFINIR PRUEBAS A OFRECER]`
+      : '[REQUIERE DEFINIR PRUEBAS A OFRECER]';
 
   const isLaboral =
     (doc.matter && /laboral/i.test(doc.matter)) ||
     (doc.documentType && /laboral/i.test(doc.documentType));
 
   if (!isLaboral) {
-    const objecionPruebasSeed = 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA:\nSe objetan en cuanto a su alcance y valor probatorio las pruebas ofrecidas por la contraria.';
-    const derechoSeed = 'DERECHO:\nSon aplicables las disposiciones legales sustantivas y adjetivas conforme a derecho.';
+    const objecionPruebasSeed = 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA:\n[REQUIERE POSTURA DEL ABOGADO: identificar cada prueba objetada y la causa concreta de objeción; no se objeta de forma genérica].';
+    const derechoSeed = 'DERECHO:\n[DATO PENDIENTE: fundamentos aplicables y verificación en fuente oficial]. No se afirma vigencia ni aplicabilidad sin investigación jurídica verificable.';
 
     return [
       mkSection(templateId, 'sec-con-proemio', 'header', 'PROEMIO', 1, proemioSeed),
@@ -329,7 +392,7 @@ export function buildContestacionSkeleton(
       mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 4, prestacionesSeed),
       mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 5, hechosSeed),
       mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
-        'EXCEPCIONES Y DEFENSAS:\nSe oponen las excepciones y defensas de falta de acción y derecho (sine actione agis), obscuridad y defecto legal de la demanda, y las que deriven de las constancias procesales.'),
+        'EXCEPCIONES Y DEFENSAS:\n[REQUIERE POSTURA DEL ABOGADO: no se formula una excepción por inferencia; cada excepción debe conectar hecho, prueba y fundamento].'),
       mkSection(templateId, 'sec-con-objecion-pruebas', 'argument', 'OBJECIÓN DE PRUEBAS DE LA PARTE ACTORA', 7, objecionPruebasSeed),
       mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS PROPIAS DE LA DEMANDADA', 8, pruebasSeed),
       mkSection(templateId, 'sec-con-derecho', 'legal_grounds', 'DERECHO', 9, derechoSeed),
@@ -347,10 +410,10 @@ export function buildContestacionSkeleton(
     mkSection(templateId, 'sec-con-hechos', 'background', 'CONTESTACIÓN DE HECHOS', 4, hechosSeed),
     mkSection(templateId, 'sec-con-prestaciones', 'argument', 'CONTESTACIÓN DE PRESTACIONES', 5, prestacionesSeed),
     mkSection(templateId, 'sec-con-excepciones', 'argument', 'EXCEPCIONES Y DEFENSAS', 6,
-      'EXCEPCIONES Y DEFENSAS:\nSe oponen las excepciones y defensas de falta de acción y derecho (sine actione agis), inexistencia de despido injustificado, obscuridad y defecto legal de la demanda, y las demás sustentadas en autos.'),
+      'EXCEPCIONES Y DEFENSAS:\n[REQUIERE POSTURA DEL ABOGADO: no se formula una excepción por inferencia; cada excepción debe conectar hecho, prueba y fundamento].'),
     mkSection(templateId, 'sec-con-pruebas', 'evidence', 'PRUEBAS', 7, pruebasSeed),
     mkSection(templateId, 'sec-con-alegatos', 'argument', 'ALEGATOS', 8,
-      `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\nSe solicita la total absolución frente a las pretensiones de la accionante ${roles.contraparte}, al haberse desvirtuado la existencia del despido alegado y acreditarse las excepciones opuestas.`),
+      `SÍNTESIS ALEGATIVA DE LA PARTE DEMANDADA ${roles.contesta}:\n[REQUIERE INSTRUCCIÓN DEL ABOGADO: síntesis vinculada a las posturas, excepciones y pruebas efectivamente formuladas; no se presume absolución ni defensas acreditadas].`),
     mkSection(templateId, 'sec-con-petitorios', 'petition', 'PETITORIOS', 9, 'PETITORIOS'),
     mkSection(templateId, 'sec-con-firma', 'signature', 'FIRMA', 10,
       `PROTESTO LO NECESARIO.\nLUGAR Y FECHA: A la fecha de su presentación.\n\n_________________________________________\n${roles.contesta}\nPARTE DEMANDADA`),
@@ -540,7 +603,16 @@ export const REVISION_AMPARO_DIRECTO_SECTION_INSTRUCTIONS: Record<string, string
     'Cierra con protesta, lugar y fecha pendientes si no constan, y la firma de la parte promovente o recurrente confirmada. Nunca firmes por la autoridad emisora.',
 };
 
+/** Ficha del caso confirmada por el abogado, si la hay: única fuente de la parte que firma y del órgano. */
+function confirmedDossier(doc: UniversalLegalDocument): CaseDossier | undefined {
+  const dossier = (doc.generationMetadata as { caseDossier?: CaseDossier } | undefined)?.caseDossier;
+  return dossier?.confirmed ? dossier : undefined;
+}
+
 function revisionParty(doc: UniversalLegalDocument): string {
+  // A quién representa el abogado lo eligió él; nunca se toma al azar un nombre del expediente (ponente, secretario…).
+  const represented = confirmedDossier(doc)?.representedName?.trim();
+  if (represented) return represented;
   return formatCaseContextField(
     doc.caseContext,
     'promovente',
@@ -560,9 +632,19 @@ function safeRequestedEffects(caseAnalysis?: CaseAnalysis): string[] {
     .filter((effect) => !/^revocar o dejar insubsistente .* conforme a derecho\.?$/i.test(effect))));
 }
 
-function buildSafePetitions(caseAnalysis?: CaseAnalysis): string {
+function buildSafePetitions(caseAnalysis?: CaseAnalysis, isRecurso = false): string {
   const effects = safeRequestedEffects(caseAnalysis);
-  if (!effects.length) return '[REQUIERE CONFIRMACIÓN DEL ABOGADO: efecto procesal solicitado]';
+  if (!effects.length) {
+    // Fórmulas procesales del recurso que no afirman nada del caso; el efecto que se pide (revocar, modificar…) lo
+    // define el abogado y queda en el anexo de revisión.
+    return isRecurso
+      ? [
+          'PRIMERO. Tener por interpuesto el presente recurso de revisión en amparo directo.',
+          'SEGUNDO. Remitir los autos a la Suprema Corte de Justicia de la Nación para su resolución.',
+          '[REQUIERE CONFIRMACIÓN DEL ABOGADO: efecto procesal solicitado]',
+        ].join('\n')
+      : '[REQUIERE CONFIRMACIÓN DEL ABOGADO: efecto procesal solicitado]';
+  }
   return effects.map((effect, index) => `${ORDINALS[index] || `${index + 1}.`} ${effect}`).join('\n');
 }
 
@@ -626,23 +708,9 @@ function sourceBackedIssueText(caseAnalysis?: CaseAnalysis): string {
     return formatted.join('\n\n---\n\n');
   }
 
-  // Fallback: desarrollar desde caseTheory si existe
-  const theory = caseAnalysis?.caseTheory;
-  if (theory?.constitutionalTheory || theory?.legalTheory) {
-    const developed: string[] = [];
-    if (theory.constitutionalTheory) {
-      developed.push(`PLANTEAMIENTO CONSTITUCIONAL IDENTIFICADO EN LAS FUENTES:\n${theory.constitutionalTheory}`);
-    }
-    if (theory.legalTheory) {
-      developed.push(`MARCO NORMATIVO APLICABLE:\n${theory.legalTheory}`);
-    }
-    if (theory.factualTheory) {
-      developed.push(`CONTROVERSIA SUBYACENTE:\n${theory.factualTheory}`);
-    }
-    return developed.join('\n\n') + '\n\n[PENDIENTE DE REVISIÓN: confirmar la cuestión constitucional y el interés excepcional con el abogado]';
-  }
-
-  return '[DATO PENDIENTE DE EXPEDIENTE: Cuestión constitucional e interés excepcional confirmados]';
+  // La teoría del caso es contexto interno de redacción («debe sostenerse…», «debe contrastarse…»): no es
+  // una cuestión identificada en las fuentes y no se imprime como tal en el escrito.
+  return '[REQUIERE POSTURA DEL ABOGADO: cuestión de constitucionalidad planteada y su interés excepcional, con las constancias que la sustentan]';
 }
 
 function sourceBackedArguments(caseAnalysis?: CaseAnalysis): string {
@@ -652,31 +720,19 @@ function sourceBackedArguments(caseAnalysis?: CaseAnalysis): string {
     return axes.map((axis, i) => formatIndividualAgravio(axis, i, caseAnalysis)).join('\n\n=========================================\n\n');
   }
 
-  // 2. Desarrollar desde caseTheory + challengedActs + rulings
-  const theory = caseAnalysis?.caseTheory;
-  const hasSubstance = theory?.factualTheory || theory?.legalTheory || theory?.constitutionalTheory
-    || caseAnalysis?.challengedActs?.length || caseAnalysis?.rulings?.length;
-  if (hasSubstance) {
-    const parts: string[] = [];
-    if (theory?.factualTheory) {
-      parts.push(`PLANTEAMIENTO FÁCTICO:\n${theory.factualTheory}`);
-    }
-    if (caseAnalysis?.challengedActs?.length) {
-      parts.push(`ACTOS IMPUGNADOS:\n${caseAnalysis.challengedActs.map((act) => `${act.authority}: ${act.actDescription}`).join('\n')}`);
-    }
-    if (theory?.constitutionalTheory) {
-      parts.push(`AGRAVIO CONSTITUCIONAL IDENTIFICADO:\n${theory.constitutionalTheory}`);
-    }
-    if (theory?.legalTheory) {
-      parts.push(`SUSTENTO NORMATIVO DEL AGRAVIO:\n${theory.legalTheory}`);
-    }
-    if (caseAnalysis?.rulings?.length) {
-      parts.push(`RESOLUCIÓN IMPUGNADA:\n${caseAnalysis.rulings.map((r) => [r.body, r.date, r.rulingText].filter(Boolean).join(' — ')).join('\n')}`);
-    }
-    return `AGRAVIO PRIMERO. PLANTEAMIENTO INTEGRAL DE AGRAVIOS\n\n${parts.join('\n\n')}\n\n[PENDIENTE DE REVISIÓN: individualizar y confirmar cada agravio con su sustento procesal]`;
+  // 2. Solo lo extraído de la fuente (actos impugnados, resolución). La teoría del caso es contexto interno
+  // y no se imprime como agravio; sin instrucción no se afirma ninguna violación.
+  const parts: string[] = [];
+  if (caseAnalysis?.challengedActs?.length) {
+    parts.push(`ACTOS IMPUGNADOS:\n${caseAnalysis.challengedActs.map((act) => `${act.authority}: ${act.actDescription}`).join('\n')}`);
   }
-
-  return 'AGRAVIO ÚNICO. VIOLACIÓN AL PARÁMETRO DE CONTROL DE REGULARIDAD CONSTITUCIONAL:\nLa resolución recurrida transgrede en perjuicio de la recurrente las garantías de legalidad, debido proceso y acceso a la justicia consagradas en los artículos 14, 16 y 17 de la Constitución Federal, al haber omitido la fijación e interpretación directa del principio constitucional invocado en la demanda de amparo.\n\n[PENDIENTE DE REVISIÓN: confirmar agravios específicos con el abogado]';
+  if (caseAnalysis?.rulings?.length) {
+    parts.push(`RESOLUCIÓN IMPUGNADA:\n${caseAnalysis.rulings.map((r) => [r.body, r.date, r.rulingText].filter(Boolean).join(' — ')).join('\n')}`);
+  }
+  const pending = '[REQUIERE POSTURA DEL ABOGADO: agravios concretos — consideración combatida, por qué es incorrecta y qué derecho o norma se vulnera; no se formula un agravio por inferencia]';
+  return parts.length
+    ? `AGRAVIOS\n\n${parts.join('\n\n')}\n\n${pending}`
+    : `AGRAVIOS\n\n${pending}`;
 }
 
 export function buildVerifiedLegalGroundsText(
@@ -703,19 +759,12 @@ export function buildVerifiedLegalGroundsText(
     sections.push(`CRITERIOS JURISPRUDENCIALES VERIFICADOS:\n${citsText}`);
   }
 
-  // 2. Parámetro constitucional y convencional
-  const constTheory = caseAnalysis?.caseTheory?.constitutionalTheory;
-  if (constTheory) {
-    sections.push(`PARÁMETRO CONSTITUCIONAL Y CONVENCIONAL:\n${constTheory}`);
-  }
-
-  // 3. Fundamento legal y procesal verificado en las fuentes
-  const legalTheory = caseAnalysis?.caseTheory?.legalTheory;
+  // 2. Fundamento legal y procesal de las fuentes. La teoría del caso (parámetro constitucional, teoría
+  // jurídica) es contexto interno de redacción, no una norma: no se lista como fundamento.
   const docBasis = doc.legalBasis || [];
   const axisRules = Array.from(new Set((caseAnalysis?.argumentAxes || []).flatMap((a) => a.rules || [])));
   const allNorms = Array.from(new Set([
     ...docBasis,
-    ...(legalTheory ? [legalTheory] : []),
     ...axisRules,
   ])).filter(Boolean);
 
@@ -737,7 +786,14 @@ export function buildRevisionAmparoDirectoSkeleton(
 ): DocumentNode[] {
   const caseNumber = revisionCaseNumber(doc, caseAnalysis);
   const party = revisionParty(doc);
-  const authority = doc.parties.autoridadResponsable || caseAnalysis?.authorities?.[0] || 'Órgano jurisdiccional competente';
+  const dossier = confirmedDossier(doc);
+  const authority = dossier?.court || doc.parties.autoridadResponsable || firstIssuingAuthority(caseAnalysis?.authorities) || 'Órgano jurisdiccional competente';
+  // El mismo esqueleto sirve a dos escritos distintos: no se mezclan sus nombres.
+  const isRecurso = doc.documentType === 'recurso_revision_amparo_directo' || doc.documentTypeLabel === 'recurso_revision_amparo_directo';
+  const escritoLabel = isRecurso
+    ? 'recurso de revisión en amparo directo'
+    : 'contestación / revisión extraordinaria frente a sentencia de amparo directo';
+  const authorityLabel = isRecurso ? 'ÓRGANO QUE DICTÓ LA SENTENCIA RECURRIDA' : 'AUTORIDAD O ÓRGANO IDENTIFICADO';
   const resolution = caseAnalysis?.rulings?.length
     ? caseAnalysis.rulings.map((ruling) => [ruling.body, ruling.date, ruling.rulingText].filter(Boolean).join(' — ')).join('\n')
     : caseAnalysis?.challengedActs?.length
@@ -749,15 +805,15 @@ export function buildRevisionAmparoDirectoSkeleton(
   const grounds = buildVerifiedLegalGroundsText(doc, caseAnalysis);
 
   return [
-    mkSection(templateId, 'sec-crad-asunto', 'header', 'IDENTIFICACIÓN DEL ASUNTO', 1, `TIPO DE ESCRITO: contestación / revisión extraordinaria frente a sentencia de amparo directo\nEXPEDIENTE O AMPARO DIRECTO: ${caseNumber}\nAUTORIDAD O ÓRGANO IDENTIFICADO: ${authority}`),
+    mkSection(templateId, 'sec-crad-asunto', 'header', 'IDENTIFICACIÓN DEL ASUNTO', 1, `TIPO DE ESCRITO: ${escritoLabel}\nEXPEDIENTE O AMPARO DIRECTO: ${caseNumber}\n${authorityLabel}: ${authority}`),
     mkSection(templateId, 'sec-crad-comparecencia', 'identity', 'COMPARECENCIA Y PERSONALIDAD', 2, `${party}\nPERSONALIDAD: [REQUIERE CONFIRMACIÓN DEL ABOGADO: carácter con el que comparece, representación, domicilio y autorizados]`),
     mkSection(templateId, 'sec-crad-sentencia', 'background', 'SENTENCIA DE AMPARO DIRECTO IMPUGNADA', 3, `EXPEDIENTE: ${caseNumber}\n${resolution}`),
     mkSection(templateId, 'sec-crad-antecedentes', 'background', 'ANTECEDENTES PROCESALES', 4, antecedents),
     mkSection(templateId, 'sec-crad-cuestion', 'legal_grounds', 'CUESTIÓN CONSTITUCIONAL Y/O PLANTEAMIENTO EXTRAORDINARIO', 5, sourceBackedIssueText(caseAnalysis)),
     mkSection(templateId, 'sec-crad-agravios', 'argument', 'AGRAVIOS / ARGUMENTOS', 6, sourceBackedArguments(caseAnalysis)),
     mkSection(templateId, 'sec-crad-fundamentos', 'legal_grounds', 'FUNDAMENTOS SUSTENTADOS', 7, grounds),
-    mkSection(templateId, 'sec-crad-petitorios', 'petition', 'PETITORIOS', 8, buildSafePetitions(caseAnalysis)),
-    mkSection(templateId, 'sec-crad-cierre', 'signature', 'CIERRE Y FIRMA', 9, `PROTESTO LO NECESARIO.\nCiudad de México, a la fecha de su presentación.\n\n_________________________________________\n${party}`),
+    mkSection(templateId, 'sec-crad-petitorios', 'petition', 'PETITORIOS', 8, buildSafePetitions(caseAnalysis, isRecurso)),
+    mkSection(templateId, 'sec-crad-cierre', 'signature', 'CIERRE Y FIRMA', 9, `${closingText(dossier?.city)}\n\n${signatureText(party, isRecurso ? 'Parte recurrente' : 'Promovente')}`),
   ];
 }
 

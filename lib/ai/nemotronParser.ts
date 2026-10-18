@@ -5,6 +5,7 @@ import type {
   DocumentBlockType,
   BlockStyle,
 } from '../legal-engine/types';
+import { recordExternalEgress } from './externalEgressLedger';
 
 export interface NemotronParserConfig {
   apiKey?: string;
@@ -17,7 +18,7 @@ export interface NemotronParseResult {
   ok: boolean;
   structuredDocument?: StructuredDocument;
   extractedText?: string;
-  reason?: 'not_configured' | 'api_error' | 'success';
+  reason?: 'not_configured' | 'not_consented' | 'api_error' | 'success';
   message?: string;
   error?: string;
 }
@@ -334,8 +335,19 @@ export async function parseDocumentWithNemotron(input: {
   fileName: string;
   mimeType?: string;
   pages?: Array<{ pageNumber: number; text: string }>;
+  /** Solo con consentimiento explícito se envía una imagen a NVIDIA. Por defecto, nunca. */
+  externalProviderOptIn?: boolean;
 }): Promise<NemotronParseResult> {
   const config = getNemotronConfig();
+  const isImageInput = input.mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(input.fileName);
+  // La rama de imágenes es la única que transmite el documento (imagen en base64) a un proveedor externo.
+  if (isImageInput && input.externalProviderOptIn !== true) {
+    return {
+      ok: false,
+      reason: 'not_consented',
+      message: 'Sin consentimiento explícito no se envía la imagen a NVIDIA Nemotron-Parse; se usa la extracción local.',
+    };
+  }
 
   // Si NVIDIA_API_KEY no está configurada, retornar fallback seguro
   if (!config.apiKey || !config.apiKey.trim()) {
@@ -357,7 +369,15 @@ export async function parseDocumentWithNemotron(input: {
       const base64Data = input.buffer.toString('base64');
       const dataUri = `data:${input.mimeType || 'image/jpeg'};base64,${base64Data}`;
 
-      const rawContent = await callNemotronApiForPage(dataUri, config);
+      const startedAt = Date.now();
+      let rawContent: string;
+      try {
+        rawContent = await callNemotronApiForPage(dataUri, config);
+      } catch (error) {
+        void recordExternalEgress({ requestId: null, provider: 'nvidia', model: config.model || null, operation: 'image_parse', channel: 'image_parse', attempt: 1, charsSent: dataUri.length, charsReceived: 0, outcome: 'ERROR', errorCode: 'NEMOTRON_API_ERROR', latencyMs: Date.now() - startedAt });
+        throw error;
+      }
+      void recordExternalEgress({ requestId: null, provider: 'nvidia', model: config.model || null, operation: 'image_parse', channel: 'image_parse', attempt: 1, charsSent: dataUri.length, charsReceived: rawContent.length, outcome: 'OK', errorCode: null, latencyMs: Date.now() - startedAt });
       const pageBlocks = normalizeNemotronOutput(rawContent, 1);
 
       allBlocks.push(...pageBlocks);

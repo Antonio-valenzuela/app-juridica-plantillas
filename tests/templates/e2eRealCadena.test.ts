@@ -19,8 +19,8 @@ async function upload(filePath: string, mime: string, name: string) {
 
 describe('E2E cadena real (caso + machote reales)', () => {
   it('pipeline + quality gate + métricas + DOCX + PDF real + persistencia', async () => {
-    const file1 = 'C:/Users/yahir/AppData/Local/Temp/opencode/real-docs/0129000036717288006AST.PDF';
-    const file2 = 'C:/Users/yahir/AppData/Local/Temp/opencode/real-docs/machote-real.pdf';
+    const file1 = 'RUTA_LOCAL';
+    const file2 = 'RUTA_LOCAL';
     if (!existsSync(file1) || !existsSync(file2)) {
       console.log('[E2E Real Cadena] Archivos de prueba externos no encontrados - prueba omitida');
       return;

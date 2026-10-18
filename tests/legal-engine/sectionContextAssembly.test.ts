@@ -10,6 +10,7 @@ import type { SectionPlan } from '@/lib/legal-engine/pipeline';
 import { makeFixtureDocument, makeFixtureFCaseAnalysis } from '@/tests/fixtures/richCoverageFixtures';
 import { projectSectionPlanFromTasks } from '@/lib/legal-engine/sectionPlanning';
 import { assembleSectionContextPacket } from '@/lib/legal-engine/sectionContextAssembly';
+import { createDocumentState } from '@/lib/legal-engine/documentState';
 
 const section = createDocumentNode({
   id: 'sec-pruebas',
@@ -170,6 +171,29 @@ function fixture(overrides: Partial<CaseAnalysis> = {}): {
 }
 
 describe('SectionPlan and SectionContextPacket', () => {
+  it('preserves a theory explicitly scoped to the section and its admitted facts and evidence', () => {
+    const value = fixture();
+    const argument = value.analysis.richCaseAnalysis!.arguments[0];
+    argument.supportingFactIds = ['fixture-f-fact-1'];
+    value.doc.legalIssueMatrix!.issues[0].argumentIds = [argument.id];
+    const state = createDocumentState(value.analysis, value.doc.legalIssueMatrix);
+    const packet = assembleSectionContextPacket({ doc: value.doc, caseAnalysis: value.analysis, section, sectionPlan: value.sectionPlan, tasks: value.tasks, issueOutcomes: value.outcomes, documentState: state });
+    expect(packet.argumentSupports).toEqual([expect.objectContaining({ argumentId: argument.id, factRefs: ['fixture-f-fact-1'], evidenceRefs: ['fixture-f-evidence-mention-1'] })]);
+    expect(packet.argumentSupports![0].reviewStatus).toBe('REVIEW_REQUIRED');
+  });
+  it('does not inject the whole matter theory into an unrelated section', () => {
+    const value = fixture();
+    const state = createDocumentState(value.analysis, value.doc.legalIssueMatrix);
+    const packet = assembleSectionContextPacket({ doc: value.doc, caseAnalysis: value.analysis, section, sectionPlan: value.sectionPlan, tasks: value.tasks, issueOutcomes: value.outcomes, documentState: state });
+    expect(packet.argumentSupports).toEqual([]);
+    expect(JSON.stringify(packet)).not.toContain('La fuente vincula el hecho 2 con el petitorio.');
+  });
+
+  it('rejects document state copied from a different matter', () => {
+    const value = fixture();
+    const state = createDocumentState(value.analysis, { ...value.doc.legalIssueMatrix!, documentId: 'OTHER_MATTER' });
+    expect(() => assembleSectionContextPacket({ doc: value.doc, caseAnalysis: value.analysis, section, sectionPlan: value.sectionPlan, tasks: value.tasks, issueOutcomes: value.outcomes, documentState: state })).toThrow('MATTER_DOCUMENT_MISMATCH');
+  });
   it('projects several GenerationTasks into one canonical SectionPlan without losing IDs or provenance', () => {
     const value = fixture();
     const projected = projectSectionPlanFromTasks({

@@ -3,12 +3,37 @@ export type AIResponseOrigin =
   | "AI_GENERATED_LEGAL_CONTENT"
   | "LOCAL_PLACEHOLDER"
   | "DETERMINISTIC_FALLBACK"
+  /** P0-A: generación jurídica sin provider externo; queda como pendiente. */
+  | "PROVIDER_UNAVAILABLE"
   | "USER"
   | "SOURCE_DIRECT";
 
 export interface AIRequest {
+  /** Cancelación cooperativa del pipeline: aborta la llamada en curso y impide las siguientes. */
+  signal?: AbortSignal;
+  /**
+   * Propósito EXPRESO de la llamada. `UI_ASSISTANT` es el chat/asistente de la
+   * interfaz; `LEGAL_GENERATION` es redacción jurídica.
+   *
+   * El LocalProvider sirve para ambos. Sin esta distinción contractual, un
+   * prompt jurídico que contiene palabras como "sección", "pantalla" o "página"
+   * caía en la respuesta de ayuda de pantalla y esa ayuda terminaba dentro de
+   * un escrito jurídico (P0).
+   *
+   * Ante la ausencia de `purpose` se conserva el comportamiento histórico
+   * (asistente de interfaz) para no alterar el chat existente.
+   */
+  purpose?: "UI_ASSISTANT" | "LEGAL_GENERATION";
   /** Per-request external transfer consent, independent of case privacy classification. */
   externalProviderOptIn?: boolean;
+  /**
+   * Proveedores remotos que el abogado autorizó EXPRESAMENTE para esta operación (los que vio en el panel).
+   * Si se indica, ningún otro proveedor remoto —tampoco como respaldo— se intenta. Sin la lista, el
+   * consentimiento cubre la cadena configurada (llamadores que no muestran el panel con proveedores).
+   */
+  authorizedExternalProviders?: string[];
+  /** Contrato de voz y contenido del escrito; el router lo antepone al prompt de sistema. */
+  writingContractPrompt?: string;
   /** Defaults to true; remains true for private case material even with explicit external consent. */
   privateCaseContext?: boolean;
   systemPrompt?: string;

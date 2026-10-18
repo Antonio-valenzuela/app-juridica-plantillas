@@ -195,7 +195,9 @@ describe('§5 — Contratos de exportación a través de las rutas API de Next.j
     const req = new NextRequest('http://localhost/api/legal-engine/export/docx', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document: doc }),
+      // FINAL exige aprobación jurídica del tipo (ver finalExportAuthorization.test.ts); la
+      // serialización binaria se verifica con el modo DRAFT, que es el único descargable hoy.
+      body: JSON.stringify({ document: doc, exportMode: 'DRAFT' }),
     });
 
     const res = await POST_exportDocx(req);
@@ -217,7 +219,7 @@ describe('§5 — Contratos de exportación a través de las rutas API de Next.j
     const req = new NextRequest('http://localhost/api/legal-engine/export/pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document: doc }),
+      body: JSON.stringify({ document: doc, exportMode: 'DRAFT' }),
     });
 
     const res = await POST_exportPdf(req);

@@ -44,6 +44,7 @@ export interface QualityGateResult {
     duplicateFactResponseCount: number;
     unsupportedFactualClaimCount: number;
     unverifiedFactualClaimCount?: number;
+    contradictoryFactualClaimCount?: number;
     unsupportedLegalAuthorities?: number;
     verifiedAuthorityCount?: number;
     appliedAuthorityCount?: number;
@@ -158,6 +159,7 @@ export function runQualityGateCheck(
   let duplicateFactResponseCount = 0;
   let unsupportedFactualClaimCount = 0;
   let unverifiedFactualClaimCount = 0;
+  let contradictoryFactualClaimCount = 0;
   let unsupportedLegalAuthorities = 0;
   let verifiedAuthorityCount = 0;
   let appliedAuthorityCount = 0;
@@ -179,11 +181,15 @@ export function runQualityGateCheck(
     });
     unsupportedFactualClaimCount += factualAudit.unsupportedClaims;
     unverifiedFactualClaimCount += factualAudit.unverifiedClaims;
+    contradictoryFactualClaimCount += factualAudit.contradictoryClaims;
     if (factualAudit.issues.some((issue) => issue.startsWith('CLAIM_AUDIT_MISSING:'))) {
       criticalErrors.push({ checkId: 'FACTUAL_CLAIM_AUDIT_MISSING', message: 'Hay afirmaciones generadas sin clasificación y trazabilidad individual a la fuente.' });
     }
     if (factualAudit.unsupportedClaims > 0) {
       criticalErrors.push({ checkId: 'UNSUPPORTED_FACTUAL_CLAIM', message: `${factualAudit.unsupportedClaims} afirmación(es) factual(es) no sustentadas.` });
+    }
+    if (factualAudit.contradictoryClaims > 0) {
+      criticalErrors.push({ checkId: 'FACTUAL_CLAIM_CONTRADICTORY', message: `${factualAudit.contradictoryClaims} afirmación(es) contradicen spans identificables de la fuente.` });
     }
     if (factualAudit.issues.some((issue) => !issue.startsWith('CLAIM_AUDIT_MISSING:')) && factualAudit.unsupportedClaims === 0) {
       criticalErrors.push({ checkId: 'FACTUAL_CLAIM_UNVERIFIED', message: 'La trazabilidad o clasificación factual contiene afirmaciones aún no verificadas.' });
@@ -291,10 +297,11 @@ export function runQualityGateCheck(
       const unresolvedMarkers = extractUnresolvedFieldMarkers(normalizedSecText);
       const pendingMarkers = unresolvedMarkers.filter((marker) => marker.kind === 'PENDING');
       const anonymizedMarkers = unresolvedMarkers.filter((marker) => marker.kind === 'ANONYMIZED');
+      const pendingMarkerCauses = [...new Set(pendingMarkers.map((marker) => marker.cause))];
       pendingFieldsCount += pendingMarkers.length + anonymizedMarkers.length;
       anonymizedFieldsCount += anonymizedMarkers.length;
 
-      const rawBracketMatches = normalizedSecText.match(/\[(?!DATO PENDIENTE|DATO ANONIMIZADO|NO VERIFICADO|DOCUMENTO GENERADO)[A-ZÁÉÍÓÚÑ_\s]{3,}\]/g);
+      const rawBracketMatches = normalizedSecText.match(/\[(?!DATO PENDIENTE|DATO ANONIMIZADO|PENDIENTE|NO VERIFICADO|DOCUMENTO GENERADO)[A-ZÁÉÍÓÚÑ_\s]{3,}\]/g);
       if (rawBracketMatches) {
         pendingFieldsCount += rawBracketMatches.length;
         warnings.push({
@@ -310,7 +317,7 @@ export function runQualityGateCheck(
         warnings.push({
           checkId: `pending_data_${sec.id}`,
           sectionId: sec.id,
-          message: `La sección "${sec.title}" contiene ${pendingMatches.length} campo(s) pendiente(s) o no resuelto(s).`
+          message: `La sección "${sec.title}" contiene ${pendingMatches.length} campo(s) pendiente(s) o no resuelto(s). Causas: ${pendingMarkerCauses.join(', ')}.`
         });
       }
 
@@ -329,7 +336,7 @@ export function runQualityGateCheck(
         warnings.push({
           checkId: `unverified_citation_${sec.id}`,
           sectionId: sec.id,
-          message: `La sección "${sec.title}" contiene ${unverifiedMatches.length} cita(s) o jurisprudencia(s) no verificada(s).`
+          message: `La sección "${sec.title}" contiene ${unverifiedMatches.length} cita(s) o jurisprudencia(s) no verificada(s). Causa: VERIFICATION_REQUIRED.`
         });
       }
 
@@ -747,6 +754,7 @@ export function runQualityGateCheck(
       duplicateFactResponseCount,
       unsupportedFactualClaimCount,
       unverifiedFactualClaimCount,
+      contradictoryFactualClaimCount,
       unsupportedLegalAuthorities,
       verifiedAuthorityCount,
       appliedAuthorityCount,

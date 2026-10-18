@@ -161,6 +161,8 @@ export interface CaseWorkflowSelection {
   mode: GenerationMode;
   templateId?: string;
   referenceDocumentId?: string;
+  /** Correcciones del abogado a qué secciones de su plantilla se conservan (FORMULA) o se reescriben (SUSTANTIVA). */
+  sectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
 }
 
 export interface SourceReference {
@@ -233,6 +235,8 @@ export interface BlockStyle {
   textDecoration?: string;
   textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
   indent?: string;
+  /** Sangría solo del primer renglón ("2.5em" o "18pt"); DOCX y PDF la aplican igual. */
+  firstLineIndent?: string;
 }
 
 export interface ContentBlock {
@@ -479,6 +483,7 @@ export interface PipelineState {
 }
 
 export interface GenerationMetadata {
+  requestContract?: import('./generationRequestContract').GenerationRequestContract;
   /** Modo de la última exportación materializada; no cambia el lifecycle jurídico. */
   exportMode?: import('./exportModes').ExportMode;
   /** Aviso que acompaña exclusivamente a una exportación de borrador. */
@@ -500,10 +505,21 @@ export interface GenerationMetadata {
   draftDepth?: import('./draftDepth').DraftDepth;
   /** Consentimiento explícito de esta generación; no se hereda de un borrador previo. */
   externalProviderOptIn?: boolean;
+  /** Proveedores remotos autorizados expresamente en esa misma operación (no se hereda tampoco). */
+  authorizedExternalProviders?: string[];
+  /** Ficha del caso confirmada por el abogado: única fuente de nombres, órgano, lugar y fechas del escrito. */
+  caseDossier?: import('./caseDossier').CaseDossier;
+  /** Notas, citas no verificadas y pendientes retirados del cuerpo; no forman parte del escrito. */
+  reviewAnnex?: import('./reviewAnnex').ReviewAnnex;
+  /** Reglas de voz y contenido del contrato del tipo; se anteponen a cada solicitud al redactor. */
+  writingContractPrompt?: string;
+  /** Resultado del validador del contrato tras la generación. */
+  writingContractValidation?: { findings: Array<{ code: string; severity: string; sectionTitle?: string; message: string }>; regenerated: string[]; passes: number };
   legalDocumentPlan?: import('./legalDocumentPlan').LegalDocumentPlan;
   factResponseMatrix?: import('./legalDocumentPlan').FactResponseMatrix;
   draftContentStopReason?: 'TARGET_REACHED' | 'CONTENT_LIMIT_REACHED' | 'COVERAGE_COMPLETE' | 'PROVIDER_UNAVAILABLE' | 'REPETITION_BLOCKED' | 'RESOURCE_LIMIT' | 'ATTORNEY_INPUT_REQUIRED';
   selectedTemplateId?: string | null;
+  templateSectionKinds?: Record<string, 'FORMULA' | 'SUSTANTIVA'>;
   referenceDocumentId?: string | null;
   referenceDocumentLifecycle?: DocumentLifecycleMetadata;
   provenance?: ProvenanceKind[];
@@ -512,6 +528,7 @@ export interface GenerationMetadata {
   generationId?: string;
   /** Trace transitorio de desarrollo/auditoría; se elimina antes de persistir. */
   auditTrace?: GenerationTrace;
+  operationalManual?: NonNullable<GenerationTrace['operationalManual']>;
   proceduralIdentity?: ProceduralIdentity;
   routing?: DocumentRoutingMetadata;
   /** Compatibilidad auditable entre la fuente cargada y la salida seleccionada. */
@@ -619,7 +636,7 @@ export type {
 
 export function createEmptyDocument(initial: Partial<UniversalLegalDocument> = {}): UniversalLegalDocument {
   const document: UniversalLegalDocument = {
-    id: crypto.randomUUID(),
+    id: initial.id || crypto.randomUUID(),
     title: initial.title || 'Nuevo Documento',
     documentType: initial.documentType || 'escrito_libre',
     documentTypeLabel: initial.documentTypeLabel || 'Escrito Libre',
@@ -734,3 +751,15 @@ export type {
   DocumentCoverageItem,
   CoverageMatrix,
 } from './coverageMatrix';
+
+/**
+ * Clase de cada proposición del borrador (audit D.3). Se asigna de forma determinista antes de aceptar el bloque.
+ * FINAL depende de la clase: UNVERIFIED_CITATION y UNSUPPORTED_OR_CONTRADICTORY bloquean.
+ */
+export type LegalPropositionClass =
+  | 'VERIFIED_AUTHORITY'
+  | 'SOURCE_STATED'
+  | 'LEGAL_REASONING'
+  | 'PENDING_CONFIRMATION'
+  | 'UNVERIFIED_CITATION'
+  | 'UNSUPPORTED_OR_CONTRADICTORY';

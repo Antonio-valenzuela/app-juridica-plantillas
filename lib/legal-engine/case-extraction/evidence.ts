@@ -21,6 +21,9 @@ const CONCRETE_EVIDENCE_TEST_RE = new RegExp(CONCRETE_EVIDENCE_RE.source, 'i');
 const CONCRETE_EVIDENCE_LIST_RE = new RegExp(CONCRETE_EVIDENCE_RE.source, 'gi');
 const PUBLIC_DEED_RE = /^escrituras?\s+p[úu]blicas?$/i;
 const GENERIC_EVIDENCE_LABEL_RE = /^(?:pruebas?\s+documental(?:es)?|documentales?)$/i;
+// A reference that merely links an already named category of evidence to a
+// numbered fact is not itself a distinct document or means of proof.
+const EVIDENCE_RELATION_ONLY_RE = /^(?:la|el|esa|dicha)\s+(?:prueba\s+)?(?:documental|confesional|testimonial|pericial|presuncional|instrumental(?:\s+de\s+actuaciones)?)\s+(?:se\s+)?(?:relaciona|vincula)\s+con\s+(?:el\s+)?hecho\s+\d+(?:\s*(?:,|y)\s*(?:el\s+)?hecho\s+\d+)*\.?$/i;
 const PUBLIC_DEED_DIRECT_CONTEXT_RE = /(?:\ben\s+autos\s+(?:obra(?:n)?|consta(?:n)?)(?!\s+que\b)|\bse\s+(?:exhibe|aporta)|\b(?:(?:la\s+)?(?:parte\s+)?(?:actora|actor|demandada|demandado|quejosa|quejoso|promovente)\s+(?:ofreció|exhibió|aportó)))\s*(?:(?:la|el|una|un)\s*)?$|(?:\b(?:se\s+ofrece|ofrezco|ofrecemos)\s+(?:como\s+prueba(?:\s+documental)?\s+)?(?:(?:la|el|una|un)\s*)?)$/i;
 const EVIDENCE_LIST_DELIMITER_RE = /^\s*(?:(?:(?:n[úu]mero|n[.°º]?|folio)\s*)?\d+(?:,\d{3})*(?:-[A-Z0-9]+)?\s*)?(?:,|y|e)\s+(?:(?:la|el|una|un)\s*)?$/i;
 const EVIDENCE_CONTEXT_RE = /\b(?:en\s+autos|autos\s+del\s+(?:presente\s+)?juicio|actuaciones\s+que\s+integran|del\s+laudo|juicio\s+(?:laboral|de\s+origen)|ofrecid[oa]s?|aportad[oa]s?|exhibid[oa]s?|admitid[oa]s?|desahogad[oa]s?|se\s+(?:ofrec(?:e|ió|ieron)|exhib(?:e|ió|ieron)|aport(?:a|ó|aron))|a\s+cargo\s+de|a\s+foja\s+\d+|ofrezco)\b|\b(?:la\s+)?(?:parte\s+)?(?:actora|actor|demandada|demandado|quejosa|quejoso|promovente)\s+(?:ofreció|aportó|exhibió)(?=\s|$)/i;
@@ -262,10 +265,17 @@ function segmentsForCandidate(candidate: ExtractionCandidate, section?: string):
   if (hasExplicitEvidenceLabel(candidate, section)) {
     const { body, type } = stripEvidenceLabel(candidate.rawText);
     return segmentsForEvidence(body)
-      .filter((description) => CONCRETE_EVIDENCE_TEST_RE.test(description) && !isUnsupportedExplicitPublicDeedDescription(description))
+      .filter((description) => (CONCRETE_EVIDENCE_TEST_RE.test(description)
+        // A specifically labeled testimony may describe the witness only as
+        // "a cargo de ..."; the explicit type plus that source text is enough
+        // to preserve the offered mention without inferring its truth.
+        || (type === 'TESTIMONIAL' && description.length >= 20 && /\ba\s+cargo\s+(?:de|del)\b/i.test(description)))
+        && !isUnsupportedExplicitPublicDeedDescription(description)
+        && !EVIDENCE_RELATION_ONLY_RE.test(description))
       .map((description) => ({ description, type }));
   }
-  return embeddedEvidenceSegments(candidate.rawText);
+  return embeddedEvidenceSegments(candidate.rawText)
+    .filter((segment) => !EVIDENCE_RELATION_ONLY_RE.test(segment.description));
 }
 
 export function extractDocumentsAndEvidence(

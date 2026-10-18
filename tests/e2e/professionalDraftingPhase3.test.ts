@@ -1,7 +1,8 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { describe, expect, it } from 'vitest';
 import { runProfessionalDraftingPhase3 } from '../../scripts/audit/run-professional-drafting-phase3';
 
-describe('Fase 3 E2E: seis expedientes y dos profundidades', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('Fase 3 E2E: seis expedientes y dos profundidades', () => {
   it('produce doce borradores trazables en DOCX/PDF y conserva bloqueada la exportación FINAL', async () => {
     const summary = await runProfessionalDraftingPhase3() as any;
 

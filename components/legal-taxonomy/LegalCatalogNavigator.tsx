@@ -6,6 +6,7 @@ import {
   LEGAL_AREAS,
   LEGAL_PROCEDURES,
   getCatalogChildren,
+  getFunctionalDocumentStatus,
   searchCatalog,
   type CatalogNodeKind,
   type CatalogStatus,
@@ -43,6 +44,14 @@ function statusLabel(status: CatalogStatus): string {
   return 'Próximamente';
 }
 
+function functionalLabel(id: string, status: CatalogStatus): string {
+  const functionalStatus = getFunctionalDocumentStatus(id);
+  if (status === 'IMPLEMENTED' && functionalStatus === 'FAIL') return 'FAIL · En desarrollo';
+  if (status === 'IMPLEMENTED' && functionalStatus === 'BLOCKED_EXTERNAL') return 'Bloqueado por servicio externo';
+  if (status === 'IMPLEMENTED' && functionalStatus === 'PASS') return 'PASS · Acreditado';
+  return statusLabel(status);
+}
+
 function statusClass(status: CatalogStatus): string {
   if (status === 'IMPLEMENTED') return 'text-emerald-700 bg-emerald-50 border-emerald-200';
   if (status === 'REQUIRES_OFFICIAL_FORM') return 'text-amber-800 bg-amber-50 border-amber-200';
@@ -54,7 +63,10 @@ export type CatalogResultAction = 'NAVIGATE' | 'SELECT' | 'DISABLED';
 
 export function getCatalogResultAction(entry: Pick<CatalogListEntry, 'id' | 'kind' | 'status'>): CatalogResultAction {
   if (entry.kind === 'AREA' || entry.kind === 'PROCEDURE' || entry.kind === 'FAMILY') return 'NAVIGATE';
-  if ((entry.kind === 'DOCUMENT_TYPE' || entry.kind === 'LEGACY_ALIAS') && entry.status === 'IMPLEMENTED' && entry.id !== 'otro') return 'SELECT';
+  if ((entry.kind === 'DOCUMENT_TYPE' || entry.kind === 'LEGACY_ALIAS')
+    && entry.status === 'IMPLEMENTED'
+    && getFunctionalDocumentStatus(entry.id) === 'PASS'
+    && entry.id !== 'otro') return 'SELECT';
   return 'DISABLED';
 }
 
@@ -82,7 +94,7 @@ function documentOption(
             <span className="mt-0.5 block break-words text-[11px] leading-4 text-slate-500">{entry.description}</span>
           </span>
           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(entry.status)}`}>
-            {statusLabel(entry.status)}
+            {functionalLabel(entry.id, entry.status)}
           </span>
         </span>
       </button>

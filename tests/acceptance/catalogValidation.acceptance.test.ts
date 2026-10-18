@@ -4,7 +4,8 @@
  *
  * Itera automáticamente sobre todos los IDs IMPLEMENTED del catálogo y verifica:
  *   - Strategy existe (DocumentStrategies o escrito_libre como fallback)
- *   - Template existe en DocumentTemplates
+ *   - Template resoluble: directa (DocumentTemplates) o derivada por familia (motor de familias), resuelta
+ *     por getDocumentTemplate; cada origen se verifica por separado
  *   - Routing existe: resolveDocumentRouting no falla
  *   - Compatibilidad: SOURCE_OUTPUT_COMPATIBILITY_RULES tiene entrada
  *   - rolAutor no es juzgador/autoridad jurisdiccional
@@ -14,8 +15,10 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LEGAL_CATALOG_REGISTRY, getCatalogDocument } from '@/lib/catalog/legalCatalog';
-import { DocumentTemplates } from '@/lib/legal-engine/documentTemplates';
+import { DocumentTemplates, familyDerivedTemplateIds } from '@/lib/legal-engine/documentTemplates';
+import { familyBlueprintFor } from '@/lib/legal-engine/documentFamilyBlueprints';
 import { resolveDocumentRouting } from '@/lib/legal-engine/documentRouting';
+import { resolveTemplateProvenance, TEMPLATE_SOURCE } from '@/scripts/audit/templateProvenance.mjs';
 import {
   SOURCE_OUTPUT_COMPATIBILITY_RULES,
 } from '@/lib/legal-engine/sourceOutputCompatibility';
@@ -51,17 +54,44 @@ describe('§24 — Validación programática: todos los IDs IMPLEMENTED', () => 
     expect(unique.size).toBe(ids.length);
   });
 
-  it('todos los IDs IMPLEMENTED tienen un template en DocumentTemplates', () => {
-    const failures: string[] = [];
-    for (const doc of implementedDocs) {
-      const tpl = DocumentTemplates[doc.id];
-      if (!tpl) failures.push(doc.id);
-    }
+  // Procedencia de la plantilla de cada tipo, calculada con el resolver real (directa o derivada por familia).
+  const provenance = new Map(implementedDocs.map((doc) => [doc.id, resolveTemplateProvenance(doc.id)]));
+  const docsBySource = (source: string) => implementedDocs.filter((doc) => provenance.get(doc.id)!.source === source);
+
+  // Aserción independiente: detecta un tipo IMPLEMENTED sin NINGUNA plantilla realmente resoluble.
+  it('todos los IDs IMPLEMENTED tienen una plantilla realmente resoluble (directa o derivada por familia)', () => {
+    const failures = docsBySource(TEMPLATE_SOURCE.NONE).map((doc) => doc.id);
     if (failures.length > 0) {
       throw new Error(
-        `${failures.length} IDs IMPLEMENTED sin template: ${failures.slice(0, 10).join(', ')}${failures.length > 10 ? '...' : ''}`,
+        `${failures.length} IDs IMPLEMENTED sin plantilla resoluble: ${failures.slice(0, 10).join(', ')}${failures.length > 10 ? '...' : ''}`,
       );
     }
+  });
+
+  it('un tipo sin plantilla directa solo se acepta si tiene una plantilla derivada válida y resoluble', () => {
+    const registered = new Set(familyDerivedTemplateIds());
+    const problems: string[] = [];
+    for (const doc of docsBySource(TEMPLATE_SOURCE.FAMILY_DERIVED)) {
+      const { template } = provenance.get(doc.id)!;
+      if (DocumentTemplates[doc.id]) problems.push(`${doc.id}: tiene plantilla directa y no debería clasificarse como derivada`);
+      if (!registered.has(doc.id)) problems.push(`${doc.id}: no está registrada por el motor de familias`);
+      if (template?.tipo !== doc.id) problems.push(`${doc.id}: la plantilla resuelta es de otro tipo (${template?.tipo})`);
+      if (doc.templateId !== doc.id) problems.push(`${doc.id}: templateId del catálogo = ${doc.templateId}`);
+      if (!template?.estructura?.length) problems.push(`${doc.id}: la plantilla derivada no declara secciones`);
+      if (!template?.camposObligatorios?.length) problems.push(`${doc.id}: la plantilla derivada no declara campos obligatorios`);
+      if (!familyBlueprintFor(doc.familyId)) problems.push(`${doc.id}: la familia ${doc.familyId} no tiene blueprint`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('las plantillas derivadas registradas corresponden a tipos del catálogo y las dos procedencias no se solapan', () => {
+    const catalogIds = new Set(LEGAL_CATALOG_REGISTRY.documents.map((doc) => doc.id));
+    const unknown = familyDerivedTemplateIds().filter((id) => !catalogIds.has(id));
+    expect(unknown).toEqual([]);
+    const direct = new Set(docsBySource(TEMPLATE_SOURCE.DIRECT).map((doc) => doc.id));
+    const derived = docsBySource(TEMPLATE_SOURCE.FAMILY_DERIVED).map((doc) => doc.id);
+    expect(derived.filter((id) => direct.has(id))).toEqual([]);
+    expect(direct.size + derived.length + docsBySource(TEMPLATE_SOURCE.NONE).length).toBe(implementedDocs.length);
   });
 
   it('todos los IDs IMPLEMENTED tienen una entrada en SOURCE_OUTPUT_COMPATIBILITY_RULES', () => {
@@ -77,58 +107,70 @@ describe('§24 — Validación programática: todos los IDs IMPLEMENTED', () => 
     }
   });
 
-  it('ningún tipo IMPLEMENTED tiene rolAutor que sea juzgador', () => {
-    const violations: string[] = [];
-    for (const doc of implementedDocs) {
-      const tpl = DocumentTemplates[doc.id];
-      if (tpl && JUDGE_ROLES.has(tpl.rolAutor?.toLowerCase())) {
-        violations.push(`${doc.id}: rolAutor=${tpl.rolAutor}`);
-      }
-    }
-    expect(violations).toEqual([]);
-  });
+  // El contrato de cada plantilla se verifica por separado para cada procedencia: una plantilla derivada
+  // no se omite (antes `continue`) ni se confunde con una directa.
+  describe.each([TEMPLATE_SOURCE.DIRECT, TEMPLATE_SOURCE.FAMILY_DERIVED])('contrato de plantilla — origen %s', (source) => {
+    const docs = docsBySource(source);
 
-  it('todos los templates de IDs IMPLEMENTED declaran rolAutor, destinatario, objetivoProcesal y prohibiciones', () => {
-    const failures: string[] = [];
-    for (const doc of implementedDocs) {
-      const tpl = DocumentTemplates[doc.id];
-      if (!tpl) continue; // ya cubierto en el test anterior
-      if (!tpl.rolAutor || !tpl.destinatario || !tpl.objetivoProcesal || !tpl.prohibiciones?.length) {
-        failures.push(`${doc.id}: falta(n) campo(s) obligatorio(s)`);
-      }
-    }
-    if (failures.length > 0) {
-      throw new Error(`${failures.length} templates incompletos: ${failures.slice(0, 10).join('; ')}`);
-    }
-  });
+    it('hay al menos un tipo IMPLEMENTED con este origen (la verificación no queda vacía)', () => {
+      expect(docs.length).toBeGreaterThan(0);
+    });
 
-  it('todos los templates de IDs IMPLEMENTED tienen al menos 5 secciones', () => {
-    const failures: string[] = [];
-    for (const doc of implementedDocs) {
-      const tpl = DocumentTemplates[doc.id];
-      if (!tpl) continue;
-      if (tpl.estructura.length < 5) {
-        failures.push(`${doc.id}: solo ${tpl.estructura.length} secciones`);
+    it('ningún tipo tiene rolAutor que sea juzgador', () => {
+      const violations: string[] = [];
+      for (const doc of docs) {
+        const tpl = provenance.get(doc.id)!.template!;
+        if (JUDGE_ROLES.has(tpl.rolAutor?.toLowerCase())) {
+          violations.push(`${doc.id}: rolAutor=${tpl.rolAutor}`);
+        }
       }
-    }
-    if (failures.length > 0) {
-      throw new Error(`${failures.length} templates con < 5 secciones: ${failures.join('; ')}`);
-    }
-  });
+      expect(violations).toEqual([]);
+    });
 
-  it('todos los templates de IDs IMPLEMENTED tienen títulos únicos dentro del mismo template', () => {
-    const failures: string[] = [];
-    for (const doc of implementedDocs) {
-      const tpl = DocumentTemplates[doc.id];
-      if (!tpl) continue;
-      const keys = tpl.estructura.map((t) => t.toLowerCase().trim());
-      if (new Set(keys).size !== keys.length) {
-        failures.push(`${doc.id}: títulos de sección duplicados`);
+    it('declaran rolAutor, destinatario, objetivoProcesal y prohibiciones', () => {
+      const failures: string[] = [];
+      for (const doc of docs) {
+        const tpl = provenance.get(doc.id)!.template!;
+        if (!tpl.rolAutor || !tpl.destinatario || !tpl.objetivoProcesal || !tpl.prohibiciones?.length) {
+          failures.push(`${doc.id}: falta(n) campo(s) obligatorio(s)`);
+        }
       }
-    }
-    if (failures.length > 0) {
-      throw new Error(`${failures.length} templates con títulos duplicados: ${failures.join('; ')}`);
-    }
+      if (failures.length > 0) {
+        throw new Error(`${failures.length} templates incompletos: ${failures.slice(0, 10).join('; ')}`);
+      }
+    });
+
+    it('tienen al menos 5 secciones', () => {
+      const failures: string[] = [];
+      for (const doc of docs) {
+        const tpl = provenance.get(doc.id)!.template!;
+        if (tpl.estructura.length < 5) {
+          failures.push(`${doc.id}: solo ${tpl.estructura.length} secciones`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`${failures.length} templates con < 5 secciones: ${failures.join('; ')}`);
+      }
+    });
+
+    it('declaran campos obligatorios', () => {
+      const failures = docs.filter((doc) => !provenance.get(doc.id)!.template!.camposObligatorios?.length).map((doc) => doc.id);
+      expect(failures).toEqual([]);
+    });
+
+    it('tienen títulos únicos dentro del mismo template', () => {
+      const failures: string[] = [];
+      for (const doc of docs) {
+        const tpl = provenance.get(doc.id)!.template!;
+        const keys = tpl.estructura.map((t) => t.toLowerCase().trim());
+        if (new Set(keys).size !== keys.length) {
+          failures.push(`${doc.id}: títulos de sección duplicados`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`${failures.length} templates con títulos duplicados: ${failures.join('; ')}`);
+      }
+    });
   });
 });
 
@@ -231,11 +273,11 @@ describe('§24 — Coherencia de entradas del catálogo', () => {
     }
   });
 
-  it('todos los templateId en CanonicalDocumentType IMPLEMENTED existen en DocumentTemplates', () => {
+  it('todos los templateId en CanonicalDocumentType IMPLEMENTED resuelven a una plantilla (directa o derivada por familia)', () => {
     const implemented = LEGAL_CATALOG_REGISTRY.documents.filter((d) => d.status === 'IMPLEMENTED');
     const failures: string[] = [];
     for (const doc of implemented) {
-      if (doc.templateId && !DocumentTemplates[doc.templateId]) {
+      if (doc.templateId && resolveTemplateProvenance(doc.templateId).source === TEMPLATE_SOURCE.NONE) {
         failures.push(`${doc.id} → templateId=${doc.templateId} no existe`);
       }
     }

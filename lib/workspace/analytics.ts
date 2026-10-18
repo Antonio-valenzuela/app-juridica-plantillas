@@ -27,6 +27,8 @@ export interface AnalyticsJobProjection {
 }
 
 export interface AnalyticsDataset {
+  observations?: { pages: number; qualityGate: number; validation: number;
+    providerAttempts?: number; providerFallbacks?: number; httpErrors?: number; timeouts?: number; sourceQuality?: number; extensionOutcome?: number };
   rangeDays: AnalyticsRangeDays;
   period: { start: string; end: string };
   hasActivity: boolean;
@@ -81,6 +83,7 @@ export interface AnalyticsDataset {
 type JsonRecord = Record<string, unknown>;
 
 interface InternalAnalyticsRecord {
+  measured: { providerAttempts: boolean; providerFallbacks: boolean; httpErrors: boolean; timeouts: boolean };
   jobId: string | null;
   documentId: string | null;
   status: AnalyticsStatus;
@@ -188,19 +191,21 @@ function sourceMetrics(draft: AnalyticsDraftProjection): { sourcePages: number; 
   if (!sources.length) return { sourcePages: 0, ocrValidated: null, sourceQualityStatus: null };
   let sourcePages = 0;
   let anyUnvalidated = false;
+  let anyUnknown = false;
   let allValidated = true;
   let qualityStatus: string | null = null;
   for (const source of sources.map(record)) {
     const pages = finiteNumber(source.pageCount) ?? array(source.pages).length;
     sourcePages += pages || 0;
     const validated = booleanValue(source.sourceValidated);
-    if (validated !== true) { allValidated = false; anyUnvalidated = true; }
+    if (validated === null) { anyUnknown = true; allValidated = false; }
+    if (validated === false) { allValidated = false; anyUnvalidated = true; }
     const candidateStatus = text(source.sourceQualityStatus) || text(record(source.qualityScore).status);
     if (candidateStatus) qualityStatus = qualityStatus || candidateStatus;
   }
   return {
     sourcePages,
-    ocrValidated: anyUnvalidated ? (allValidated ? true : false) : true,
+    ocrValidated: anyUnvalidated ? false : anyUnknown ? null : allValidated,
     sourceQualityStatus: qualityStatus,
   };
 }
@@ -251,7 +256,16 @@ function fromDraft(draft: AnalyticsDraftProjection): InternalAnalyticsRecord {
     ...array(validation.warnings),
   ]);
   const duration = finiteNumber(metadata.generationTimeMs) ?? finiteNumber(persistence.durationMs);
+  const providerSections = Object.values(record(metadata.sections)).map(record);
+  const extensionMetrics = record(extension.metrics);
   return {
+    measured: {
+      providerAttempts: finiteNumber(extensionMetrics.llmCalls) !== null || finiteNumber(extensionMetrics.continuationCalls) !== null
+        || Object.keys(record(extensionMetrics.providerCalls)).length > 0 || providerSections.some(section => typeof section.provider === 'string'),
+      providerFallbacks: providerSections.length > 0 && providerSections.every(section => typeof section.fallbackUsed === 'boolean'),
+      httpErrors: finiteNumber(metadata.httpErrors) !== null,
+      timeouts: typeof metadata.errorCode === 'string',
+    },
     jobId: text(persistence.jobId),
     documentId: draft.id,
     status: derivedStatus,
@@ -285,6 +299,7 @@ function fromJob(job: AnalyticsJobProjection): InternalAnalyticsRecord {
   const updated = new Date(job.updatedAt).getTime();
   const durationMs = Number.isFinite(started) && Number.isFinite(updated) && updated >= started ? updated - started : null;
   return {
+    measured: { providerAttempts: false, providerFallbacks: false, httpErrors: /^HTTP_/i.test(String(job.errorCode || '')), timeouts: ['completed', 'failed', 'cancelled'].includes(String(job.status)) },
     jobId: job.id,
     documentId: job.documentId || null,
     status,
@@ -316,6 +331,12 @@ function mergeRecords(base: InternalAnalyticsRecord, incoming: InternalAnalytics
   const incomingHasDocumentData = incoming.documentType !== 'Sin especificar' || incoming.targetPages !== null || incoming.qualityGatePass !== null;
   return {
     ...base,
+    measured: {
+      providerAttempts: base.measured.providerAttempts || incoming.measured.providerAttempts,
+      providerFallbacks: base.measured.providerFallbacks || incoming.measured.providerFallbacks,
+      httpErrors: base.measured.httpErrors || incoming.measured.httpErrors,
+      timeouts: base.measured.timeouts || incoming.measured.timeouts,
+    },
     jobId: base.jobId || incoming.jobId,
     documentId: base.documentId || incoming.documentId,
     status: incoming.jobId === base.jobId && incoming.documentType === 'Sin especificar' ? incoming.status : base.status,
@@ -409,6 +430,17 @@ export function buildAnalyticsDataset(input: { drafts: AnalyticsDraftProjection[
   }));
   return {
     rangeDays: input.rangeDays,
+    observations: {
+      pages: periodRecords.filter(item => item.actualPages !== null).length,
+      qualityGate: periodRecords.filter(item => item.qualityGatePass !== null).length,
+      validation: periodRecords.filter(item => item.validationPass !== null).length,
+      providerAttempts: periodRecords.filter(item => item.measured.providerAttempts).length,
+      providerFallbacks: periodRecords.filter(item => item.measured.providerFallbacks).length,
+      httpErrors: periodRecords.filter(item => item.measured.httpErrors).length,
+      timeouts: periodRecords.filter(item => item.measured.timeouts).length,
+      sourceQuality: periodRecords.filter(item => item.sourceQualityStatus !== null).length,
+      extensionOutcome: periodRecords.filter(item => item.extensionTargetUnmet !== null).length,
+    },
     period: { start: start.toISOString(), end: now.toISOString() },
     hasActivity: periodRecords.length > 0,
     insufficientActivity: periodRecords.length === 0,

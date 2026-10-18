@@ -1,4 +1,5 @@
 import type { ExtractionCandidate, CaseParty, PartyRole, PartyExtractionResult } from './types';
+import { isNonPartyDesignation } from '../partyExtraction';
 
 const ROLE_LABELS: Array<[RegExp, PartyRole]> = [
   [/^ACTOR(?:A)?$/i, 'ACTOR'],
@@ -22,7 +23,11 @@ function parsePartyCandidate(text: string): { role: PartyRole; name: string } | 
   const role = roleForLabel(match[1]);
   if (!role) return undefined;
   const name = match[2].replace(/[.;,]+$/, '').trim();
-  return name ? { role, name } : undefined;
+  if (!name) return undefined;
+  // Solo AUTORIDAD admite al órgano jurisdiccional; ninguna parte procesal puede
+  // ser el juzgado, sus funcionarios o una referencia como "ESTE H.".
+  if (role !== 'AUTORIDAD' && isNonPartyDesignation(name)) return undefined;
+  return { role, name };
 }
 
 /** Extract an alias only when the source explicitly declares one. */

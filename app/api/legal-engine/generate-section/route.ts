@@ -1,25 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSection } from '@/lib/legal-engine/pipeline';
 import { UniversalLegalDocument } from '@/lib/legal-engine/types';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess, executionOwnerKey } from '@/lib/security/workspaceExecutionAccess';
 import { readDocumentExportReadiness } from '@/lib/legal-engine/documentLifecycle';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
+import { explicitAuthorizedProviders, explicitExternalProviderConsent } from '@/lib/ai/caseProviderConsent';
+import {
+  getDraftRegenerationRoutingError,
+  getUncertifiedDraftAcknowledgementError,
+} from '@/lib/legal-engine/uncertifiedDraftAcknowledgement';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const requestId = req.headers.get('x-request-id')?.trim() || generateRequestId();
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req);
   if (!auth.ok) return auth.response;
-  const rateLimit = checkRequestRateLimit(req, 'generation-section', 20, `${auth.context.organizationId}:${auth.context.userId}`);
+  const rateLimit = checkRequestRateLimit(req, 'generation-section', 20, executionOwnerKey(auth.context));
   if (!rateLimit.ok) return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas regeneraciones. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
 
   try {
     const body = await req.json();
-    const { document, sectionId, instruction } = body;
+    const { document, sectionId, instruction, uncertifiedDraftAcknowledged } = body;
 
     if (!document || !sectionId) {
       return NextResponse.json({ ok: false, error: 'Faltan datos: document y sectionId son requeridos.' }, { status: 400 });
@@ -34,7 +39,30 @@ export async function POST(req: NextRequest) {
       }, { status: 409 });
     }
 
-    const res = await generateSection(document as UniversalLegalDocument, sectionId, instruction);
+    const documentTypeId = typeof document.documentType === 'string' ? document.documentType : undefined;
+    const routingError = getDraftRegenerationRoutingError(documentTypeId);
+    if (routingError) {
+      return NextResponse.json({ ok: false, ...routingError }, { status: 422 });
+    }
+    const acknowledgementError = getUncertifiedDraftAcknowledgementError(
+      documentTypeId,
+      uncertifiedDraftAcknowledged,
+    );
+    if (acknowledgementError) {
+      return NextResponse.json({ ok: false, ...acknowledgementError }, { status: 422 });
+    }
+
+    // El consentimiento de envío externo vale por solicitud: nunca se hereda del documento que envía el
+    // navegador (un borrador generado con consentimiento conserva `externalProviderOptIn: true`).
+    const scopedDocument = {
+      ...(document as UniversalLegalDocument),
+      generationMetadata: {
+        ...((document as UniversalLegalDocument).generationMetadata || {}),
+        externalProviderOptIn: explicitExternalProviderConsent(body.externalProviderOptIn),
+        authorizedExternalProviders: explicitAuthorizedProviders(body.authorizedExternalProviders),
+      },
+    } as UniversalLegalDocument;
+    const res = await generateSection(scopedDocument, sectionId, instruction);
 
     if (res.aiUsed !== true) {
       return NextResponse.json(

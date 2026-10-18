@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +12,7 @@ const REAL_PUBLIC_PDF = path.resolve(
   'data/uploads/templates/1787377598439-0129000036717288006AST.PDF',
 );
 
-describe('E2E Real PDF — Source compatibility for Recurso de Revisión', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('E2E Real PDF — Source compatibility for Recurso de Revisión', () => {
   it('blocks the real 27-page demanda before drafting a recurso de revisión', async () => {
     expect(fs.existsSync(REAL_PUBLIC_PDF)).toBe(true);
 

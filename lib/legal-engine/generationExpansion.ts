@@ -1,10 +1,14 @@
 import { runFastMode } from '../ai/orchestrator';
+import { evaluateBlockFactualSupport, sourceTextsOf } from './blockFactualGate';
+import { isResponseDocument, postureDirectiveLines } from './posturePrompt';
+import { withAbort } from '../ai/abortContext';
 import { caseProviderFlags } from '../ai/caseProviderConsent';
 import type { AIProviderResult, AIRequest } from '../ai/providers/types';
 import type { CaseAnalysis } from './caseAnalysis';
 import {
   deduplicateExpansionContent,
   isExtendedGeneration,
+  isStructuralSection,
   salvageCompleteProviderSentences,
   type GenerationExtensionContract,
 } from './generationExtension';
@@ -12,11 +16,19 @@ import { assessRemainingDraftSupport } from './draftDepth';
 import { measureRenderedDocumentPages, type RenderedDocumentPageMetrics } from './documentPageMetrics';
 import type { ContentBlock, DocumentNode, UniversalLegalDocument } from './types';
 import type { GenerationTraceContext } from './generationTrace';
+import { confirmedEvidenceDescriptions, evaluateGeneratedLegalAdmission, type GeneratedLegalAdmissionResult } from './generatedLegalAdmission';
 
 export interface ExtendedExpansionOptions {
   invokeProvider?: (request: AIRequest) => Promise<AIProviderResult>;
   measure?: (document: UniversalLegalDocument) => Promise<RenderedDocumentPageMetrics>;
   trace?: GenerationTraceContext;
+  /** Cancelación cooperativa: no se inicia ninguna llamada ni pasada nueva una vez abortada. */
+  signal?: AbortSignal;
+}
+
+/** Presupuesto global por documento: cuenta redacción inicial y ampliaciones (`contract.metrics.llmCalls`). */
+function documentCallsExhausted(contract: GenerationExtensionContract): boolean {
+  return contract.metrics.llmCalls >= contract.maxCallsPerDocument;
 }
 
 export interface ExtendedExpansionResult {
@@ -118,6 +130,25 @@ function countWords(text: string): number {
 
 function sectionWordCount(section: DocumentNode): number {
   return countWords((section.content || []).map((block) => block.text).join('\n'));
+}
+
+/** Sustracción mínima para considerar que un remanente es desarrollo útil. */
+const MIN_RECOVERED_WORDS = 25;
+const MIN_RECOVERED_SHARE = 0.5;
+
+/**
+ * La remediación por proposición conserva el razonamiento admisible, pero un
+ * remanente mínimo no es una sección: se trata como resto insuficiente y el
+ * candidato se rechaza. Evita que un fragmento truncado que sobrevive a la
+ * remediación entre al documento como si fuera desarrollo.
+ */
+function hasRecoverableRemediation(admission: GeneratedLegalAdmissionResult): boolean {
+  if (admission.accepted) return true;
+  if (admission.fullyNeutralized) return false;
+  const total = admission.proposals.reduce((sum, proposal) => sum + countWords(proposal.text), 0);
+  const kept = admission.proposals.filter(proposal => proposal.admitted)
+    .reduce((sum, proposal) => sum + countWords(proposal.text), 0);
+  return kept >= MIN_RECOVERED_WORDS && kept / Math.max(1, total) >= MIN_RECOVERED_SHARE;
 }
 
 function continuationLimit(section: DocumentNode, contract: GenerationExtensionContract): number {
@@ -277,10 +308,7 @@ export function buildSupportedExpansionPrompt(
   const existingText = section.content.map((block) => block.text).join('\n\n');
   return [
     'Redacta en español jurídico mexicano una ampliación profesional, específica y estrictamente limitada al material siguiente.',
-    'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
-    'Cuando no exista postura fáctica confirmada por el abogado:',
-    'ESTÁ PERMITIDO ÚNICAMENTE: cuestionar la acreditación y suficiencia probatoria del hecho afirmado por la contraria, invocar la carga de la prueba, señalar falta de precisión o presupuestos legales, analizar el alcance probatorio y formular argumentos y excepciones jurídicas subsidiarias sostenibles.',
-    'ESTÁ TERMINANTEMENTE PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad, inventar una versión fáctica del demandado (como contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados), inventar documentos inexistentes, fechas no mencionadas o causas de terminación laboral no comprobadas en autos, o inventar acontecimientos materiales.',
+    ...postureDirectiveLines(document),
     'Una afirmación de fuente no equivale a un hecho admitido; si el material no permite una conclusión, delimita la cuestión y deja la decisión al abogado.',
     'No rellenes para alcanzar páginas. No repitas texto, ni dentro de la sección ni en otra parte del documento. Entrega solo texto nuevo y sustantivo.',
     `DOCUMENTO: ${document.documentTypeLabel || document.documentType}`,
@@ -339,6 +367,7 @@ async function expandWithSupportedCoverage(
 ): Promise<ExtendedExpansionResult> {
   const measure = options.measure || measureRenderedDocumentPages;
   const invokeProvider = options.invokeProvider || runFastMode;
+  const invoke = (request: Parameters<typeof invokeProvider>[0]) => withAbort(invokeProvider(request), options.signal);
   const warnings: string[] = [];
   let metrics = initialMetrics;
   let expansionPasses = 0;
@@ -346,6 +375,9 @@ async function expandWithSupportedCoverage(
   const continuationCallsBySection = new Map<string, number>();
   let contentStopReason: NonNullable<ExtendedExpansionResult['contentStopReason']> = 'TARGET_REACHED';
   const candidates = document.sections
+    // Secciones estructurales (encabezado, comparecencia, petitorios, firma) nunca son candidatas de ampliación.
+    // Respuesta individual («Contestación de hechos/prestaciones») en un escrito de respuesta: la ampliación no añade bloques a cada hecho.
+    .filter((section) => !isStructuralSection(section, { responseDocument: isResponseDocument(document) }))
     .filter((section) => !['header', 'footer', 'page-header', 'page-footer', 'signature', 'closing', 'petition', 'preamble'].includes(section.type) && !/petitori|proemio|firma|cierre|comparec/i.test(`${section.title} ${section.type}`))
     .sort((left, right) => sectionPriority(right) - sectionPriority(left) || left.order - right.order);
 
@@ -358,9 +390,9 @@ async function expandWithSupportedCoverage(
     });
   };
 
-  while ((metrics.actualPages < contract.minPages || hasBudgetedNonFinalContinuation())
+  while (!options.signal?.aborted && (metrics.actualPages < contract.minPages || hasBudgetedNonFinalContinuation())
     && expansionPasses < contract.maxExpansionPasses
-    && calls < contract.maxCallsPerDocument) {
+    && !documentCallsExhausted(contract)) {
     expansionPasses += 1;
     let addedThisPass = false;
     let sawProviderFailure = false;
@@ -383,7 +415,8 @@ async function expandWithSupportedCoverage(
     }
 
     for (const section of candidates) {
-      if (calls >= contract.maxCallsPerDocument) break;
+      if (options.signal?.aborted) break;
+      if (documentCallsExhausted(contract)) break;
       const packet = packetBySection.get(section.id);
       if (!packet) continue;
       const isContinuation = hasNonFinalCoverageResponse(section, packet);
@@ -396,15 +429,19 @@ async function expandWithSupportedCoverage(
           continuationCallsBySection.set(section.id, (continuationCallsBySection.get(section.id) || 0) + 1);
           contract.metrics.continuationCalls += 1;
         }
-        response = await invokeProvider({
+        response = await invoke({
           systemPrompt: 'Redacción jurídica profesional con trazabilidad estricta. Respeta las posturas confirmadas y límites del expediente; no inventes ni rellenes.',
           userMessage: buildSupportedExpansionPrompt(document, section, packet, contract),
           mode: 'fast',
           maxTokens: Math.min(contract.maxGeneratedTokens, 1800),
           maxProviderRetries: 1,
+          signal: options.signal,
           ...caseProviderFlags(document),
         });
       } catch (error) {
+        // Una cancelación (signal abortada) no es un fallo de proveedor: relanzar para
+        // que el while-loop salga inmediatamente sin iterar candidatos adicionales.
+        if (options.signal?.aborted) throw error;
         calls += 1;
         contract.metrics.llmCalls += 1;
         contract.metrics.expansionCalls += 1;
@@ -470,8 +507,25 @@ async function expandWithSupportedCoverage(
         });
         continue;
       }
+      // Control fáctico por bloque: una fecha o monto ausente de la fuente rechaza el bloque antes de admitirlo.
+      const factual = evaluateBlockFactualSupport(generated, [...sourceTextsOf(document), ...confirmedEvidenceDescriptions(caseAnalysis)]);
+      if (!factual.accepted) {
+        warnings.push(`FACTUAL_SUPPORT_MISSING:${section.id}:${factual.rejectedItems.join("+")}`);
+        options.trace?.addWarning(`FACTUAL_SUPPORT_MISSING:${section.id}`);
+        continue;
+      }
+      const admission = evaluateGeneratedLegalAdmission({ text: generated, sectionType: section.type, document, analysis: caseAnalysis, legalIssueIds: packet.legalIssueIds });
+      if (!admission.accepted) {
+        const reason = admission.reasons.join('+');
+        const outcome = admission.fullyNeutralized ? 'LEGAL_ADMISSION_REJECTED' : 'LEGAL_ADMISSION_REMEDIATED';
+        warnings.push(`${outcome}:${section.id}:${reason}`);
+        options.trace?.addWarning(`${outcome}:${section.id}:${reason}`);
+        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: admission.rejectedWords, reason, lossStage: 'block-admission' });
+        if (!hasRecoverableRemediation(admission)) continue;
+      }
+      const admittedText = admission.accepted ? generated : admission.text;
       const wholeDocumentText = document.sections.flatMap((candidate) => candidate.content.map((block) => block.text)).join('\n\n');
-      const deduplicated = deduplicateExpansionContent(wholeDocumentText, generated);
+      const deduplicated = deduplicateExpansionContent(wholeDocumentText, admittedText);
       if (deduplicated.removedWords > 0) {
         options.trace?.recordWordAccounting({
           sectionId: section.id,
@@ -534,7 +588,7 @@ async function expandWithSupportedCoverage(
     warnings: Array.from(new Set(warnings)),
     contentStopReason,
     continuationBudgetAvailable: hasBudgetedNonFinalContinuation()
-      && calls < contract.maxCallsPerDocument
+      && !documentCallsExhausted(contract)
       && expansionPasses < contract.maxExpansionPasses,
     callBudgetAvailable: contract.metrics.llmCalls < contract.maxCallsPerDocument,
   };
@@ -545,10 +599,17 @@ export function buildExpansionPrompt(
   section: DocumentNode,
   caseAnalysis: CaseAnalysis | undefined,
   contract: GenerationExtensionContract,
+  pass = 1,
 ): string {
   const context = sourceContext(document, caseAnalysis);
   const existingText = section.content.map((block) => block.text).join('\n\n');
-  const pending = [
+  // Foco por función de sección: una sección de HECHOS no desarrolla regla jurídica ni refutación.
+  const factSection = /hecho/i.test(section.title || '');
+  const pending = factSection ? [
+    'delimitación del problema',
+    'hechos y prueba estrictamente vinculados',
+    'conclusión y efecto procesal',
+  ] : [
     'delimitación del problema',
     'hechos y prueba estrictamente vinculados',
     'regla jurídica aplicable y su interpretación',
@@ -557,12 +618,9 @@ export function buildExpansionPrompt(
     'conclusión y efecto procesal',
   ];
   return [
-    'Eres redactor jurídico mexicano especializado en contestaciones extensas y source-grounded.',
+    `Eres redactor jurídico mexicano; redactas ${document.documentTypeLabel || document.documentType} con base estricta en las fuentes del expediente.`,
     'Genera una ampliación sustantiva para una sección existente. No rellenes espacio.',
-    'DIRECTIVA OBLIGATORIA DE POSTURA DEFENSIVA SIN INSTRUCCIÓN DEL CLIENTE:',
-    'Cuando no exista postura fáctica confirmada por el abogado:',
-    'ESTÁ PERMITIDO ÚNICAMENTE: cuestionar la acreditación y suficiencia probatoria del hecho afirmado por la contraria, invocar la carga de la prueba, señalar falta de precisión o presupuestos legales, analizar el alcance probatorio y formular argumentos y excepciones jurídicas subsidiarias sostenibles.',
-    'ESTÁ TERMINANTEMENTE PROHIBIDO: afirmar que un hecho es falso sin que conste en la fuente su falsedad, inventar una versión fáctica del demandado (como contratos temporales, convenios, renuncias, faltas, notificaciones, liquidaciones o pagos no acreditados), inventar documentos inexistentes, fechas no mencionadas o causas de terminación laboral no comprobadas en autos, o inventar acontecimientos materiales.',
+    ...postureDirectiveLines(document),
     'Usa únicamente los hechos, pruebas, autoridades y fuentes identificadas abajo. Si algo no consta, formula una reserva jurídica prudente sin inventarlo.',
     'No repitas texto, encabezados, premisas o citas ya existentes; escribe prosa forense continua sin Markdown.',
     `DOCUMENTO: ${document.documentTypeLabel || document.documentType}`,
@@ -572,7 +630,10 @@ export function buildExpansionPrompt(
     `HECHOS VINCULADOS: ${context.factIds.join(', ') || 'Ninguno identificado'}`,
     context.facts.length ? `DETALLE DE HECHOS:\n${context.facts.join('\n')}` : 'DETALLE DE HECHOS: No hay detalle estructurado adicional.',
     context.authorities.length ? `AUTORIDADES IDENTIFICADAS:\n${context.authorities.join('\n')}` : 'AUTORIDADES IDENTIFICADAS: No se proporcionaron autoridades verificadas.',
-    `PUNTOS DE PROFUNDIZACIÓN POSIBLES: ${pending.join(' | ')}`,
+    // Cada pasada se enfoca en una función distinta para que la ampliación aporte análisis nuevo, no paráfrasis.
+    `ENFOQUE DE ESTA AMPLIACIÓN (pasada ${pass}): ${pending[(pass - 1) % pending.length]}; desarróllalo solo si el texto existente no lo agota.`,
+    `OTROS PUNTOS DE PROFUNDIZACIÓN POSIBLES: ${pending.join(' | ')}`,
+    `META DEL ESCRITO: ${contract.targetPages} páginas. Es un objetivo de profundidad, no autoriza relleno: si la sección ya está agotada responde únicamente [SECCIÓN_COMPLETA].`,
     'TEXTO EXISTENTE DE LA SECCIÓN (solo para evitar repetición):',
     existingText.slice(-14000),
     '',
@@ -638,6 +699,7 @@ export async function expandDocumentToPageTarget(
   let expansionPasses = 0;
   let calls = 0;
   const invokeProvider = options.invokeProvider || runFastMode;
+  const invoke = (request: Parameters<typeof invokeProvider>[0]) => withAbort(invokeProvider(request), options.signal);
 
   if (!isExtendedGeneration(contract)) {
     contract.actualPages = metrics.actualPages;
@@ -647,14 +709,16 @@ export async function expandDocumentToPageTarget(
     return { metrics, expansionPasses, calls, warnings };
   }
 
-  if (document.generationMetadata.draftDepth) {
+  // Primero la ampliación anclada a cobertura pendiente (hechos, pruebas y autoridades verificadas no usados);
+  // aplica a toda meta de páginas, en cualquier tipo de escrito del catálogo.
+  if (document.generationMetadata.draftDepth || (document.generationMetadata as { pageTarget?: unknown }).pageTarget) {
     const supportedResult = await expandWithSupportedCoverage(document, caseAnalysis, contract, options, metrics);
     metrics = supportedResult.metrics;
     expansionPasses += supportedResult.expansionPasses;
     calls += supportedResult.calls;
     warnings.push(...supportedResult.warnings);
 
-    if (metrics.actualPages >= contract.minPages || calls >= contract.maxCallsPerDocument || expansionPasses >= contract.maxExpansionPasses) {
+    if (metrics.actualPages >= contract.minPages || documentCallsExhausted(contract) || expansionPasses >= contract.maxExpansionPasses) {
       contract.actualPages = metrics.actualPages;
       contract.wordCount = metrics.wordCount;
       contract.characterCount = metrics.characterCount;
@@ -670,28 +734,49 @@ export async function expandDocumentToPageTarget(
 
   }
 
+  let lastPass = { providerFailures: 0, duplicates: 0, exhausted: 0, attempts: 0 };
   const candidates = document.sections
+    // Secciones estructurales (encabezado, comparecencia, petitorios, firma) nunca son candidatas de ampliación.
+    // Respuesta individual («Contestación de hechos/prestaciones») en un escrito de respuesta: la ampliación no añade bloques a cada hecho.
+    .filter((section) => !isStructuralSection(section, { responseDocument: isResponseDocument(document) }))
     .filter((section) => !['header', 'footer', 'page-header', 'page-footer', 'signature', 'closing', 'petition', 'preamble'].includes(section.type) && !/petitori|proemio|firma|cierre|comparec/i.test(`${section.title} ${section.type}`))
     .sort((left, right) => sectionPriority(right) - sectionPriority(left) || left.order - right.order);
 
-  while (
-    metrics.actualPages < contract.minPages
+  while (!options.signal?.aborted
+    && metrics.actualPages < contract.minPages
     && expansionPasses < contract.maxExpansionPasses
-    && calls < contract.maxCallsPerDocument
+    && !documentCallsExhausted(contract)
   ) {
     expansionPasses += 1;
     let addedThisPass = false;
+    lastPass = { providerFailures: 0, duplicates: 0, exhausted: 0, attempts: 0 };
     for (const section of candidates) {
-      if (metrics.actualPages >= contract.minPages || calls >= contract.maxCallsPerDocument) break;
+      if (options.signal?.aborted) break;
+      if (metrics.actualPages >= contract.minPages || documentCallsExhausted(contract)) break;
       const existingText = section.content.map((block) => block.text).join('\n\n');
-      const response = await invokeProvider({
+      lastPass.attempts += 1;
+      let response: AIProviderResult;
+      try {
+      response = await invoke({
         systemPrompt: 'Redacción jurídica extensa, profesional y estrictamente fundada en el expediente. No inventes datos ni repitas contenido.',
-        userMessage: buildExpansionPrompt(document, section, caseAnalysis, contract),
+        userMessage: buildExpansionPrompt(document, section, caseAnalysis, contract, expansionPasses),
         mode: 'fast',
         maxTokens: Math.min(contract.maxGeneratedTokens, 1800),
         maxProviderRetries: 1,
+        signal: options.signal,
         ...caseProviderFlags(document),
       });
+      } catch (error) {
+        // Una cancelación no es un fallo de proveedor: relanzar para salir del while-loop.
+        if (options.signal?.aborted) throw error;
+        // Un error del proveedor no aborta el documento ni se presenta como meta cumplida.
+        calls += 1;
+        contract.metrics.llmCalls += 1;
+        contract.metrics.expansionCalls += 1;
+        lastPass.providerFailures += 1;
+        warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:${error instanceof Error ? error.name : 'ERROR'}`);
+        continue;
+      }
       calls += 1;
       contract.metrics.llmCalls += 1;
       contract.metrics.expansionCalls += 1;
@@ -713,6 +798,7 @@ export async function expandDocumentToPageTarget(
           reason: 'PROVIDER_OUTPUT_TRUNCATED_WITHOUT_COMPLETE_SENTENCE',
           lossStage: 'provider-validation',
         });
+        lastPass.providerFailures += 1;
         warnings.push(`EXTENSION_OUTPUT_TRUNCATED:${section.id}`);
         continue;
       }
@@ -736,6 +822,7 @@ export async function expandDocumentToPageTarget(
           reason: response.fallbackReason || response.errorCode || 'PROVIDER_OUTPUT_NOT_USABLE',
           lossStage: 'provider-validation',
         });
+        lastPass.providerFailures += 1;
         warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:LOCAL_FALLBACK`);
         // A local/non-legal fallback is not admissible as extension content,
         // but it must not abort the whole document. Continue with the next
@@ -750,6 +837,7 @@ export async function expandDocumentToPageTarget(
           reason: response.errorCode || response.fallbackReason || 'PROVIDER_OUTPUT_NOT_USABLE',
           lossStage: 'provider-validation',
         });
+        lastPass.providerFailures += 1;
         warnings.push(`EXTENSION_PROVIDER_UNAVAILABLE:${section.id}:${response.errorCode || response.fallbackReason || 'NO_LEGAL_CONTENT'}`);
         continue;
       }
@@ -761,10 +849,28 @@ export async function expandDocumentToPageTarget(
           reason: 'COMPLETION_SENTINEL_WITHOUT_NEW_CONTENT',
           lossStage: 'provider-validation',
         });
+        lastPass.exhausted += 1;
         continue;
       }
+      // Control fáctico por bloque: una fecha o monto ausente de la fuente rechaza el bloque antes de admitirlo.
+      const factual = evaluateBlockFactualSupport(generated, [...sourceTextsOf(document), ...confirmedEvidenceDescriptions(caseAnalysis)]);
+      if (!factual.accepted) {
+        warnings.push(`FACTUAL_SUPPORT_MISSING:${section.id}:${factual.rejectedItems.join("+")}`);
+        options.trace?.addWarning(`FACTUAL_SUPPORT_MISSING:${section.id}`);
+        continue;
+      }
+      const admission = evaluateGeneratedLegalAdmission({ text: generated, sectionType: section.type, document, analysis: caseAnalysis, legalIssueIds: section.content.flatMap(block => block.legalIssueIds || []) });
+      if (!admission.accepted) {
+        const reason = admission.reasons.join('+');
+        const outcome = admission.fullyNeutralized ? 'LEGAL_ADMISSION_REJECTED' : 'LEGAL_ADMISSION_REMEDIATED';
+        warnings.push(`${outcome}:${section.id}:${reason}`);
+        options.trace?.addWarning(`${outcome}:${section.id}:${reason}`);
+        options.trace?.recordWordAccounting({ sectionId: section.id, rejectedWords: admission.rejectedWords, reason, lossStage: 'block-admission' });
+        if (!hasRecoverableRemediation(admission)) continue;
+      }
+      const admittedText = admission.accepted ? generated : admission.text;
       const wholeDocText = document.sections.flatMap((candidate) => candidate.content.map((block) => block.text)).join('\n\n');
-      const deduplicated = deduplicateExpansionContent(wholeDocText, generated);
+      const deduplicated = deduplicateExpansionContent(wholeDocText, admittedText);
       if (deduplicated.removedWords > 0) options.trace?.recordWordAccounting({
         sectionId: section.id,
         dedupRemovedWords: deduplicated.removedWords,
@@ -773,6 +879,7 @@ export async function expandDocumentToPageTarget(
       });
       if (deduplicated.isDuplicate || !deduplicated.text) {
         contract.metrics.rejectedDuplicateChunks += 1;
+        lastPass.duplicates += 1;
         warnings.push(`EXTENSION_DUPLICATE_REJECTED:${section.id}`);
         continue;
       }
@@ -794,8 +901,16 @@ export async function expandDocumentToPageTarget(
   if (contract.extensionTargetUnmet) {
     warnings.push(`EXTENSION_TARGET_UNMET:${metrics.actualPages}/${contract.minPages}`);
   }
+  // Motivo explícito cuando no se alcanzó: el abogado sabe si faltó material, si el proveedor falló o si
+  // las propuestas repetían texto. Ninguno se registra como meta cumplida.
+  const budgetExhausted = documentCallsExhausted(contract) || expansionPasses >= contract.maxExpansionPasses;
   const contentStopReason: ExtendedExpansionResult['contentStopReason'] =
-    metrics.actualPages >= contract.minPages ? 'TARGET_REACHED' : 'RESOURCE_LIMIT';
+    metrics.actualPages >= contract.minPages ? 'TARGET_REACHED'
+      : budgetExhausted && lastPass.attempts > 0 && lastPass.providerFailures < lastPass.attempts ? 'RESOURCE_LIMIT'
+        : lastPass.attempts > 0 && lastPass.providerFailures === lastPass.attempts ? 'PROVIDER_UNAVAILABLE'
+          : lastPass.duplicates > 0 && lastPass.duplicates + lastPass.exhausted + lastPass.providerFailures >= lastPass.attempts && lastPass.exhausted === 0 ? 'REPETITION_BLOCKED'
+            : lastPass.providerFailures > 0 && lastPass.exhausted === 0 ? 'PROVIDER_UNAVAILABLE'
+              : 'CONTENT_LIMIT_REACHED';
   return { metrics, expansionPasses, calls, warnings: Array.from(new Set(warnings)), contentStopReason };
 }
 

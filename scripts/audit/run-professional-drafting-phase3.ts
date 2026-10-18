@@ -57,7 +57,7 @@ export async function createIsolatedAuditRoot(baseRoot = auditBaseRoot): Promise
   await mkdir(runsRoot, { recursive: true });
   return mkdtemp(path.join(runsRoot, 'run-'));
 }
-const manifestPath = path.resolve(repoRoot, 'audit/final-legal-readiness-2026/selected-cases.json');
+const manifestPath = path.resolve(repoRoot, 'audit/banco-prueba/selected-cases.json');
 const DEPTHS: DraftDepth[] = phase4Audit
   ? ['EXTENSIVE_40', 'PROFESSIONAL_20']
   : ['PROFESSIONAL_20', 'EXTENSIVE_40'];
@@ -437,7 +437,7 @@ export async function runProfessionalDraftingPhase3(): Promise<Record<string, un
 
   const summary = {
     generatedAt: new Date().toISOString(),
-    testBank: manifest.testBankZip || 'C:\\Users\\yahir\\Desktop\\Datos.zip',
+    testBank: manifest.testBankZip || 'RUTA_LOCAL',
     productionDatabaseExcluded: true,
     writesToPrisma: false,
     providerPolicy: useConfiguredProviders ? 'EXPLICITLY_CONFIGURED' : 'CREDENTIALS_SUPPRESSED_LOCAL_FALLBACK_ONLY',

@@ -3,6 +3,7 @@ import {
   DocumentRoutingError,
   type DocumentTemplate,
   resolveTemplateByExplicitLabel,
+  familyDerivedTemplateFor,
 } from './documentTemplates';
 import { getDocumentTypeByValue } from '@/lib/legal-taxonomy';
 import { getCatalogDocument } from '@/lib/catalog/legalCatalog';
@@ -79,7 +80,18 @@ function outputFilename(value: string | undefined, template: DocumentTemplate): 
 }
 
 function knownDocumentType(id: string): boolean {
-  return Boolean(getCatalogDocument(id) || getDocumentTypeByValue(id) || DocumentTemplates[id]);
+  return Boolean(getCatalogDocument(id) || getDocumentTypeByValue(id) || resolveGenerableTemplate(id));
+}
+
+/**
+ * Resuelve la plantilla generable de un tipo: primero la plantilla declarada
+ * propia y, si no existe, la materializada por el MOTOR DE FAMILIAS. Un tipo
+ * catalogado no puede caer al fallback genérico por falta de plantilla.
+ */
+function resolveGenerableTemplate(id: string): DocumentTemplate | undefined {
+  const key = normalize(id);
+  if (!key) return undefined;
+  return DocumentTemplates[key] || familyDerivedTemplateFor(key);
 }
 
 function throwRoutingError(code: DocumentRoutingErrorCode, message: string): never {
@@ -138,13 +150,23 @@ export function resolveDocumentRouting(input: ResolveDocumentRoutingInput): Docu
         `UNKNOWN_DOCUMENT_TYPE: "${selected}" es una familia genérica y no un ID documental generable; seleccione un tipo canónico explícito.`,
       );
     }
+    // CONTRACTO fail-closed: un tipo REQUIRES_OFFICIAL_FORM o ASSISTED_DRAFT no
+    // es generable aunque tenga plantilla. El estado de producto manda sobre la
+    // existencia del backend: la autoridad exige el formulario oficial.
+    const selectedTemplate = resolveGenerableTemplate(selected);
+    if (catalogEntry?.kind === 'DOCUMENT_TYPE' && catalogEntry.status !== 'IMPLEMENTED') {
+      return throwRoutingError(
+        'DOCUMENT_TYPE_NOT_IMPLEMENTED',
+        `DOCUMENT_TYPE_NOT_IMPLEMENTED: el tipo canónico "${selected}" requiere una forma oficial o aún es un borrador asistido/de catálogo.`,
+      );
+    }
     if (!knownDocumentType(selected)) {
       return throwRoutingError(
         'UNKNOWN_DOCUMENT_TYPE',
         `UNKNOWN_DOCUMENT_TYPE: no existe un tipo documental canónico registrado para "${selected}".`,
       );
     }
-    const template = DocumentTemplates[selected];
+    const template = selectedTemplate;
     if (!template) {
       return throwRoutingError(
         'DOCUMENT_TYPE_NOT_IMPLEMENTED',
@@ -197,14 +219,14 @@ export function resolveDocumentRouting(input: ResolveDocumentRoutingInput): Docu
     }
     if (!knownDocumentType(inferred)) return safeFreeWritingFallback(input);
     const inferredEntry = getCatalogDocument(inferred);
-    if (inferredEntry && (inferredEntry.kind === 'FAMILY' || inferredEntry.status !== 'IMPLEMENTED')) {
+    const inferredTemplate = resolveGenerableTemplate(inferred);
+    if (inferredEntry?.kind === 'FAMILY' || inferredEntry?.status !== 'IMPLEMENTED' || !inferredTemplate) {
       return throwRoutingError(
         'DOCUMENT_TYPE_NOT_IMPLEMENTED',
         `DOCUMENT_TYPE_NOT_IMPLEMENTED: el tipo canónico "${inferred}" está catalogado, pero aún no tiene strategy/template generable.`,
       );
     }
-    const template = DocumentTemplates[inferred];
-    if (!template) return safeFreeWritingFallback(input);
+    const template = inferredTemplate;
     return {
       sourceDocumentType: normalizedSourceDocumentType(input.sourceDocumentType),
       resolvedStrategy: template.tipo,

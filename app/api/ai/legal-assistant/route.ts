@@ -138,8 +138,8 @@ export async function POST(req: NextRequest) {
               AND: [
                 {
                   OR: words.flatMap((w: string) => [
-                    { title: { contains: w, mode: 'insensitive' } },
-                    { summary: { contains: w, mode: 'insensitive' } },
+                    { title: { contains: w } },
+                    { summary: { contains: w } },
                   ]),
                 },
                 // Exclude SENADO_WEB and invalid domains

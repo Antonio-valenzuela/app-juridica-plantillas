@@ -726,7 +726,7 @@ docs/blueprints/loop-7-catalogo-juridico-profesional-blueprint.md
 - Mantener los 33 IDs legacy y sus contratos existentes.
 - No cambiar Loop 6 sin una prueba que demuestre regresión.
 - No inventar hechos, personas, expedientes, PDFs, jurisprudencia ni casos.
-- Tests con fixtures sintéticos; no usar valores reales ni `800/2024`.
+- Tests con fixtures sintéticos; no usar valores reales ni `999/2099`.
 - No introducir Neon, infraestructura remota ni migraciones para este loop.
 - Usar TypeScript estricto y funciones puras para validación/búsqueda.
 - Ejecutar focos antes de la suite completa; cerrar con typecheck, lint y build.

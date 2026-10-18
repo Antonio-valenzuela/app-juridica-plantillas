@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -26,7 +27,7 @@ import type { DerivedIssueReadiness, LegalRegimeResolution } from '@/lib/legal-e
 import type { GenerationTask } from '@/lib/legal-engine/generationTasks';
 import type { IssueGenerationOutcome } from '@/lib/legal-engine/issueDraftResult';
 
-describe('VALIDACIÓN REAL E2E: PDF REAL → RESEARCH → LLM → ASSEMBLY → DOCX/PDF', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('VALIDACIÓN REAL E2E: PDF REAL → RESEARCH → LLM → ASSEMBLY → DOCX/PDF', () => {
   it('ejecuta el ciclo de vida completo de extremo a extremo sin mocks', async () => {
     // ─────────────────────────────────────────────────────────────
     // 1. CARGA Y EXTRACCIÓN DEL PDF JURÍDICO REAL
@@ -64,7 +65,7 @@ describe('VALIDACIÓN REAL E2E: PDF REAL → RESEARCH → LLM → ASSEMBLY → D
     // ─────────────────────────────────────────────────────────────
     const caseAnalysis = reconstructCaseAnalysis(
       [sourceDoc],
-      'Interponer recurso de revisión contra la sentencia del Tribunal Colegiado en el amparo directo 800/2024',
+      'Interponer recurso de revisión contra la sentencia del Tribunal Colegiado en el amparo directo 999/2099',
     );
 
     expect(caseAnalysis.authorities.length).toBeGreaterThan(10); // Contiene citas a leyes y tesis
@@ -72,7 +73,7 @@ describe('VALIDACIÓN REAL E2E: PDF REAL → RESEARCH → LLM → ASSEMBLY → D
     const docTemplate = getDocumentTemplate('recurso_revision_amparo_directo') || getDocumentTemplate('universal');
     const baseDoc = markDocumentAsDraft({
       ...createEmptyDocument(),
-      title: 'Recurso de Revisión en Amparo Directo 800/2024',
+      title: 'Recurso de Revisión en Amparo Directo 999/2099',
       documentType: 'recurso_revision_amparo_directo',
       userInstruction: 'Interponer recurso de revisión en amparo directo',
     });
@@ -118,7 +119,7 @@ describe('VALIDACIÓN REAL E2E: PDF REAL → RESEARCH → LLM → ASSEMBLY → D
     const abstractQuery = projectAbstractLegalQuery(rawQuery);
 
     // Verificación de no fuga de datos sensibles
-    expect(abstractQuery).not.toContain('800/2024');
+    expect(abstractQuery).not.toContain('999/2099');
     expect(abstractQuery).not.toMatch(/\b[A-Z]{4}\d{6}[A-Z0-9]{3}\b/i);
 
     // ─────────────────────────────────────────────────────────────

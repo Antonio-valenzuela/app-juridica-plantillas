@@ -167,6 +167,10 @@ export function assembleSectionContextPacket(input: {
   const diagnostics: string[] = [];
   const excluded: SectionSourceManifest['excluded'] = [];
   const matrix = input.doc.legalIssueMatrix;
+  if ((matrix && matrix.documentId !== input.doc.id)
+    || (input.documentState?.documentId && input.documentState.documentId !== input.doc.id)) {
+    throw new Error('MATTER_DOCUMENT_MISMATCH');
+  }
   const allowedOutcomes = input.issueOutcomes.filter(outcomeAllowed);
   let groundedIssueOutputs = allowedOutcomes
     .map((outcome) => projectIssueOutput(outcome))
@@ -399,7 +403,10 @@ export function assembleSectionContextPacket(input: {
     evidence: cappedEvidence,
     verifiedAuthorities,
     research,
-    argumentSupports: input.documentState?.matterKnowledgeBase.argumentSupports || [],
+    argumentSupports: (input.documentState?.matterKnowledgeBase.argumentSupports || []).filter((support) =>
+      groundedIssues.some((issue) => issue.argumentIds.includes(support.argumentId))
+      && support.factRefs.every((id) => cappedFacts.some((fact) => fact.id === id))
+      && support.evidenceRefs.every((id) => cappedEvidence.some((evidence) => evidence.id === id))),
     clientPosition,
     previousSectionSummaries: input.documentState?.previousConclusions || [],
     blockers,

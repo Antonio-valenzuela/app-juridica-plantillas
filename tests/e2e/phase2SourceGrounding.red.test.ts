@@ -1,9 +1,10 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { analyzeUploadedDocument } from '@/lib/upload-analysis/analyze';
 
-const auditRoot = path.resolve(process.cwd(), 'audit/final-legal-readiness-2026');
+const auditRoot = path.resolve(process.cwd(), 'audit/banco-prueba');
 
 const realCases = [
   {
@@ -54,7 +55,7 @@ async function analyzeRealCase(caseNumber: string) {
   };
 }
 
-describe.sequential('FASE 2 RED source classification with the six real sources', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('FASE 2 RED source classification with the six real sources', () => {
   it.each(realCases)('$caseNumber must identify the principal source document, not an embedded precedent', async (expected) => {
     const { fileName, result } = await analyzeRealCase(expected.caseNumber);
 

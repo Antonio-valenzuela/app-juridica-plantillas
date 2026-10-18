@@ -1,8 +1,9 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { reexportFinalLegalReadinessCases } from '../../scripts/audit/reexport-final-legal-readiness';
 
-describe('Reexportación de entregables de readiness legal', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('Reexportación de entregables de readiness legal', () => {
   it('reexporta seis pares DOCX/PDF válidos con el renderer corregido', async () => {
     const results = await reexportFinalLegalReadinessCases();
     expect(results).toHaveLength(6);

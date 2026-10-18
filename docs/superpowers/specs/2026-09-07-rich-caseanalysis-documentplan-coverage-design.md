@@ -1,7 +1,7 @@
 # FASE 2 — RichCaseAnalysis, DocumentPlan y CoverageMatrix rich-first
 
 **Fecha:** 2026-09-07  
-**Proyecto:** `C:\Users\yahir\Desktop\APP-plantillas`  
+**Proyecto:** `RUTA_LOCAL`  
 **Fase:** 2 — planificación documental y cobertura basada en el análisis rico  
 **Estado:** diseño aprobado en conversación; pendiente de revisión humana del spec antes de `writing-plans`
 

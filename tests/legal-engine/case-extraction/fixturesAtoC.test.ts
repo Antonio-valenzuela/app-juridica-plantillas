@@ -21,7 +21,8 @@ describe('synthetic extraction fixtures A-C', () => {
 
   it('Fixture C produces evidence mentions from comma-separated text', () => {
     const analysis = reconstructCaseAnalysis([fixtureC_commaEvidence()], 'Analizar', '', { includeReferenceInAnalysis: false });
-    expect(analysis.richCaseAnalysis?.evidenceMentions.length).toBe(3);
+    expect(analysis.richCaseAnalysis?.evidenceMentions.length, JSON.stringify(analysis.richCaseAnalysis?.evidenceMentions.map((item) => item.description))).toBe(3);
+    expect(analysis.richCaseAnalysis?.evidenceMentions.map((item) => item.description)).not.toContain('La documental se relaciona con el hecho 1.');
     expect(analysis.richCaseAnalysis?.evidenceOffers).toHaveLength(0);
   });
 });

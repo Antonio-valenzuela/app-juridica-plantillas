@@ -9,7 +9,7 @@ import type {
 } from './documentAssemblyTypes';
 import type { ExportValidationResult } from './exportGuards';
 
-export type VerificationMode = 'RICH_ASSEMBLY' | 'COMPATIBILITY';
+export type VerificationMode = 'RICH_ASSEMBLY' | 'COMPATIBILITY' | 'DRAFT_REVIEW';
 
 export interface RichVerifiedInput {
   verificationMode: 'RICH_ASSEMBLY';
@@ -37,7 +37,13 @@ export interface VerifiedCompatibilityInput {
 }
 
 /** Task 7 may widen this union with an explicitly gated compatibility producer. */
-export type VerifiedMaterializationInput = RichVerifiedInput | VerifiedCompatibilityInput;
+export interface DraftReviewInput {
+  verificationMode: 'DRAFT_REVIEW';
+  document: UniversalLegalDocument;
+  exportValidation: ExportValidationResult;
+}
+
+export type VerifiedMaterializationInput = RichVerifiedInput | VerifiedCompatibilityInput | DraftReviewInput;
 
 export interface RenderProvenance {
   documentId: string;

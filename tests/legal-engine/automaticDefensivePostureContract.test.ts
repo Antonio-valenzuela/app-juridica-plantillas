@@ -72,7 +72,7 @@ describe('Contrato A — Postura Defensiva Automática (Reglas PERMITIDO y PROHI
     ],
     richCaseAnalysis: {
       facts: [
-        { id: 'fact-1', proposition: 'El trabajador afirma despido injustificado el 01/07/2025', assertionStatus: 'EXTRACTED' },
+        { id: 'fact-1', proposition: 'El trabajador afirma despido injustificado el 01/07/2025', assertionStatus: 'EXTRACTED', provenance: [] },
       ],
       claims: [
         { id: 'claim-1', requestedRelief: 'Indemnización constitucional', status: 'EXTRACTED', provenance: [{ sourceId: 'source-1' }] },
@@ -144,6 +144,8 @@ describe('Contrato A — Postura Defensiva Automática (Reglas PERMITIDO y PROHI
     };
 
     const matrix: LegalIssueMatrix = {
+      documentId: syntheticDoc.id,
+      documentType: syntheticDoc.documentType,
       issues: [
         {
           id: 'issue-1',

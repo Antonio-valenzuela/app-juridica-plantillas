@@ -208,12 +208,12 @@ describe('FASE 4 — Fuente REFERENCE_ONLY contra los cinco tipos documentales',
       const firmaText = (firma?.content || []).map((b: any) => b.text).join('\n');
       if (caso.tipo === 'contestacion_demanda_laboral') {
         // Quien contesta es el demandado [PENDIENTE]; JAMÁS la autoridad de la fuente
-        expect(firmaText).toMatch(/DATO PENDIENTE DE EXPEDIENTE: Nombre del demandado/);
+        expect(firmaText).toMatch(/\[PENDIENTE:\s*Nombre del demandado\]/i);
         expect(firmaText).not.toMatch(/Instituto de Pensiones del Estado de Jalisco/);
       } else {
         const tpl = getDocumentTemplate(caso.tipo);
         expect(tpl.rolAutor).toBeTruthy();
-        expect(firmaText.toLowerCase()).toContain('dato pendiente');
+        expect(firmaText).toMatch(/\[PENDIENTE:\s*[^\]]+\]/i);
       }
     }, 30000);
   }

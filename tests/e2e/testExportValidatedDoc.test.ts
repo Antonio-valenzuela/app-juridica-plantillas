@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import { it, expect } from 'vitest';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -25,7 +26,7 @@ function splitIntoPages(text: string, wordsPerPage = 500): string[] {
   return pages.length > 0 ? pages : [text];
 }
 
-it('exporta el documento generado en Caso 01 EXTENSIVE_40 a DOCX y PDF', async () => {
+it.skipIf(!LIVE_PROVIDER_TESTS)('exporta el documento generado en Caso 01 EXTENSIVE_40 a DOCX y PDF', async () => {
   const runDir = path.resolve('audit/final-generator-validation/run-2026-09-28T18-22-14');
   const evidenceDir = path.join(runDir, 'evidence');
   const outputDir = path.join(runDir, 'outputs');

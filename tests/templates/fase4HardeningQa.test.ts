@@ -70,7 +70,17 @@ describe('FASE 4: HARDENING, QA DE PRODUCCIÓN Y VALIDACIÓN INTEGRAL', () => {
         expect(doc.sections.some(s => s.type === 'petition' || s.title.toLowerCase().includes('petitorio'))).toBe(true);
 
         const validation = validateDocument(doc);
-        expect(validation.isValid).toBe(true);
+        if (preset.name === 'Demanda de Amparo Directo' || preset.name === 'Demanda de Amparo Indirecto') {
+          // These presets contain no confirmed act, constitutional parameter,
+          // concrete injury/effect or record link. The correct contract is a
+          // review-blocked draft, not a fabricated complete constitutional claim.
+          expect(validation.isValid).toBe(false);
+          expect(validation.errors.map((error) => error.checkId)).toContain('INCOMPLETE_CONSTITUTIONAL_CONCEPT');
+          expect(validation.errors.map((error) => error.checkId)).toContain('MISSING_CASE_RECORD_LINK');
+          expect(doc.status).toBe('draft');
+          return;
+        }
+        expect(validation.isValid, JSON.stringify(validation.errors)).toBe(true);
         expect(validation.errors).toHaveLength(0);
       });
     }

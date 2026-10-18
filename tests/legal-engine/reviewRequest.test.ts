@@ -43,7 +43,7 @@ describe('review request', () => {
         richCaseAnalysis: {
           facts: [
             { id: 'fact-1', proposition: 'La parte demandada sostiene que el auto de fecha 08 de septiembre de 2025 quedó firme y produjo efectos de cosa juzgada.', provenance: [{ page: 10, sourceId: 'source.pdf', excerpt: 'La parte demandada sostiene que el auto de fecha 08 de septiembre de 2025 quedó firme y produjo efectos de cosa juzgada.' }] },
-            { id: 'fact-2', proposition: 'La parte actora sostiene que la edad de Sebastiana Meza González generaba dudas sobre su capacidad para otorgar testamento.', provenance: [{ page: 15, sourceId: 'source.pdf', excerpt: 'La parte actora sostiene que la edad de Sebastiana Meza González generaba dudas sobre su capacidad para otorgar testamento.' }] },
+            { id: 'fact-2', proposition: 'La parte actora sostiene que la edad de Persona Sintética Tres generaba dudas sobre su capacidad para otorgar testamento.', provenance: [{ page: 15, sourceId: 'source.pdf', excerpt: 'La parte actora sostiene que la edad de Persona Sintética Tres generaba dudas sobre su capacidad para otorgar testamento.' }] },
           ],
           missingData: [{ field: 'clientPosition', reason: 'No explicit client posture was found.', sourceSearched: ['source.pdf'] }],
           clientPosition: { status: 'UNKNOWN', source: 'SOURCE_POSITION', propositionIds: [], provenance: [] },
@@ -78,7 +78,7 @@ describe('review request', () => {
     expect(request.pendingItems[1]).toMatchObject({
       id: 'position-fact-2',
       rootDecisionKey: 'CLIENT_POSITION:FACT:fact-2',
-      neutralContext: 'La parte actora sostiene que la edad de Sebastiana Meza González generaba dudas sobre su capacidad para otorgar testamento.',
+      neutralContext: 'La parte actora sostiene que la edad de Persona Sintética Tres generaba dudas sobre su capacidad para otorgar testamento.',
       sourcePage: 15,
       affectedSections: ['section-fact'],
     });

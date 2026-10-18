@@ -5,16 +5,16 @@ import { deriveNvidiaIndicator } from '@/lib/runtime/nvidiaStatus';
 describe('encabezado del workspace', () => {
   it('usa el expediente y órgano del documento seleccionado', () => {
     expect(toActiveCaseContext({
-      expediente: '1152/2013',
+      expediente: '998/2099',
       autoridad: 'TRIBUNAL COLEGIADO DEL SEXTO CIRCUITO',
       actor: 'Ahora 1 A',
-      demandado: 'Jesús Ustavo Chávez Lozano',
+      demandado: 'Persona Sintética Cuatro',
       materia: 'Laboral',
     })).toEqual({
-      expedienteNumber: '1152/2013',
+      expedienteNumber: '998/2099',
       court: 'TRIBUNAL COLEGIADO DEL SEXTO CIRCUITO',
       actor: 'Ahora 1 A',
-      demandado: 'Jesús Ustavo Chávez Lozano',
+      demandado: 'Persona Sintética Cuatro',
       matter: 'Laboral',
     });
   });

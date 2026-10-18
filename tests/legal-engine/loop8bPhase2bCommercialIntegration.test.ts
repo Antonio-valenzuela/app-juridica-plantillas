@@ -3,6 +3,7 @@ import { buildCaseContext } from '@/lib/legal-engine/caseContext';
 import { buildDocumentPlan, buildTemplateSkeleton } from '@/lib/legal-engine/documentPlan';
 import { DocumentTemplates } from '@/lib/legal-engine/documentTemplates';
 import { getCanonicalOutputFilename } from '@/lib/legal-engine/outputFilename';
+import { sectionDisplayTitle } from '@/lib/legal-engine/documentStrategies';
 import { ExportGuardError, prepareUniversalDocumentForExport, validateForExport } from '@/lib/legal-engine/exportGuards';
 import { markDocumentAsReadyToExport } from '@/lib/legal-engine/documentLifecycle';
 import { generateSection, runGenerationPipeline } from '@/lib/legal-engine/pipeline';
@@ -111,7 +112,7 @@ describe('LOOP 8B FASE 2B — integración de pipeline mercantil', () => {
     const result = await generateSection(doc, 'hechos');
 
     expect(result.text).not.toMatch(/autoridad responsable|garantías fundamentales|medio de defensa|revocar/i);
-    expect(result.text).toMatch(/DATO PENDIENTE|REQUIERE/i);
+    expect(result.text).toMatch(/\[PENDIENTE:/i);
   });
 
   it('no convierte una fuente larga en MACHOTE cuando el modo es automático', () => {
@@ -130,7 +131,8 @@ describe('LOOP 8B FASE 2B — integración de pipeline mercantil', () => {
     });
 
     expect(plan.planSource).toBe('GENERATED');
-    expect(plan.sections.map((section) => section.title)).toEqual(template.estructura);
+    expect(plan.sections.map((section) => section.id)).toEqual(template.estructura);
+    expect(plan.sections.map((section) => section.title)).toEqual(template.estructura.map(sectionDisplayTitle));
   });
 
   it('no permite que un machote de otra familia reemplace el esqueleto mercantil', () => {
@@ -149,7 +151,8 @@ describe('LOOP 8B FASE 2B — integración de pipeline mercantil', () => {
     });
 
     expect(plan.planSource).toBe('GENERATED');
-    expect(plan.sections.map((section) => section.title)).toEqual(template.estructura);
+    expect(plan.sections.map((section) => section.id)).toEqual(template.estructura);
+    expect(plan.sections.map((section) => section.title)).toEqual(template.estructura.map(sectionDisplayTitle));
   });
 
   it('conserva el contexto comercial en el único pipeline y no autoexporta', async () => {

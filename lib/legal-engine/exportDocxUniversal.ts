@@ -1,4 +1,5 @@
 import 'server-only';
+import { prepareDraftReviewMaterialization } from './draftDocumentMaterialization';
 import {
   AlignmentType,
   Document,
@@ -27,6 +28,8 @@ import {
   markExportManifestRecorded,
 } from './exportArtifactTypes';
 import type { ExportArtifact } from './exportArtifactTypes';
+import { inspectDocxMold, renderWithDocxMold, type MoldParagraph } from '../templates/docxMold';
+import { buildCarryoverBlocklist, describeCarryover, findCarryover } from '../templates/carryoverFilter';
 import type {
   ExportRenderModel,
   RenderParagraph,
@@ -99,6 +102,16 @@ function lineSpacing(lineHeight: unknown): number {
   if (typeof lineHeight !== 'string') return 276;
   const value = Number.parseFloat(lineHeight);
   return Number.isFinite(value) && value >= 1 && value <= 4 ? Math.round(value * 240) : 276;
+}
+
+/** Sangría de primera línea (style.firstLineIndent en pt o em), la misma que aplica el PDF. */
+function firstLineIndentTwips(style: RenderParagraph['style'], role: RenderParagraph['role']): { firstLine: number } | undefined {
+  const match = typeof style?.firstLineIndent === 'string' ? /([\d.]+)\s*(em|pt)?/i.exec(style.firstLineIndent) : null;
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  const points = match[2]?.toLowerCase() === 'pt' ? value : value * (fontSizeInHalfPoints(style.fontSize, role) / 2);
+  return { firstLine: Math.round(points * 20) };
 }
 
 function sanitizeXmlText(text: string): string {
@@ -225,7 +238,9 @@ function renderParagraph(paragraph: RenderParagraph, placement: 'BODY' | 'HEADER
     keepNext: paragraph.keepNext,
     keepLines: paragraph.keepTogether,
     pageBreakBefore: paragraph.pageBreakBefore,
-    indent: paragraph.role === 'LIST' ? { left: 360, hanging: 260 } : undefined,
+    indent: paragraph.role === 'LIST'
+      ? { left: 360, hanging: 260 }
+      : firstLineIndentTwips(style, paragraph.role),
   });
 }
 
@@ -308,6 +323,17 @@ function traceParagraphs(model: ExportRenderModel): readonly RenderParagraph[] {
   ];
 }
 
+function ensureTraceWordAccounting(trace: GenerationTrace): void {
+  const compatibleTrace = trace as GenerationTrace & { wordAccounting?: unknown };
+  if (compatibleTrace.wordAccounting === undefined) {
+    compatibleTrace.wordAccounting = [];
+    return;
+  }
+  if (!Array.isArray(compatibleTrace.wordAccounting)) {
+    throw new TypeError('GENERATION_TRACE_WORD_ACCOUNTING_INVALID');
+  }
+}
+
 function recordTrace(
   trace: GenerationTrace,
   model: ExportRenderModel,
@@ -357,6 +383,9 @@ function verifiedInputForPreparedDocument(
   exportValidation: ReturnType<typeof validateForExport>,
   options: PrepareUniversalDocumentForExportOptions = {},
 ): VerifiedMaterializationInput {
+  if (document.generationMetadata.exportMode === 'DRAFT') {
+    return prepareDraftReviewMaterialization(document, exportValidation);
+  }
   const candidate = document as UniversalLegalDocument & {
     documentAssemblyResult?: unknown;
     documentAssemblyQualityGate?: unknown;
@@ -388,6 +417,98 @@ export const exportUniversalToDocx = async (
     lawyerProfile,
   });
   const auditTrace = trace || prepared.document.generationMetadata.auditTrace;
-  if (auditTrace) recordTrace(auditTrace, model, artifact.bytes, artifact.manifest);
+  if (auditTrace) {
+    ensureTraceWordAccounting(auditTrace);
+    recordTrace(auditTrace, model, artifact.bytes, artifact.manifest);
+  }
   return Buffer.from(artifact.bytes);
+};
+
+export interface DocxMoldExportInput {
+  /** .docx original del abogado (se procesa solo en local). */
+  templateBytes: Uint8Array | Buffer;
+  /** Texto original de la plantilla: de aquí salen los datos viejos que se bloquean. */
+  templateText?: string;
+  /** Valores del caso nuevo que NO deben bloquearse. */
+  caseValues?: readonly string[];
+}
+
+export interface DocxMoldExportResult {
+  buffer: Buffer;
+  warnings: string[];
+  blocked: string[];
+}
+
+export class TemplateCarryoverExportError extends Error {
+  constructor(readonly blocked: string[]) {
+    super('TEMPLATE_CARRYOVER_BLOCKED');
+    this.name = 'TemplateCarryoverExportError';
+  }
+}
+
+/** Mismo contrato de exportación que exportUniversalToDocx, pero con el diseño del .docx del abogado. */
+export const exportUniversalToDocxWithMold = async (
+  docData: UniversalLegalDocument,
+  mold: DocxMoldExportInput,
+  trace?: GenerationTrace,
+  exportOptions: PrepareUniversalDocumentForExportOptions = {},
+): Promise<DocxMoldExportResult> => {
+  const prepared = await prepareUniversalDocumentForExport(docData, exportOptions);
+  const exportValidation = validateForExport(prepared.document);
+  const verified = verifiedInputForPreparedDocument(prepared.document, exportValidation, exportOptions);
+  const model = materializePreparedFinalDocument(verified);
+
+  const inspection = await inspectDocxMold(mold.templateBytes);
+  const blocklist = mold.templateText?.trim()
+    ? buildCarryoverBlocklist(mold.templateText, [...(mold.caseValues || [])])
+    : undefined;
+
+  const content: MoldParagraph[] = [];
+  const blocked: string[] = [];
+  let currentSection: string | undefined;
+  for (const paragraph of renderableBodyParagraphs(model)) {
+    const text = paragraph.text.trim();
+    if (!text) continue;
+    if (blocklist) {
+      const hits = findCarryover(text, blocklist);
+      if (hits.length > 0) {
+        blocked.push(describeCarryover({ excerpt: text.length > 200 ? `${text.slice(0, 199)}…` : text, hits }));
+        continue;
+      }
+    }
+    if (paragraph.role === 'TITLE' && paragraph.headingLevel) {
+      currentSection = text;
+      content.push({ role: 'heading', text, sectionTitle: text });
+    } else if (paragraph.role === 'TITLE') {
+      content.push({ role: 'title', text });
+    } else if (paragraph.role === 'SIGNATURE') {
+      content.push({ role: 'signature', text });
+    } else if (/protesto lo necesario/i.test(text) && text.length < 60) {
+      content.push({ role: 'closing', text });
+    } else {
+      content.push({ role: 'body', text, sectionTitle: currentSection });
+    }
+  }
+  if (blocked.length > 0 && docData.generationMetadata.exportMode !== 'DRAFT') {
+    throw new TemplateCarryoverExportError(blocked);
+  }
+
+  const rendered = await renderWithDocxMold(mold.templateBytes, content, { blocklist });
+  const pageProfile: DocxPageProfile = {
+    id: 'docx-lawyer-mold',
+    unit: 'twip',
+    width: inspection.page.width,
+    height: inspection.page.height,
+    margins: inspection.page.margins,
+    source: 'SERVER_OPTION',
+  };
+  const manifest = createExportManifest({ model, format: 'docx', pageProfile, traceStatus: 'NOT_AVAILABLE' });
+  const auditTrace = trace || prepared.document.generationMetadata.auditTrace;
+  if (auditTrace) {
+    ensureTraceWordAccounting(auditTrace);
+    recordTrace(auditTrace, model, rendered.bytes, manifest);
+  }
+  const warnings = [...rendered.warnings];
+  if (blocked.length > 0) warnings.push(`${blocked.length} párrafo(s) con datos de la plantilla anterior no se incluyeron en el Word.`);
+  return { buffer: Buffer.from(rendered.bytes), warnings, blocked };
 };

@@ -41,4 +41,14 @@ describe('getSafeApiErrorMessage', () => {
       getSafeApiErrorMessage(new Error('PrismaClientKnownRequestError: relation does not exist'), 'No fue posible completar la operación.'),
     ).toBe('No fue posible completar la operación.');
   });
+
+  it('explica de forma segura que se detuvo la exportación cuando no se pudo guardar el borrador', () => {
+    const error = Object.assign(new Error('No se pudo guardar el documento antes de exportar.'), {
+      errorCode: 'DRAFT_PERSISTENCE_REQUIRED',
+    });
+
+    expect(getSafeApiErrorMessage(error, 'No fue posible exportar el PDF.')).toBe(
+      'No se pudo guardar el borrador; la exportación se detuvo y el archivo no fue solicitado. Reintenta cuando el guardado esté disponible.',
+    );
+  });
 });

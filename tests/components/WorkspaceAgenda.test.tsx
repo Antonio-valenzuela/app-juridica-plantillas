@@ -38,4 +38,21 @@ describe('Workspace agenda calendar', () => {
     expect(readAgendaEvents().find((event) => event.id === 'agenda-high')?.status).toBe('COMPLETED');
     expect(window.localStorage.getItem(AGENDA_STORAGE_KEY)).toContain('COMPLETED');
   });
+
+  it('aligns weekday labels with the date grid and marks the calculated day without creating an agenda event', async () => {
+    render(<WorkspaceModulesView mode="terminos" onNavigate={() => undefined} />);
+
+    const calendarLayout = screen.getByTestId('workspace-terms-calendar-layout');
+    expect(screen.getByTestId('workspace-terms-weekdays').parentElement).toBe(calendarLayout);
+    expect(screen.getByLabelText('Calendario mensual de términos').parentElement).toBe(calendarLayout);
+
+    fireEvent.change(screen.getByLabelText('Fecha inicial'), { target: { value: '2026-09-30' } });
+    fireEvent.change(screen.getByLabelText('Días'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Calcular' }));
+
+    const calculatedDay = await screen.findByRole('button', { name: 'Fecha calculada 2026-10-01. Seleccionar eventos del 2026-10-01' });
+    expect(calculatedDay).toHaveAttribute('data-computed-term', 'true');
+    expect(screen.getByText('octubre de 2026')).toBeInTheDocument();
+    expect(readAgendaEvents()).toHaveLength(0);
+  });
 });

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractAppealResolutionReview, isCivilFamilyAppeal, resolveAppealGeneration } from '@/lib/legal-engine/case-extraction/appealResolutionReview';
 import { z } from 'zod';
 import { runGenerationPipeline } from '@/lib/legal-engine/pipeline';
 import { UploadedSourceDocument, UniversalLegalDocument, CaseWorkflow } from '@/lib/legal-engine/types';
-import { requireLawyerAccess } from '@/lib/security/lawyerAuth';
+import { requireWorkspaceExecutionAccess, executionOwnerKey, ownsExecution } from '@/lib/security/workspaceExecutionAccess';
+import { loadResearchBundles, researchStoreKey, unverifiedFundamentalsNotice } from '@/lib/legal-engine/researchBundleStore';
+import { DesktopProfileRepository } from '@/lib/workspace/desktopProfileRepository';
 import { LawyerProfile } from '@/lib/workspace/lawyerProfileTypes';
 import { loadLawyerProfile } from '@/lib/workspace/lawyerProfileStore';
 import { buildFingerprint } from '@/lib/legal-engine/generationLock';
-import { createGenerationJob, findActiveJobByFingerprint, getGenerationJob, updateJobProgress, ensureTerminalJobState } from '@/lib/legal-engine/generationJobs';
+import { createGenerationJob, findActiveJobByFingerprint, getGenerationJob, updateJobProgress, ensureTerminalJobState, registerJobAbort, unregisterJobAbort } from '@/lib/legal-engine/generationJobs';
 import { recoverActiveGenerationJob, recoverGenerationJob } from '@/lib/legal-engine/generationJobPersistence';
 import { CUSTOM_VALUE_MAX_LENGTH, sanitizeCustomValue } from '@/lib/legal-taxonomy';
 import { resolveGenerationTotal } from '@/lib/legal-engine/generationProgress';
@@ -16,10 +19,14 @@ import { buildReviewRequest } from '@/lib/legal-engine/reviewRequest';
 import { checkRequestRateLimit } from '@/lib/security/rateLimit';
 import { checkGenerationAdmission, maxGenerationInputChars } from '@/lib/security/aiCostControls';
 import { getSafeApiErrorMessage } from '@/lib/apiErrorMessage';
-import { getGenerationJobDeadlineMs } from '@/lib/legal-engine/generationDeadline';
+import { getGenerationJobDeadlineMs, runWithGenerationDeadline } from '@/lib/legal-engine/generationDeadline';
+import { pageTargetFailureResult, pageTargetToGenerationExtension } from '@/lib/legal-engine/pageTarget';
 import { resolveDraftDepthProfile } from '@/lib/legal-engine/draftDepth';
 import { generationExtensionForDraftDepth } from '@/lib/legal-engine/generationExtension';
-import { explicitExternalProviderConsent, scopeConsentIdempotencyKey } from '@/lib/ai/caseProviderConsent';
+import { PageTargetValidationError, parsePageTarget, tryParsePageTarget, type PageTarget } from '@/lib/legal-engine/pageTarget';
+import { explicitAuthorizedProviders, explicitExternalProviderConsent, scopeConsentIdempotencyKey } from '@/lib/ai/caseProviderConsent';
+import { getUncertifiedDraftAcknowledgementError } from '@/lib/legal-engine/uncertifiedDraftAcknowledgement';
+import { parseCaseDossier } from '@/lib/legal-engine/caseDossier';
 
 type CompletionDocument = UniversalLegalDocument & {
   documentAssemblyResult?: { readiness?: string };
@@ -71,34 +78,34 @@ function buildFingerprintFromBody(body: any, sourcesArr: UploadedSourceDocument[
     expediente: expedienteFromBody || expedienteFromPrompt || '',
     partiesHash,
     draftDepth: body.draftDepth as 'PROFESSIONAL_20' | 'EXTENSIVE_40' | undefined,
+    pageTargetPages: body.pageTarget === undefined ? undefined : tryParsePageTarget(body.pageTarget)?.pages,
     externalProviderOptIn: explicitExternalProviderConsent(body.externalProviderOptIn),
   });
 }
 
-async function withGenerationDeadline<T>(promise: Promise<T>, deadlineMs: number): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      const error = new Error('El tiempo máximo de generación fue alcanzado.') as Error & { code?: string };
-      error.code = 'GENERATION_TIMEOUT';
-      reject(error);
-    }, deadlineMs);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
+
+/** Estado terminal compartido por ambas rutas: meta no alcanzada o fallo de medición nunca es «completado». */
+function resultTerminalStatus(doc: UniversalLegalDocument): 'COMPLETED' | 'NEEDS_REVIEW' {
+  const result = (doc.generationMetadata as any)?.pageTargetResult;
+  if (result?.failureCause || result?.outcome === 'BELOW_TARGET') return 'NEEDS_REVIEW';
+  return doc.status === 'draft' ? 'NEEDS_REVIEW' : 'COMPLETED';
+}
+
+/** Marca un checkpoint parcial como BELOW_TARGET por TIMEOUT (si había meta). Copia independiente. */
+function markTimeoutOnDocument(checkpoint: UniversalLegalDocument, pageTarget: PageTarget | undefined): UniversalLegalDocument {
+  const copy = structuredClone(checkpoint);
+  if (pageTarget) (copy.generationMetadata as any).pageTargetResult = pageTargetFailureResult(pageTarget, 'TIMEOUT', 0);
+  return copy;
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req, true);
   if (!auth.ok) return auth.response;
   const rateLimit = checkRequestRateLimit(
     req,
     'generation',
     10,
-    `${auth.context.organizationId}:${auth.context.userId}`,
+    executionOwnerKey(auth.context),
   );
   if (!rateLimit.ok) {
     return NextResponse.json({ ok: false, errorCode: 'RATE_LIMITED', message: 'Demasiadas solicitudes de generación. Intenta de nuevo más tarde.' }, { status: 429, headers: rateLimit.headers });
@@ -106,6 +113,7 @@ export async function POST(req: NextRequest) {
   const owner = {
     organizationId: auth.context.organizationId,
     userId: auth.context.userId,
+    desktopOwnerId: auth.context.desktopOwnerId,
   };
   const admission = await checkGenerationAdmission(owner);
   if (!admission.ok) {
@@ -115,8 +123,24 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const externalProviderOptIn = explicitExternalProviderConsent(body.externalProviderOptIn);
+  // Solo los proveedores que el abogado vio y autorizó; ningún otro remoto (tampoco como respaldo).
+  const authorizedExternalProviders = explicitAuthorizedProviders(body.authorizedExternalProviders);
   if (Buffer.byteLength(JSON.stringify(body), 'utf8') > maxGenerationInputChars()) {
     return NextResponse.json({ ok: false, errorCode: 'GENERATION_INPUT_TOO_LARGE', message: 'La solicitud de generación excede el tamaño permitido.' }, { status: 413 });
+  }
+  // New request contract, limited to civil/family appeals; never changes legal/export gates.
+  const requiresAppealConfirmation = isCivilFamilyAppeal(body.selectedDocumentType || body.taxonomy?.documentType || body.documentType);
+  if (requiresAppealConfirmation) {
+    const review = extractAppealResolutionReview(Array.isArray(body.sourceDocuments) ? body.sourceDocuments : []);
+    const confirmation = resolveAppealGeneration(review, body.appealConfirmation);
+    if (!confirmation.canGenerate) {
+      return NextResponse.json({ ok: false, errorCode: 'NEEDS_USER_INPUT', state: 'NEEDS_USER_INPUT', message: 'Confirma expediente, partes, resolución, destinatario y notificación antes de generar.' }, { status: 422 });
+    }
+    // El expediente que llega al pipeline proviene del mismo objeto cuya
+    // huella y confirmación explícita fueron validadas, no de un campo paralelo.
+    const confirmedExpediente = String(body.appealConfirmation?.expediente || '').trim();
+    // Solo el expediente de la propia confirmación; un campo paralelo (posible expediente ajeno) nunca se confía.
+    body.expediente = confirmedExpediente && !confirmedExpediente.startsWith('[') ? confirmedExpediente : undefined;
   }
 
   let draftDepth: 'PROFESSIONAL_20' | 'EXTENSIVE_40' | undefined;
@@ -135,6 +159,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Meta de extensión (5/10/20/40/personalizada): se valida en el servidor; nunca se confía en el cliente.
+  let pageTarget: PageTarget | undefined;
+  if (body.pageTarget !== undefined) {
+    try {
+      pageTarget = parsePageTarget(body.pageTarget);
+    } catch (error) {
+      return NextResponse.json({
+        ok: false,
+        errorCode: 'INVALID_PAGE_TARGET',
+        message: error instanceof PageTargetValidationError ? error.message : 'Selecciona una extensión válida.',
+      }, { status: 400 });
+    }
+  }
+  // La meta validada en el servidor define el contrato y el plazo: el `generationExtension` del cliente no decide.
+  if (pageTarget) effectiveGenerationExtension = pageTargetToGenerationExtension(pageTarget);
+
+  // Ficha del caso confirmada por el abogado: se valida su forma; el pipeline comprueba que corresponda a las fuentes.
+  const parsedCaseDossier = body.caseDossier === undefined || body.caseDossier === null ? undefined : parseCaseDossier(body.caseDossier);
+  const caseDossier = parsedCaseDossier ?? undefined;
+  if (body.caseDossier !== undefined && body.caseDossier !== null && !parsedCaseDossier) {
+    return NextResponse.json({ ok: false, errorCode: 'INVALID_CASE_DOSSIER', message: 'La ficha del caso no es válida. Vuelve a revisarla y confirmarla.' }, { status: 400 });
+  }
+  const requireCaseDossier = body.requireCaseDossier === true;
+  const separateReviewAnnex = body.separateReviewAnnex === true || requireCaseDossier;
+
   // VERIFY-only continuation: re-evaluate the same materialized document and
   // never re-enter section generation or extension.
   if (body.continuation === 'VERIFY') {
@@ -149,8 +198,7 @@ export async function POST(req: NextRequest) {
     const reviewRequest = buildReviewRequest(result.document);
     (result.document.generationMetadata as any).reviewRequest = reviewRequest;
     await saveGenerationArtifact({
-      organizationId: auth.context.organizationId,
-      userId: auth.context.userId,
+      ...owner,
       document: result.document,
       jobId: typeof body.jobId === 'string' ? body.jobId : null,
       progress: 100,
@@ -212,6 +260,15 @@ export async function POST(req: NextRequest) {
   const selectedDocumentType = typeof bodySelectedDocumentType === 'string'
     ? bodySelectedDocumentType.trim().slice(0, 80) || undefined
     : undefined;
+  const requestedTypeId = selectedDocumentType
+    || (typeof taxonomy?.documentType === 'string' ? taxonomy.documentType : undefined);
+  const acknowledgementError = getUncertifiedDraftAcknowledgementError(
+    requestedTypeId,
+    body.uncertifiedDraftAcknowledged,
+  );
+  if (acknowledgementError) {
+    return NextResponse.json({ ok: false, ...acknowledgementError }, { status: 422 });
+  }
 
   const workflowSnapshot = workflow && typeof workflow === 'object'
     ? workflow as CaseWorkflow
@@ -231,7 +288,9 @@ export async function POST(req: NextRequest) {
   // tal cual (compatibilidad con el flujo existente).
   const bodyProfile = lawyerProfile as LawyerProfile | undefined;
   let effectiveLawyerProfile = bodyProfile && typeof bodyProfile === 'object' ? bodyProfile : undefined;
-  if (!effectiveLawyerProfile) {
+  if (auth.context.kind === 'DESKTOP_LOCAL') {
+    effectiveLawyerProfile = (await new DesktopProfileRepository().load()).profile;
+  } else if (!effectiveLawyerProfile) {
     try {
       const loaded = await loadLawyerProfile(auth.context.organizationId, auth.context.lawyerId);
       effectiveLawyerProfile = loaded.profile;
@@ -267,17 +326,45 @@ export async function POST(req: NextRequest) {
     if (taxonomy.documentType) effectiveDocumentTypeLabel = resolveDocumentTypeLabel(taxonomy);
   }
 
+  // Bundles de investigación verificada del propietario y expediente: solo del almacén del servidor.
+  const researchBundlesByIssueId = loadResearchBundles(researchStoreKey(executionOwnerKey(auth.context), (expediente as string | undefined)?.trim() || ''));
   // Compat sync directo (para tests internos o clientes legacy que lo soliciten explícitamente)
   if (wantSync) {
+    // Mismo contrato que la ruta asíncrona: plazo cooperativo, cancelación y último checkpoint válido.
+    let syncCheckpoint = null as UniversalLegalDocument | null;
+    const syncController = new AbortController();
     try {
-      const doc = await runGenerationPipeline({
+      const doc = await runWithGenerationDeadline((signal) => runGenerationPipeline({
+        signal,
+        requireAppealConfirmation: requiresAppealConfirmation, appealConfirmation: body.appealConfirmation,
         userInstruction, sourceDocuments: sourcesArr, allowUnvalidatedSource,
         referenceDocumentText, referenceDocumentId, matter: effectiveMatter, documentTypeLabel: effectiveDocumentTypeLabel, selectedDocumentType, jurisdiction: effectiveJurisdiction, expediente: (expediente as string | undefined)?.trim() || undefined, taxonomy, existingDocument, lawyerProfile: effectiveLawyerProfile, savedParties, workflow: workflowSnapshot, idempotencyKey: fingerprint, generationExtension: effectiveGenerationExtension,
         draftDepth,
+        pageTarget,
+        caseDossier, requireCaseDossier, separateReviewAnnex,
+          researchBundlesByIssueId,
         externalProviderOptIn,
-      }, {} as any);
-      return NextResponse.json({ ok: true, document: doc });
+        authorizedExternalProviders,
+      }, {
+        onStageComplete: (stage: any, document: UniversalLegalDocument) => {
+          if (stage === 'generate_sections' && document && !syncController.signal.aborted) syncCheckpoint = structuredClone(document);
+        },
+        onBlockComplete: (_c: number, _t: number, _b: any, _m: any, document?: UniversalLegalDocument) => {
+          if (document && !syncController.signal.aborted) syncCheckpoint = structuredClone(document);
+        },
+      } as any), getGenerationJobDeadlineMs(effectiveGenerationExtension), syncController);
+      // Aviso global: sin investigación verificada, los fundamentos del documento no están verificados.
+      const fundamentalsNotice = unverifiedFundamentalsNotice(researchBundlesByIssueId);
+      if (fundamentalsNotice) (doc.validation ??= { warnings: [], errors: [] } as any).warnings.push({ checkId: 'UNVERIFIED_FUNDAMENTALS', message: fundamentalsNotice } as any);
+      const terminalStatus = resultTerminalStatus(doc);
+      if (owner.desktopOwnerId) await saveGenerationArtifact({ ...owner, document: doc, progress: 100, terminalStatus });
+      return NextResponse.json({ ok: true, document: doc, terminalStatus });
     } catch (err: any) {
+      if (err?.code === 'GENERATION_TIMEOUT') {
+        syncController.abort();
+        const partial = syncCheckpoint ? markTimeoutOnDocument(syncCheckpoint, pageTarget) : null;
+        return NextResponse.json({ ok: false, errorCode: 'GENERATION_TIMEOUT', terminalStatus: 'NEEDS_REVIEW', message: 'La generación tardó demasiado y quedó pendiente de revisión.', document: partial }, { status: 504 });
+      }
       if ([
         'SOURCE_DOCUMENT_INCOMPATIBLE',
         'MISSING_SOURCE_COMPATIBILITY_RULE',
@@ -285,6 +372,8 @@ export async function POST(req: NextRequest) {
         'UNKNOWN_DOCUMENT_TYPE',
         'INCOMPATIBLE_DOCUMENT_ROUTE',
         'NEEDS_SOURCE_REVIEW',
+        'CASE_DOSSIER_REQUIRED',
+        'REQUIRED_SOURCE_MISSING',
       ].includes(err?.code)) {
         return NextResponse.json({ ok: false, error: err.message, errorCode: err.code, errorMetadata: err.metadata }, { status: 422 });
       }
@@ -313,8 +402,7 @@ export async function POST(req: NextRequest) {
   // 2. Crear job y responder INMEDIATAMENTE (sin esperar pipeline)
   console.log('[generate:POST] Creando job...');
   const job = createGenerationJob({
-    organizationId: auth.context.organizationId,
-    userId: auth.context.userId,
+    ...owner,
     fingerprint,
     idempotencyKey: scopedIdempotencyKey,
     total: 0,
@@ -326,14 +414,18 @@ export async function POST(req: NextRequest) {
   // Detach promise — no await
   (async () => {
     let latestCheckpoint: UniversalLegalDocument | null = null;
+    // Cancelación cooperativa: al vencer el plazo se aborta; los checkpoints posteriores se ignoran.
+    const generationController = new AbortController();
+    // cancelJob (POST /generate/cancel) aborta este controlador: el pipeline deja de llamar al proveedor.
+    registerJobAbort(job.jobId, generationController);
     let terminalError: any = null;
     let persistenceChain: Promise<void> = Promise.resolve();
     let persistedDraftRecordId: string | null = null;
+    let localPersistenceFailure: Error | null = null;
     const persistCheckpoint = async (document: UniversalLegalDocument, progress?: number, terminalStatus?: string | null) => {
       try {
         const snapshot = await saveGenerationArtifact({
-          organizationId: auth.context.organizationId,
-          userId: auth.context.userId,
+          ...owner,
           draftRecordId: persistedDraftRecordId,
           document,
           jobId: job.jobId,
@@ -344,6 +436,7 @@ export async function POST(req: NextRequest) {
         persistedDraftRecordId = snapshot.draftRecordId || persistedDraftRecordId;
       } catch (error: any) {
         console.error('[generation:persistence] checkpoint failed:', error?.message || error);
+        if (owner.desktopOwnerId) localPersistenceFailure = Object.assign(new Error('No se pudo guardar el borrador en el workspace local.'), { code: 'DESKTOP_ARTIFACT_PERSISTENCE_FAILED' });
       }
     };
     const queueCheckpoint = (document: UniversalLegalDocument, progress?: number, terminalStatus?: string | null) => {
@@ -374,26 +467,32 @@ export async function POST(req: NextRequest) {
           });
         },
         onBlockComplete: (_completed: number, _total: number, _block: any, _meta: any, document?: UniversalLegalDocument) => {
-          if (document) {
-            latestCheckpoint = document;
-            updateJobProgress(job.jobId, { checkpointDocument: document });
+          // Copia independiente: el pipeline sigue mutando su documento; el checkpoint persistido no debe cambiar.
+          if (document && !generationController.signal.aborted) {
+            const snapshot = structuredClone(document);
+            latestCheckpoint = snapshot;
+            updateJobProgress(job.jobId, { checkpointDocument: snapshot });
           }
         },
         onStageComplete: (stage: any, document: UniversalLegalDocument) => {
-          if (stage === 'generate_sections' && document) {
-            latestCheckpoint = document;
-            updateJobProgress(job.jobId, { checkpointDocument: document, phase: 'extend', stage: 'Extensión jurídica' });
-            queueCheckpoint(document);
+          if (stage === 'generate_sections' && document && !generationController.signal.aborted) {
+            const snapshot = structuredClone(document);
+            latestCheckpoint = snapshot;
+            updateJobProgress(job.jobId, { checkpointDocument: snapshot, phase: 'extend', stage: 'Extensión jurídica' });
+            queueCheckpoint(snapshot);
           }
         },
       };
 
       // Ejecutar pipeline con callbacks. El pipeline internamente invoca generateLegalBlock
       // con timeout individual 15s por bloque y fallback determinístico — sin timeout global.
-      const doc: UniversalLegalDocument = await withGenerationDeadline(runGenerationPipeline(
+      const doc: UniversalLegalDocument = await runWithGenerationDeadline((signal) => runGenerationPipeline(
         {
+          signal,
           userInstruction,
           sourceDocuments: sourcesArr,
+          requireAppealConfirmation: requiresAppealConfirmation,
+          appealConfirmation: body.appealConfirmation,
           allowUnvalidatedSource,
           referenceDocumentText: referenceDocumentText as string | undefined,
           referenceDocumentId: referenceDocumentId as string | undefined,
@@ -411,7 +510,11 @@ export async function POST(req: NextRequest) {
           jobId: job.jobId,
           generationExtension: effectiveGenerationExtension,
           draftDepth,
+          pageTarget,
+          caseDossier, requireCaseDossier, separateReviewAnnex,
+          researchBundlesByIssueId,
           externalProviderOptIn,
+          authorizedExternalProviders,
         },
         // Bridge: además de callbacks estándar, enganchar progreso real por bloque
         {
@@ -421,7 +524,9 @@ export async function POST(req: NextRequest) {
           onStageComplete: callbacks.onStageComplete as any,
           onBlockComplete: callbacks.onBlockComplete as any,
         } as any
-      ), getGenerationJobDeadlineMs(effectiveGenerationExtension));
+      ), getGenerationJobDeadlineMs(effectiveGenerationExtension), generationController);
+      const fundamentalsNotice = unverifiedFundamentalsNotice(researchBundlesByIssueId);
+      if (fundamentalsNotice) (doc.validation ??= { warnings: [], errors: [] } as any).warnings.push({ checkId: 'UNVERIFIED_FUNDAMENTALS', message: fundamentalsNotice } as any);
       latestCheckpoint = doc;
       const finalTotal = resolveGenerationTotal(doc, job.total);
       updateJobProgress(job.jobId, { total: finalTotal, completed: finalTotal, phase: 'materialize', stage: 'Materializando documento', currentBlock: doc.sections[doc.sections.length-1]?.title || null, checkpointDocument: doc });
@@ -429,14 +534,27 @@ export async function POST(req: NextRequest) {
     } catch (err: any) {
       terminalError = err;
       console.error(`[pipeline:job] Job ${job.jobId} fallido:`, err?.code || 'GENERATION_FAILED');
+      // Timeout con meta: el último checkpoint válido queda registrado como BELOW_TARGET por TIMEOUT.
+      if (pageTarget && err?.code === 'GENERATION_TIMEOUT' && latestCheckpoint) {
+        (latestCheckpoint.generationMetadata as any).pageTargetResult = pageTargetFailureResult(pageTarget, 'TIMEOUT', 0);
+      }
     } finally {
-      const checkpointTerminalStatus = !latestCheckpoint
+      unregisterJobAbort(job.jobId);
+      await persistenceChain;
+      if (localPersistenceFailure) terminalError = localPersistenceFailure;
+      // Timeout o fallo de medición nunca se presentan como generación completa.
+      const pageResult = (latestCheckpoint as any)?.generationMetadata?.pageTargetResult;
+      const measurementFailed = Boolean(pageResult?.failureCause) || pageResult?.outcome === 'BELOW_TARGET';
+      const checkpointTerminalStatus = terminalError?.code === 'GENERATION_CANCELLED' ? 'CANCELLED' as const
+        : !latestCheckpoint
         ? 'FAILED' as const
-        : !terminalError
-          ? 'COMPLETED' as const
-          : terminalError?.code === 'GENERATION_TIMEOUT' || String(terminalError?.code || '').startsWith('EXTENSION_')
-            ? 'COMPLETED_WITH_WARNINGS' as const
-            : 'NEEDS_REVIEW' as const;
+        : terminalError?.code === 'GENERATION_TIMEOUT' || measurementFailed
+          ? 'NEEDS_REVIEW' as const
+          : !terminalError
+            ? 'COMPLETED' as const
+            : String(terminalError?.code || '').startsWith('EXTENSION_')
+              ? 'COMPLETED_WITH_WARNINGS' as const
+              : 'NEEDS_REVIEW' as const;
       const finalJob = ensureTerminalJobState(job.jobId, {
         document: latestCheckpoint,
         error: terminalError?.message || 'Ejecución finalizada sin documento materializable.',
@@ -448,6 +566,7 @@ export async function POST(req: NextRequest) {
       if (finalJob?.document) {
         await persistenceChain;
         await persistCheckpoint(finalJob.document, finalJob.percentage, finalJob.terminalStatus || null);
+        if (localPersistenceFailure && !finalJob.warnings.includes('DESKTOP_ARTIFACT_PERSISTENCE_FAILED')) finalJob.warnings.push('DESKTOP_ARTIFACT_PERSISTENCE_FAILED');
       }
       console.log(`[GenerationLifecycle] jobId=${job.jobId} phase=terminal state=${finalJob?.status || 'failed'} progress=${finalJob?.percentage ?? 100} provider=${finalJob?.aiProvider || ''} attempt= durationMs=${Date.now() - job.startedAt}`);
     }
@@ -470,14 +589,14 @@ export async function POST(req: NextRequest) {
 // y legacy sync para tests que hacen POST y esperan document directo: si cliente envía ?sync=1, se ejecuta sync
 export async function GET(req: NextRequest) {
   // El job contiene el documento completo — exige la MISMA identidad que POST/status.
-  const auth = await requireLawyerAccess(req);
+  const auth = await requireWorkspaceExecutionAccess(req);
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
   const jobId = url.searchParams.get('jobId');
   if (jobId) {
     const job = getGenerationJob(jobId) || await recoverGenerationJob(jobId);
-    if (!job || job.organizationId !== auth.context.organizationId || job.userId !== auth.context.userId) {
+    if (!job || !ownsExecution(job, auth.context)) {
       return NextResponse.json({ ok: false, error: 'JOB_NOT_FOUND' }, { status: 404 });
     }
     return NextResponse.json({

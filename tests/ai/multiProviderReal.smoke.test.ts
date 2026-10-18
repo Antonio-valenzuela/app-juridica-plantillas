@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import "dotenv/config";
 import { describe, it, expect } from "vitest";
 import { GeminiProvider } from "@/lib/ai/providers/gemini";
@@ -6,7 +7,7 @@ import { NVIDIAProvider } from "@/lib/ai/providers/nvidia";
 import { defaultProviderRouter } from "@/lib/ai/providerRouter";
 import type { AIRequest } from "@/lib/ai/providers/types";
 
-describe("Smoke Real Providers Test — Live API calls", () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)("Smoke Real Providers Test — Live API calls", () => {
   const liveEnabled = process.env.RUN_LIVE_PROVIDER_TESTS === 'true';
   const pingRequest: AIRequest = {
     userMessage: "Responde únicamente con la palabra: JURIDICO_OK",

@@ -17,7 +17,7 @@ from docx.shared import Inches, Pt, RGBColor
 
 
 ROOT = Path.cwd()
-AUDIT = ROOT / "audit" / "final-legal-readiness-2026"
+AUDIT = ROOT / "audit" / "banco-prueba"
 REPORT_MD = ROOT / "FINAL_LEGAL_READINESS_REPORT.md"
 REPORT_DOCX = ROOT / "FINAL_LEGAL_READINESS_REPORT.docx"
 REPORT_PDF = ROOT / "FINAL_LEGAL_READINESS_REPORT.pdf"
@@ -165,7 +165,7 @@ def report_markdown(cases: list[dict[str, Any]]) -> str:
     lines.extend([
         "# FINAL LEGAL READINESS REPORT",
         "",
-        "Fecha de ejecución: 26 de septiembre de 2026. Este reporte conserva la evidencia técnica de la auditoría local y de las seis pruebas E2E realizadas con expedientes de `Datos.zip`.",
+        "Fecha de ejecución: 26 de septiembre de 2026. Este reporte conserva la evidencia técnica de la auditoría local y de las seis pruebas E2E realizadas con expedientes de `banco-de-pruebas.zip`.",
         "",
         "## Conclusión ejecutiva",
         "",
@@ -178,18 +178,18 @@ def report_markdown(cases: list[dict[str, Any]]) -> str:
         "## 1. Alcance y decisiones respetadas",
         "",
         "- Usuario actual: un solo abogado local. No se agregaron roles, equipos, organizaciones, facturación, suscripciones ni colaboración multiusuario.",
-        "- Persistencia: se conserva Prisma y la base de datos configurada por la aplicación. `C:\\Users\\yahir\\Desktop\\Datos.zip` se usó únicamente como banco de pruebas.",
-        "- Separación de datos: el ZIP no se importó ni se mezcló con la base productiva. El manifiesto, fuentes extraídas y salidas viven únicamente bajo `audit/final-legal-readiness-2026`.",
+        "- Persistencia: se conserva Prisma y la base de datos configurada por la aplicación. `RUTA_LOCAL` se usó únicamente como banco de pruebas.",
+        "- Separación de datos: el ZIP no se importó ni se mezcló con la base productiva. El manifiesto, fuentes extraídas y salidas viven únicamente bajo `audit/banco-prueba`.",
         "- Las dos referencias de Downloads se trataron como referencias de estructura, redacción y diseño, no como fuentes de hechos para las seis contestaciones.",
         "",
         "Referencias revisadas:",
         "",
-        "- `C:\\Users\\yahir\\Downloads\\Recurso_Apelacion_Actualizado_2026_Galarza_Meza.docx`",
-        "- `C:\\Users\\yahir\\Downloads\\Recurso_de_Apelacion_Galarza_Meza_actualizado.docx`",
+        "- `RUTA_LOCAL`",
+        "- `RUTA_LOCAL`",
         "",
         "## 2. Evidencia de entrada y selección de casos",
         "",
-        "El selector PowerShell `scripts/audit/select-final-legal-readiness-cases.ps1` extrajo seis DOCX distintos, calculó bytes y SHA-256, y escribió `audit/final-legal-readiness-2026/selected-cases.json`. La validación final del manifiesto devolvió ok true y errors vacíos.",
+        "El selector PowerShell `scripts/audit/select-final-legal-readiness-cases.ps1` extrajo seis DOCX distintos, calculó bytes y SHA-256, y escribió `audit/banco-prueba/selected-cases.json`. La validación final del manifiesto devolvió ok true y errors vacíos.",
         "",
     ])
     selection_rows = []
@@ -201,7 +201,7 @@ def report_markdown(cases: list[dict[str, Any]]) -> str:
     lines.append(markdown_table(["Caso", "Materia", "Salida", "Bytes", "SHA-256", "Entrada del ZIP"], selection_rows))
     lines.extend([
         "",
-        "El sexto caso originalmente seleccionado fue una revisión de amparo directo. Se conservó como intento negativo y se reemplazó por la demanda laboral de Marco C4 porque el guard de contenido cruzado detectó que el resultado de amparo contenía estrategia propia de una demanda de amparo. La evidencia está en `audit/final-legal-readiness-2026/attempts/case-06-amparo-revision`.",
+        "El sexto caso originalmente seleccionado fue una revisión de amparo directo. Se conservó como intento negativo y se reemplazó por la demanda laboral de Marco C4 porque el guard de contenido cruzado detectó que el resultado de amparo contenía estrategia propia de una demanda de amparo. La evidencia está en `audit/banco-prueba/attempts/case-06-amparo-revision`.",
         "",
         "## 3. Recorrido E2E ejecutado",
         "",
@@ -290,7 +290,7 @@ def report_markdown(cases: list[dict[str, Any]]) -> str:
         "",
         "La inspección visual encontró que el renderer manual emitía cada palabra y hasta cada espacio como un `Tj` independiente, avanzando con un ancho estimado. En Times, algunas palabras reales eran más anchas y se pegaban o se desbordaban. La corrección agrupa fragmentos contiguos de la misma fuente y tamaño en una sola línea, usa `Tw` para justificado, eleva el factor conservador de envoltura y evita justificar líneas residuales cortas. La prueba PDF pasó 4 de 4 casos y la reexportación E2E pasó 1 de 1 prueba con los seis pares.",
         "",
-        "La revisión con Word se usó como control visual del DOCX porque no hay LibreOffice disponible en la máquina. Poppler informó `No display font for 'Symbol'` durante algunos renders; la advertencia quedó registrada en `audit/final-legal-readiness-2026/visual-qa/pages/*/poppler-render-warning.txt` y no impidió generar las páginas ni observar clipping en los seis PDFs.",
+        "La revisión con Word se usó como control visual del DOCX porque no hay LibreOffice disponible en la máquina. Poppler informó `No display font for 'Symbol'` durante algunos renders; la advertencia quedó registrada en `audit/banco-prueba/visual-qa/pages/*/poppler-render-warning.txt` y no impidió generar las páginas ni observar clipping en los seis PDFs.",
         "",
         "## 6. Verificación de aplicación y límites actuales",
         "",
@@ -435,7 +435,7 @@ def report_docx(cases: list[dict[str, Any]]) -> None:
     subrun.font.name = "Arial"
     subrun.font.size = Pt(11)
     subrun.font.color.rgb = RGBColor(85, 85, 85)
-    add_body(document, "Fecha de ejecucion: 26 de septiembre de 2026. Alcance: un abogado local, persistencia Prisma conservada y seis pruebas E2E con expedientes aislados de Datos.zip.")
+    add_body(document, "Fecha de ejecucion: 26 de septiembre de 2026. Alcance: un abogado local, persistencia Prisma conservada y seis pruebas E2E con expedientes aislados de banco-de-pruebas.zip.")
     add_heading(document, "Conclusion ejecutiva", 1)
     add_body(document, "La aplicacion completo seis recorridos E2E y produjo seis pares DOCX/PDF de borrador para revision. La persistencia existente se conservo y el ZIP de pruebas no se incorporo a la base productiva.")
     add_body(document, "El estado juridico no es FINAL. Todos los casos conservan REVIEW_REQUIRED, aviso de borrador y bloqueo de exportacion final por cobertura, postura del cliente, evidencia o calidad pendiente. Esto protege al abogado contra la presentacion de un escrito incompleto.")
@@ -445,10 +445,10 @@ def report_docx(cases: list[dict[str, Any]]) -> None:
     add_bullets(document, [
         "Version actual optimizada para un solo abogado local. No se agregaron roles, equipos, organizaciones, facturacion ni colaboracion multiusuario.",
         "Prisma y la persistencia existente se conservaron.",
-        "Datos.zip se uso unicamente como banco de pruebas y quedo separado de la base productiva.",
+        "banco-de-pruebas.zip se uso unicamente como banco de pruebas y quedo separado de la base productiva.",
         "Las dos referencias de Downloads se usaron como referencia de estructura, redaccion y diseno, no como fuente de hechos.",
     ])
-    add_body(document, "Referencias: C:\\Users\\yahir\\Downloads\\Recurso_Apelacion_Actualizado_2026_Galarza_Meza.docx; C:\\Users\\yahir\\Downloads\\Recurso_de_Apelacion_Galarza_Meza_actualizado.docx.")
+    add_body(document, "Referencias: RUTA_LOCAL; RUTA_LOCAL")
 
     add_heading(document, "Resumen de los seis casos", 1)
     summary_rows = []

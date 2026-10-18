@@ -7,14 +7,18 @@
  */
 
 export type UnresolvedFieldMarkerKind = 'PENDING' | 'ANONYMIZED';
+export type UnresolvedFieldMarkerCause = 'SOURCE_NOT_FOUND' | 'VERIFICATION_REQUIRED' | 'PENDING_DATA' | 'ANONYMIZATION_REVIEW';
 
 export interface UnresolvedFieldMarker {
   marker: string;
   kind: UnresolvedFieldMarkerKind;
   label: string;
+  cause: UnresolvedFieldMarkerCause;
 }
 
-const FIELD_MARKER_RE = /\[((?:DATO\s*PENDIENTE(?:\s+DE\s+EXPEDIENTE)?|DATOPENDIENTE(?:DEEXPEDIENTE)?|DATO\s+ANONIMIZADO(?:\s+DE\s+EXPEDIENTE)?|DATOANONIMIZADO(?:DEEXPEDIENTE)?))\s*:\s*([^\]]{1,160})\]/giu;
+const SOURCE_NOT_FOUND_PHRASE = /\[?\s*DATO\s+NO\s+LOCALIZADO\s+EN\s+LOS\s+DOCUMENTOS\s+PROPORCIONADOS(?:\s*:\s*([^\]\n.]+))?\s*\]?/giu;
+const VERIFICATION_REQUIRED_PHRASE = /\[?\s*DATO\s+PENDIENTE\s+DE\s+VERIFICACI[ÓO]N(?:\s*:\s*([^\]\n.]+))?\s*\]?/giu;
+const FIELD_MARKER_RE = /\[((?:NO\s+VERIFICADO|PENDIENTE|DATO\s*PENDIENTE(?:\s+DE\s+EXPEDIENTE)?|DATOPENDIENTE(?:DEEXPEDIENTE)?|DATO\s+ANONIMIZADO(?:\s+DE\s+EXPEDIENTE)?|DATOANONIMIZADO(?:DEEXPEDIENTE)?))\s*:\s*([^\]]{1,160})\]/giu;
 
 const LABEL_ALIASES: Record<string, string> = {
   nombredelpromovente: 'Nombre del promovente',
@@ -45,7 +49,7 @@ export function normalizePendingFieldLabel(value: string): string {
     .replace(/[_\-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Campo pendiente';
+  return spaced || 'Campo pendiente';
 }
 
 function canonicalKind(raw: string): UnresolvedFieldMarkerKind {
@@ -54,16 +58,28 @@ function canonicalKind(raw: string): UnresolvedFieldMarkerKind {
     : 'PENDING';
 }
 
+function markerCause(raw: string): UnresolvedFieldMarkerCause {
+  const compact = raw.replace(/\s+/g, '').toLowerCase();
+  if (compact.startsWith('noverificado')) return 'VERIFICATION_REQUIRED';
+  if (compact.startsWith('datoanonimizado')) return 'ANONYMIZATION_REVIEW';
+  if (compact === 'pendiente') return 'SOURCE_NOT_FOUND';
+  return 'PENDING_DATA';
+}
+
 function canonicalPrefix(kind: UnresolvedFieldMarkerKind, raw: string): string {
   const compact = raw.replace(/\s+/g, '').toLowerCase();
   const fromExpediente = compact.includes('deexpediente');
   if (kind === 'ANONYMIZED') return fromExpediente ? 'DATO ANONIMIZADO DE EXPEDIENTE' : 'DATO ANONIMIZADO';
-  return fromExpediente ? 'DATO PENDIENTE DE EXPEDIENTE' : 'DATO PENDIENTE';
+  if (compact.startsWith('noverificado')) return 'NO VERIFICADO';
+  return 'PENDIENTE';
 }
 
 export function normalizeUnresolvedFieldMarkers(text: string): string {
   if (!text) return text;
-  return text.replace(FIELD_MARKER_RE, (_match, rawPrefix: string, rawLabel: string) => {
+  const withCanonicalSources = text
+    .replace(SOURCE_NOT_FOUND_PHRASE, (_match, label?: string) => `[PENDIENTE: ${normalizePendingFieldLabel(label || 'fuente no localizada')}]`)
+    .replace(VERIFICATION_REQUIRED_PHRASE, (_match, label?: string) => `[NO VERIFICADO: ${normalizePendingFieldLabel(label || 'verificación requerida')}]`);
+  return withCanonicalSources.replace(FIELD_MARKER_RE, (_match, rawPrefix: string, rawLabel: string) => {
     const kind = canonicalKind(rawPrefix);
     return `[${canonicalPrefix(kind, rawPrefix)}: ${normalizePendingFieldLabel(rawLabel)}]`;
   });
@@ -80,7 +96,7 @@ export function extractUnresolvedFieldMarkers(text: string): UnresolvedFieldMark
     const marker = `[${canonicalPrefix(kind, match[1])}: ${normalizePendingFieldLabel(match[2])}]`;
     if (!seen.has(marker)) {
       seen.add(marker);
-      found.push({ marker, kind, label: normalizePendingFieldLabel(match[2]) });
+      found.push({ marker, kind, label: normalizePendingFieldLabel(match[2]), cause: markerCause(match[1]) });
     }
   }
   return found;

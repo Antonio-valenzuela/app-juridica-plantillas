@@ -1,3 +1,4 @@
+import { LIVE_PROVIDER_TESTS } from '@/tests/helpers/liveProviderGate';
 import 'dotenv/config';
 import { describe, it, expect } from 'vitest';
 import { runLegalAI } from '@/lib/ai/orchestrator';
@@ -7,7 +8,7 @@ import { runLegalAI } from '@/lib/ai/orchestrator';
  * Si no hay NVIDIA_API_KEY o no hay red, se marca SKIPPED (no falla).
  * Nunca imprime la key.
  */
-describe('P4 — NVIDIA REAL (no mock)', () => {
+describe.skipIf(!LIVE_PROVIDER_TESTS)('P4 — NVIDIA REAL (no mock)', () => {
   const hasKey = !!process.env.NVIDIA_API_KEY?.trim();
   const shouldRunReal = hasKey && process.env.RUN_LIVE_PROVIDER_TESTS === 'true' && process.env.NVIDIA_REAL_TEST === 'true' && process.env.CI !== 'true';
 

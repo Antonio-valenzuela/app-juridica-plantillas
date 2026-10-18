@@ -38,6 +38,32 @@ describe('FASE 6 document assembly pipeline integration', () => {
     expect(result.lifecycle?.readiness).not.toBe('READY_TO_EXPORT');
   }, 30000);
 
+  it('records an unverified generated citation and does not admit it into the draft', async () => {
+    let authorityCallbackMatched = false;
+    const result = await runGenerationPipeline({
+      selectedDocumentType: 'escrito_libre',
+      matter: 'civil',
+      userInstruction: 'Preparar una promoción procesal breve.',
+      traceOptions: { enabled: true },
+      generateSection: async ({ section }: { section: { title: string } }) => {
+        const isArgumentSection = /ARGUMENTOS|FUNDAMENTOS/i.test(section.title);
+        authorityCallbackMatched ||= isArgumentSection;
+        return isArgumentSection
+          ? 'El artículo 17 de la Constitución garantiza tutela judicial efectiva en el trámite.'
+          : `Contenido controlado de ${section.title}.`;
+      },
+    }) as AssemblyAttachedDocument;
+
+    expect(authorityCallbackMatched).toBe(true);
+    const generatedText = result.sections.flatMap((section) => section.content.map((block) => block.text)).join('\n');
+    const warnings = (result.generationMetadata.auditTrace as any)?.warnings || [];
+    expect(warnings.some((warning: string) => /^UNVERIFIED_AUTHORITY_REFERENCES:.+:1$/.test(warning))).toBe(true);
+    expect(generatedText).not.toContain('artículo 17 de la Constitución');
+    expect(result.generationMetadata.draftDepth).toBeFalsy();
+    expect(result.documentAssemblyResult?.readiness).not.toBe('READY');
+    expect(result.lifecycle?.readiness).not.toBe('READY_TO_EXPORT');
+  }, 30000);
+
   it('keeps the returned document JSON-serializable after attaching assembly metadata', async () => {
     const result = await runControlledRichPipeline();
 

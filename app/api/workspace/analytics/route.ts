@@ -4,6 +4,9 @@ import { requireCaseAccess } from '@/lib/cases/access';
 import { apiErrorResponse } from '@/lib/security/apiErrors';
 import { generateRequestId } from '@/lib/logger';
 import { buildAnalyticsDataset, type AnalyticsRangeDays } from '@/lib/workspace/analytics';
+import { desktopDraftRepository, isGeneratedActivity } from '@/lib/workspace/desktopDraftRepository';
+import { DesktopProfileRepository } from '@/lib/workspace/desktopProfileRepository';
+import { listDesktopGenerationJobs } from '@/lib/legal-engine/generationJobPersistence';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,6 +19,14 @@ function parseRangeDays(value: string | null): AnalyticsRangeDays {
 export async function GET(request: NextRequest) {
   const requestId = request.headers.get('x-request-id')?.trim() || generateRequestId();
   try {
+    const local = desktopDraftRepository(request);
+    if (local && !local.ok) return local.response;
+    if (local?.ok) {
+      const drafts = (await local.store.list()).filter(isGeneratedActivity);
+      const owner = await new DesktopProfileRepository().load();
+      const jobs = await listDesktopGenerationJobs(owner.ownerId);
+      return NextResponse.json({ ok: true, storage: 'DESKTOP_LOCAL', ...buildAnalyticsDataset({ drafts, jobs, rangeDays: parseRangeDays(request.nextUrl.searchParams.get('rangeDays')) }) });
+    }
     const access = await requireCaseAccess(request);
     if (!access.ok) return access.response;
     const rangeDays = parseRangeDays(new URL(request.url).searchParams.get('rangeDays'));
